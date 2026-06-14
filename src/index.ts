@@ -116,13 +116,25 @@ const editorPlugin: JupyterFrontEndPlugin<void> = {
 
     app.docRegistry.addModelFactory(new AfdagModelFactory());
 
-    const widgetFactory = new AfdagWidgetFactory({
-      name: FACTORY,
-      label: trans.__('Airflow Studio'),
-      modelName: 'afdag-model',
-      fileTypes: [AFDAG_FILE_TYPE],
-      defaultFor: [AFDAG_FILE_TYPE]
-    });
+    const services = {
+      contents: app.serviceManager.contents,
+      openPath: (path: string) =>
+        void app.commands.execute('docmanager:open', {
+          path,
+          factory: FACTORY
+        })
+    };
+
+    const widgetFactory = new AfdagWidgetFactory(
+      {
+        name: FACTORY,
+        label: trans.__('Airflow Studio'),
+        modelName: 'afdag-model',
+        fileTypes: [AFDAG_FILE_TYPE],
+        defaultFor: [AFDAG_FILE_TYPE]
+      },
+      services
+    );
     app.docRegistry.addWidgetFactory(widgetFactory);
 
     const tracker = new WidgetTracker<AfdagDocWidget>({

@@ -35,8 +35,8 @@ import {
   loadOperators,
   validateNodeParams
 } from '../operators';
+import { IStudioServices } from '../services';
 import { AfdagNode } from './AfdagNode';
-import { CodePanel } from './CodePanel';
 import { Inspector } from './Inspector';
 import { Palette } from './Palette';
 
@@ -47,10 +47,12 @@ const nodeTypes: NodeTypes = { afdagNode: AfdagNode };
 export interface IStudioAppProps {
   context: DocumentRegistry.IContext<AfdagModel>;
   resized: ISignal<unknown, void>;
+  services?: IStudioServices | null;
 }
 
 export function StudioApp(props: IStudioAppProps): JSX.Element {
   const { context, resized } = props;
+  const services = props.services ?? null;
   const model = context.model as AfdagModel;
 
   const [ready, setReady] = React.useState(false);
@@ -64,7 +66,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     () => createEmptyIR('').dag
   );
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [rightTab, setRightTab] = React.useState<'build' | 'code'>('build');
+  const [reloadKey, setReloadKey] = React.useState(0);
 
   const baseRef = React.useRef<IAfdagIR>(createEmptyIR(''));
   const lastWritten = React.useRef<string>('');
@@ -124,6 +126,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       setEdges(flow.edges);
       setDag(ir.dag);
       setReady(true);
+      // Remount the form tabs so they reseed local state from the new IR.
+      setReloadKey(key => key + 1);
     };
 
     const onChanged = (): void => {
@@ -244,6 +248,25 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     [nodes, edges, dag]
   );
 
+  // Instant, client-side validation messages for the CODE tab's panel.
+  const clientErrors = React.useMemo(() => {
+    const messages: string[] = [];
+    if (hasCycle(nodes, edges)) {
+      messages.push(
+        'DAG contains a cycle — Airflow does not support cyclic dependencies.'
+      );
+    }
+    for (const node of nodes) {
+      const result = validateNodeParams(node.data.op, node.data.params);
+      if (!result.valid) {
+        messages.push(
+          `Task "${node.data.task_id}" is missing: ${result.missing.join(', ')}`
+        );
+      }
+    }
+    return messages;
+  }, [nodes, edges]);
+
   if (opsError) {
     return (
       <div className="jp-afdag-loading jp-mod-error">
@@ -313,44 +336,17 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             </div>
           )}
         </div>
-        <div className="jp-afdag-rightpanel">
-          <div className="jp-afdag-tabs" role="tablist">
-            <button
-              className={
-                rightTab === 'build'
-                  ? 'jp-afdag-tab jp-mod-active'
-                  : 'jp-afdag-tab'
-              }
-              role="tab"
-              aria-selected={rightTab === 'build'}
-              onClick={() => setRightTab('build')}
-            >
-              Build
-            </button>
-            <button
-              className={
-                rightTab === 'code'
-                  ? 'jp-afdag-tab jp-mod-active'
-                  : 'jp-afdag-tab'
-              }
-              role="tab"
-              aria-selected={rightTab === 'code'}
-              onClick={() => setRightTab('code')}
-            >
-              Code
-            </button>
-          </div>
-          {rightTab === 'build' ? (
-            <Inspector
-              dag={dag}
-              node={selected}
-              onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
-              onNodeChange={updateNode}
-            />
-          ) : (
-            <CodePanel ir={currentIR} />
-          )}
-        </div>
+        <Inspector
+          dag={dag}
+          node={selected}
+          ir={currentIR}
+          services={services}
+          currentPath={context.path}
+          clientErrors={clientErrors}
+          reloadKey={reloadKey}
+          onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
+          onNodeChange={updateNode}
+        />
       </div>
     </div>
   );

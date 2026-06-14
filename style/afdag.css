@@ -212,8 +212,8 @@
 }
 
 /* Inspector */
-.jp-afdag-rightpanel {
-  flex: 0 0 280px;
+.jp-afdag-inspector {
+  flex: 0 0 300px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -235,6 +235,7 @@
   background: transparent;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size1);
+  letter-spacing: 0.3px;
   cursor: pointer;
 }
 
@@ -247,19 +248,125 @@
   border-bottom-color: var(--jp-brand-color1);
 }
 
-.jp-afdag-inspector {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  background: var(--jp-layout-color1);
-  padding: 8px;
-}
-
-.jp-afdag-code {
+.jp-afdag-tabpanel {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 8px;
+}
+
+/* CodeMirror host (code/json fields + read-only preview) */
+.jp-afdag-cm {
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 2px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--jp-layout-color0);
+}
+
+.jp-afdag-cm .cm-editor {
+  font-size: var(--jp-code-font-size);
+}
+
+.jp-afdag-cm .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* RJSF form, themed with jp variables */
+.jp-afdag-rjsf .form-group {
+  margin-bottom: 10px;
+}
+
+.jp-afdag-rjsf label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-rjsf input[type='text'],
+.jp-afdag-rjsf input[type='number'],
+.jp-afdag-rjsf input[type='date'],
+.jp-afdag-rjsf select,
+.jp-afdag-rjsf textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 2px;
+  background: var(--jp-input-active-background, var(--jp-layout-color0));
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-afdag-rjsf .control-label .required {
+  color: var(--jp-error-color1);
+  margin-left: 2px;
+}
+
+.jp-afdag-rjsf .text-danger,
+.jp-afdag-rjsf .error-detail {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  list-style: disc;
+  color: var(--jp-error-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-rjsf .field-description,
+.jp-afdag-rjsf .help-block {
+  margin: 2px 0 0;
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* SAVED tab */
+.jp-afdag-saved-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-saved-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jp-afdag-saved-item {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--jp-content-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  text-align: left;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.jp-afdag-saved-item:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-afdag-saved-item.jp-mod-current {
+  color: var(--jp-brand-color1);
+}
+
+.jp-afdag-saved-tag {
+  color: var(--jp-ui-font-color3);
+  font-style: italic;
 }
 
 .jp-afdag-code-pre {

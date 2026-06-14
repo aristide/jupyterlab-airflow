@@ -5,20 +5,24 @@ import { IAfdagIR } from '../ir';
 
 export interface ICodePanelProps {
   ir: IAfdagIR;
+  /** Instant client-side issues (cycle, missing required fields). */
+  clientErrors: string[];
 }
 
 /**
- * The CODE tab: a read-only preview of the server-generated Airflow 3.x Python.
- * Codegen is authoritative server-side; this debounces a `POST generate` on each
- * IR change and shows the result (or the validation errors that block it).
+ * CODE tab: a read-only preview of the server-generated Airflow 3.x Python with
+ * a Generate DAG button and a validation panel. Codegen is authoritative
+ * server-side; this debounces a `POST generate` on each IR change (and on demand)
+ * and shows the result plus both client-side and server-side validation messages.
  */
 export function CodePanel(props: ICodePanelProps): JSX.Element {
-  const { ir } = props;
+  const { ir, clientErrors } = props;
   const [code, setCode] = React.useState('');
-  const [errors, setErrors] = React.useState<string[]>([]);
+  const [serverErrors, setServerErrors] = React.useState<string[]>([]);
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'error'>(
     'idle'
   );
+  const [nonce, setNonce] = React.useState(0);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -30,11 +34,11 @@ export function CodePanel(props: ICodePanelProps): JSX.Element {
         }
         if (res.status === 'OK' && res.data) {
           setCode(res.data.code);
-          setErrors(res.data.errors);
+          setServerErrors(res.data.errors);
           setStatus(res.data.valid ? 'idle' : 'error');
         } else {
           setCode('');
-          setErrors([res.error ?? 'Code generation failed']);
+          setServerErrors([res.error ?? 'Code generation failed']);
           setStatus('error');
         }
       });
@@ -43,13 +47,25 @@ export function CodePanel(props: ICodePanelProps): JSX.Element {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [ir]);
+  }, [ir, nonce]);
+
+  const messages = [...clientErrors, ...serverErrors];
 
   return (
-    <div className="jp-afdag-code">
-      {errors.length > 0 && (
+    <div className="jp-afdag-tabpanel jp-afdag-code">
+      <div className="jp-afdag-saved-head">
+        <span>Generated DAG (TaskFlow)</span>
+        <button
+          className="jp-afdag-btn"
+          onClick={() => setNonce(n => n + 1)}
+          title="Regenerate the DAG from the current graph"
+        >
+          Generate DAG
+        </button>
+      </div>
+      {messages.length > 0 && (
         <ul className="jp-afdag-code-errors">
-          {errors.map((message, index) => (
+          {messages.map((message, index) => (
             <li key={index}>{message}</li>
           ))}
         </ul>
@@ -62,7 +78,7 @@ export function CodePanel(props: ICodePanelProps): JSX.Element {
           <code>{code}</code>
         </pre>
       )}
-      {!code && status !== 'loading' && errors.length === 0 && (
+      {!code && status !== 'loading' && messages.length === 0 && (
         <div className="jp-afdag-hint">Add tasks to generate a DAG.</div>
       )}
     </div>

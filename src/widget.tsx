@@ -6,6 +6,7 @@ import { Widget } from '@lumino/widgets';
 import * as React from 'react';
 
 import { AfdagModel } from './model';
+import { IStudioServices } from './services';
 import { StudioApp } from './components/StudioApp';
 
 import '@xyflow/react/dist/style.css';
@@ -16,10 +17,14 @@ import '@xyflow/react/dist/style.css';
  * widget is shown or resized (ReactFlow renders 0x0 if it never remeasures).
  */
 export class AfdagEditorPanel extends ReactWidget {
-  constructor(context: DocumentRegistry.IContext<AfdagModel>) {
+  constructor(
+    context: DocumentRegistry.IContext<AfdagModel>,
+    services: IStudioServices | null = null
+  ) {
     super();
     this.addClass('jp-afdag-editor');
     this._context = context;
+    this._services = services;
   }
 
   get resized(): ISignal<this, void> {
@@ -37,9 +42,16 @@ export class AfdagEditorPanel extends ReactWidget {
   }
 
   render(): JSX.Element {
-    return <StudioApp context={this._context} resized={this._resized} />;
+    return (
+      <StudioApp
+        context={this._context}
+        resized={this._resized}
+        services={this._services}
+      />
+    );
   }
 
   private _context: DocumentRegistry.IContext<AfdagModel>;
+  private _services: IStudioServices | null;
   private _resized = new Signal<this, void>(this);
 }

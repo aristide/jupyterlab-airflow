@@ -14,7 +14,6 @@ _(none)_
 
 Next steps follow the MVP milestones in `docs/PRD.md` (§5, §14).
 
-- [ ] Registry-driven RJSF forms + the four inspector tabs (DAG / NODE / CODE / SAVED)
 - [ ] Server `POST validate` + `POST deploy`: validation pipeline (PRD Appendix E), atomic shared-volume write, provenance header
 - [ ] Deploy lifecycle: poll `/api/v2/dags` + `/api/v2/importErrors`, tri-state UI (Writing / Waiting / Registered-Failed-Processing)
 - [ ] Manager: add import-errors view, task instances, task logs, clear/retry, delete; fix `client.list_dags` `only_active` → v2 `exclude_stale`/`paused`
@@ -23,6 +22,7 @@ Next steps follow the MVP milestones in `docs/PRD.md` (§5, §14).
 
 ## Done
 
+- [x] 2026-06-14 — Registry-driven RJSF forms + four inspector tabs (DAG / NODE / CODE / SAVED): `forms.ts` builds JSON-Schema/uiSchema from the registry; `AfdagForm` (RJSF + ajv8) with custom `code`/`json`/`schedule` widgets; `code`/`json` fields use an embedded CodeMirror 6 editor (`CodeMirrorField`); NODE form is registry-generated, DAG form fixed; CODE tab gains Generate-DAG + client/server validation panel; SAVED tab lists workspace `.afdag` docs via Contents API (services threaded index→factory→widget→app). Deps: @rjsf/* + @codemirror/*. Tests: `forms.spec.ts`. Follow-ups: per-node common params (retries/retry_delay/depends_on_past) need an IR slot before wiring into the NODE form + codegen `common`; SAVED deploy-status marking deferred to manager correlation.
 - [x] 2026-06-14 — Server `POST generate`: IR → Airflow 3.x TaskFlow Python via `codegen.py` (Jinja2 `autoescape=False` + `pyrepr`/`pyargs`, registry templates, Kahn topo order, Appendix E validation: identifiers/cycle/`ast.parse`/`compile`, provenance header); `GenerateHandler` route; frontend `generateDag` + `CodePanel` (debounced) wired as a Build/Code tab in the inspector; tests added (codegen, endpoint, handler)
 - [x] 2026-06-14 — Server `GET operators`: YAML operator registry (`jupyterlab_airflow/operators/*.yaml` + `registry.py` with mtime hot-reload + `AIRFLOW_OPERATORS_DIR` override) served via `OperatorsHandler`; `src/operators.ts` now fetches/caches the registry (`loadOperators`) instead of a hardcoded list; tests added (registry, endpoint, loader)
 - [x] 2026-06-13 — Establish this `TODO.md` task-history convention (documented in `CLAUDE.md`)

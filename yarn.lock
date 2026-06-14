@@ -1335,7 +1335,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@codemirror/commands@npm:^6.10.2":
+"@codemirror/commands@npm:^6.10.2, @codemirror/commands@npm:^6.3.0":
   version: 6.10.3
   resolution: "@codemirror/commands@npm:6.10.3"
   dependencies:
@@ -1412,7 +1412,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@codemirror/lang-json@npm:^6.0.2":
+"@codemirror/lang-json@npm:^6.0.1, @codemirror/lang-json@npm:^6.0.2":
   version: 6.0.2
   resolution: "@codemirror/lang-json@npm:6.0.2"
   dependencies:
@@ -1450,7 +1450,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@codemirror/lang-python@npm:^6.2.1":
+"@codemirror/lang-python@npm:^6.1.0, @codemirror/lang-python@npm:^6.2.1":
   version: 6.2.1
   resolution: "@codemirror/lang-python@npm:6.2.1"
   dependencies:
@@ -1558,7 +1558,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@codemirror/state@npm:^6.0.0, @codemirror/state@npm:^6.5.4, @codemirror/state@npm:^6.6.0":
+"@codemirror/state@npm:^6.0.0, @codemirror/state@npm:^6.4.0, @codemirror/state@npm:^6.5.4, @codemirror/state@npm:^6.6.0":
   version: 6.6.0
   resolution: "@codemirror/state@npm:6.6.0"
   dependencies:
@@ -2249,7 +2249,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@jupyterlab/codemirror@npm:^4.5.8":
+"@jupyterlab/codemirror@npm:^4.1.6, @jupyterlab/codemirror@npm:^4.5.8":
   version: 4.5.8
   resolution: "@jupyterlab/codemirror@npm:4.5.8"
   dependencies:
@@ -3172,7 +3172,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@rjsf/core@npm:^5.13.4":
+"@rjsf/core@npm:^5.13.4, @rjsf/core@npm:^5.18.0":
   version: 5.24.13
   resolution: "@rjsf/core@npm:5.24.13"
   dependencies:
@@ -3187,7 +3187,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@rjsf/utils@npm:^5.13.4":
+"@rjsf/utils@npm:^5.13.4, @rjsf/utils@npm:^5.18.0":
   version: 5.24.13
   resolution: "@rjsf/utils@npm:5.24.13"
   dependencies:
@@ -3199,6 +3199,20 @@ __metadata:
   peerDependencies:
     react: ^16.14.0 || >=17
   checksum: 40bb315a6e0b2e635dd6998a1ce82ce9fda2c8f57206f952006abc80e48d54790fa4298b167c0fdbc28a5a278573dbdb5bc68ec1da99c49a6b6c45fc7b61cdf5
+  languageName: node
+  linkType: hard
+
+"@rjsf/validator-ajv8@npm:^5.18.0":
+  version: 5.24.13
+  resolution: "@rjsf/validator-ajv8@npm:5.24.13"
+  dependencies:
+    ajv: ^8.12.0
+    ajv-formats: ^2.1.1
+    lodash: ^4.17.21
+    lodash-es: ^4.17.21
+  peerDependencies:
+    "@rjsf/utils": ^5.24.x
+  checksum: 71efbbd77ed032d724539e979fb9e9b17bf2a1533040a981e8ff8b17f0b6e997cd8da10e78c7c96fc080a0b497e46b7418591c22869be91775938ddd9e9001fd
   languageName: node
   linkType: hard
 
@@ -8160,9 +8174,15 @@ __metadata:
   dependencies:
     "@babel/core": ^7.0.0
     "@babel/preset-env": ^7.0.0
+    "@codemirror/commands": ^6.3.0
+    "@codemirror/lang-json": ^6.0.1
+    "@codemirror/lang-python": ^6.1.0
+    "@codemirror/state": ^6.4.0
+    "@codemirror/view": ^6.23.0
     "@jupyterlab/application": ^4.1.6
     "@jupyterlab/apputils": ^4.2.6
     "@jupyterlab/builder": ^4.0.0
+    "@jupyterlab/codemirror": ^4.1.6
     "@jupyterlab/coreutils": ^6.1.6
     "@jupyterlab/docregistry": ^4.1.6
     "@jupyterlab/filebrowser": ^4.1.6
@@ -8176,6 +8196,9 @@ __metadata:
     "@lumino/messaging": ^2.0.1
     "@lumino/signaling": ^2.1.3
     "@lumino/widgets": ^2.3.2
+    "@rjsf/core": ^5.18.0
+    "@rjsf/utils": ^5.18.0
+    "@rjsf/validator-ajv8": ^5.18.0
     "@types/jest": ^29.2.0
     "@types/json-schema": ^7.0.11
     "@types/react": ^18.0.26
