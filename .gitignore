@@ -99,3 +99,7 @@ scope/
 
 # MemSearch plugin
 .memsearch/
+
+# Scratch DAGs: keep the folder, ignore its contents
+notebooks/*
+!notebooks/.keep
