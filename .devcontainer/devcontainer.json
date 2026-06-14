@@ -1,0 +1,50 @@
+{
+  "name": "Jupyterlab Airflow Extension",
+  "remoteUser": "jupyter",
+  "forwardPorts": [8888, 9999, 8081],
+  "portsAttributes": {
+    "8888": {
+      "label": "Jupyter Lab",
+      "onAutoForward": "openBrowser",
+      "protocol": "http",
+      "url": "http://localhost:8888/lab"
+    },
+    "9999": {
+      "label": "Jupyter Lab (debug)",
+      "onAutoForward": "silent"
+    },
+    "8081": {
+      "label": "Airflow UI",
+      "onAutoForward": "notify",
+      "protocol": "http",
+      "url": "http://localhost:8081"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "openExternal": true,
+      "defaultUrl": "/lab",
+      "extensions": [
+        "ms-python.python",
+        "ms-vscode.live-server",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "terminal.integrated.profiles.linux": {
+          "jupyter bash": {
+            "path": "/bin/bash"
+          }
+        },
+        "terminal.integrated.defaultProfile.linux": "jupyter bash",
+        "debug.node.autoAttach": "disabled"
+      }
+    }
+  },
+  "dockerComposeFile": "./docker-compose.yaml",
+  "service": "jupyter",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "mounts": [
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/jupyter/.ssh,type=bind,consistency=cached"
+  ]
+}

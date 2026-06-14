@@ -1,0 +1,58 @@
+# The Airflow service is controlled via a Docker Compose profile so it can be
+# turned off when you only need the JupyterLab dev container. Edit
+# .devcontainer/.env (COMPOSE_PROFILES) to enable/disable it.
+
+services:
+  airflow:
+    image: apache/airflow:3.0.2
+    command: standalone
+    ports:
+      # Host 8080 is often taken (e.g. an MCP server); map the UI to 8081 on the
+      # host. Inside the compose network Airflow is still reached at airflow:8080.
+      - 0.0.0.0:8081:8080
+    environment:
+      # Dev-only: SQLite metadata DB + bundled example DAGs so the extension has
+      # something to show on first start.
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      # Deterministic credentials for the SimpleAuthManager (admin / admin).
+      # The password file is pre-seeded and mounted below; without this Airflow
+      # would generate a random password on every start.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/passwords.json
+      # Stable JWT signing secret so tokens survive restarts.
+      AIRFLOW__API_AUTH__JWT_SECRET: dev-jwt-secret-change-me
+    volumes:
+      - ./airflow-dags:/opt/airflow/dags
+      - ./airflow-config:/opt/airflow/config
+      - airflow-db:/opt/airflow
+    healthcheck:
+      test: ['CMD-SHELL', "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/')\""]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    profiles:
+      - airflow
+
+  jupyter:
+    image: aristidetm/labextension-dev
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+    ports:
+      - 0.0.0.0:8888:8888
+      - 0.0.0.0:9999:9999
+    command: sleep infinity
+    environment:
+      # Where the server extension reaches Airflow. Inside the compose network
+      # the Airflow API server is at http://airflow:8080.
+      AIRFLOW_API_URL: http://airflow:8080
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
+    depends_on:
+      airflow:
+        condition: service_started
+        required: false
+
+volumes:
+  airflow-db:

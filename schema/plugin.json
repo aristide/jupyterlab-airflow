@@ -1,0 +1,15 @@
+{
+  "jupyter.lab.shortcuts": [],
+  "title": "jupyterlab-airflow",
+  "description": "jupyterlab-airflow settings.",
+  "type": "object",
+  "properties": {
+    "autoRefreshSeconds": {
+      "type": "number",
+      "title": "Auto-refresh interval (seconds)",
+      "description": "How often the DAG list refreshes automatically. Set to 0 to disable.",
+      "default": 0
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,126 @@
+name: Build
+
+on:
+  push:
+    branches: main
+  pull_request:
+    branches: '*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - name: Install dependencies
+        run: python -m pip install -U "jupyterlab>=4.0.0,<5"
+
+      - name: Install node dependencies
+        run: jlpm
+
+      - name: Lint the extension
+        run: |
+          set -eux
+          jlpm run lint:check
+
+      - name: Test the extension (frontend)
+        run: |
+          set -eux
+          jlpm run test
+
+      - name: Build and install the extension
+        run: |
+          set -eux
+
+          # Clean any pre-existing labextension build so hatch-jupyter-builder
+          # runs the full build during pip install.
+          rm -rf jupyterlab_airflow/labextension
+
+          python -m pip install ".[test]"
+
+          jupyter labextension list
+          jupyter labextension list 2>&1 \
+            | sed 's/\x1b\[[0-9;]*m//g' \
+            | grep -ie "jupyterlab-airflow.*ok"
+          jupyter server extension list
+          jupyter server extension list 2>&1 \
+            | sed 's/\x1b\[[0-9;]*m//g' \
+            | grep -ie "jupyterlab_airflow.*ok"
+          python -m jupyterlab.browser_check
+
+      - name: Test the server extension (pytest)
+        run: |
+          set -eux
+          python -m pytest -vv -r ap --cov jupyterlab_airflow \
+            jupyterlab_airflow/tests/
+
+      - name: Package the extension
+        run: |
+          set -eux
+
+          pip install build
+          python -m build
+          pip uninstall -y "jupyterlab_airflow" jupyterlab
+
+      - name: Upload extension packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-artifacts
+          path: dist/jupyterlab_airflow*
+          if-no-files-found: error
+          retention-days: 5
+
+  test-isolated:
+    name: Test isolated
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: 'x64'
+      - uses: actions/download-artifact@v4
+        with:
+          name: extension-artifacts
+      - name: Install and Test
+        run: |
+          set -eux
+          # Remove NodeJS, twice to take care of system and locally
+          # installed node versions.
+          sudo rm -rf $(which node)
+          sudo rm -rf $(which node)
+
+          pip install "jupyterlab>=4.0.0,<5" jupyterlab_airflow*.whl
+
+          jupyter labextension list
+          jupyter labextension list 2>&1 \
+            | sed 's/\x1b\[[0-9;]*m//g' \
+            | grep -ie "jupyterlab-airflow.*ok"
+          jupyter server extension list
+          jupyter server extension list 2>&1 \
+            | sed 's/\x1b\[[0-9;]*m//g' \
+            | grep -ie "jupyterlab_airflow.*ok"
+          python -m jupyterlab.browser_check --no-chrome-test
+
+  check-links:
+    name: Check Links
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - uses: jupyterlab/maintainer-tools/.github/actions/check-links@v1

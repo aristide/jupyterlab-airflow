@@ -1,0 +1,153 @@
+/*
+    See the JupyterLab Developer Guide for useful CSS Patterns:
+    https://jupyterlab.readthedocs.io/en/stable/developer/css.html
+*/
+
+.jp-airflow-panel {
+  min-width: 240px;
+  color: var(--jp-ui-font-color1);
+  background: var(--jp-layout-color1);
+  overflow-y: auto;
+}
+
+.jp-airflow-root {
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-airflow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--jp-border-color2);
+  position: sticky;
+  top: 0;
+  background: var(--jp-layout-color1);
+  z-index: 1;
+}
+
+.jp-airflow-title {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-airflow-iconbtn:hover {
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-airflow-status,
+.jp-airflow-error {
+  padding: 8px 10px;
+}
+
+.jp-airflow-error {
+  color: var(--jp-error-color1, #e63558);
+}
+
+.jp-airflow-hint {
+  margin-top: 4px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-list,
+.jp-airflow-runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.jp-airflow-dag {
+  border-bottom: 1px solid var(--jp-border-color3);
+}
+
+.jp-airflow-dagrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.jp-airflow-expand {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 16px;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-airflow-dagname {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-airflow-schedule {
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  font-variant-numeric: tabular-nums;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-airflow-pause {
+  display: inline-flex;
+  align-items: center;
+}
+
+.jp-airflow-runs {
+  padding: 0 8px 6px 30px;
+}
+
+.jp-airflow-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-runid {
+  color: var(--jp-ui-font-color2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-airflow-state {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-transform: capitalize;
+  font-size: 11px;
+  color: #fff;
+  background: var(--jp-ui-font-color3);
+}
+
+.jp-airflow-state-success {
+  background: var(--jp-success-color1, #3a9c52);
+}
+
+.jp-airflow-state-running,
+.jp-airflow-state-queued {
+  background: var(--jp-warn-color1, #e6a817);
+}
+
+.jp-airflow-state-failed {
+  background: var(--jp-error-color1, #e63558);
+}
