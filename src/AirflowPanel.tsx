@@ -71,7 +71,7 @@ export class AirflowPanel extends ReactWidget {
     this._emit({ expanded });
     const res = await listDagRuns(dag.dag_id);
     const next = { ...this._state.expanded };
-    next[dag.dag_id] = res.status === 'OK' ? res.data?.dag_runs ?? [] : [];
+    next[dag.dag_id] = res.status === 'OK' ? (res.data?.dag_runs ?? []) : [];
     this._emit({ expanded: next });
   }
 
@@ -97,7 +97,8 @@ export class AirflowPanel extends ReactWidget {
     if (dag.dag_id in this._state.expanded) {
       const runs = await listDagRuns(dag.dag_id);
       const next = { ...this._state.expanded };
-      next[dag.dag_id] = runs.status === 'OK' ? runs.data?.dag_runs ?? [] : [];
+      next[dag.dag_id] =
+        runs.status === 'OK' ? (runs.data?.dag_runs ?? []) : [];
       this._emit({ expanded: next });
     }
   }

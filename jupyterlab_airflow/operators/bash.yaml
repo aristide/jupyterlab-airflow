@@ -1,0 +1,26 @@
+id: bash
+label: Bash operator
+category: Python/Bash
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+import: 'from airflow.providers.standard.operators.bash import BashOperator'
+import_taskflow: 'from airflow.sdk import task'
+handles: { in: true, out: true }
+taskflow: native
+task_id_prefix: bash
+params:
+  - { name: bash_command, label: 'Bash Command', type: string, required: true, widget: textarea }
+  - { name: env, label: 'Environment Vars', type: object, required: false, widget: json, default: {} }
+  - { name: cwd, label: 'Working dir', type: string, required: false, widget: text }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = BashOperator(
+      task_id={{ task_id | pyrepr }},
+      bash_command={{ params.bash_command | pyrepr }},
+      {% if params.env %}env={{ params.env | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  @task.bash(task_id={{ task_id | pyrepr }})
+  def {{ task_id }}():
+      return {{ params.bash_command | pyrepr }}

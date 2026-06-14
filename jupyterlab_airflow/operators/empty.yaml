@@ -1,0 +1,21 @@
+id: empty
+label: Empty operator
+category: Flow Control
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+import: 'from airflow.providers.standard.operators.empty import EmptyOperator'
+handles: { in: true, out: true }
+taskflow: operator            # no TaskFlow-native form — render as an operator in both modes
+task_id_prefix: empty
+params: []
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = EmptyOperator(
+      task_id={{ task_id | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = EmptyOperator(
+      task_id={{ task_id | pyrepr }},
+      {{ common | pyargs }}
+  )

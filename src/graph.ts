@@ -6,14 +6,14 @@ import { IAfdagIR, IAfdagNode } from './ir';
 // Bidirectional mapping between the `.afdag` IR and ReactFlow's nodes/edges,
 // plus instant (client-side) cycle detection for the live error badge.
 
-export interface AfdagNodeData {
+export interface IAfdagNodeData {
   op: string;
   task_id: string;
   params: Record<string, unknown>;
   [key: string]: unknown;
 }
 
-export type AfdagFlowNode = Node<AfdagNodeData>;
+export type AfdagFlowNode = Node<IAfdagNodeData>;
 
 export function irToFlow(ir: IAfdagIR): {
   nodes: AfdagFlowNode[];

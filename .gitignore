@@ -94,3 +94,8 @@ dmypy.json
 # Claude Code
 .claude/
 CLAUDE.md
+
+scope/
+
+# MemSearch plugin
+.memsearch/

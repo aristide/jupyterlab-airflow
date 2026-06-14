@@ -21,15 +21,22 @@ import * as React from 'react';
 
 import {
   AfdagFlowNode,
-  AfdagNodeData,
+  IAfdagNodeData,
   flowToIR,
   hasCycle,
   irToFlow
 } from '../graph';
+import { IOperatorDef } from '../interfaces';
 import { IAfdagIR, createEmptyIR, dagIdFromPath, stringifyIR } from '../ir';
 import { AfdagModel } from '../model';
-import { OPERATORS, getOperator, validateNodeParams } from '../operators';
+import {
+  getOperator,
+  getOperators,
+  loadOperators,
+  validateNodeParams
+} from '../operators';
 import { AfdagNode } from './AfdagNode';
+import { CodePanel } from './CodePanel';
 import { Inspector } from './Inspector';
 import { Palette } from './Palette';
 
@@ -47,12 +54,17 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const model = context.model as AfdagModel;
 
   const [ready, setReady] = React.useState(false);
+  const [operators, setOperators] =
+    React.useState<IOperatorDef[]>(getOperators);
+  const [opsLoaded, setOpsLoaded] = React.useState(false);
+  const [opsError, setOpsError] = React.useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<AfdagFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [dag, setDag] = React.useState<IAfdagIR['dag']>(
     () => createEmptyIR('').dag
   );
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [rightTab, setRightTab] = React.useState<'build' | 'code'>('build');
 
   const baseRef = React.useRef<IAfdagIR>(createEmptyIR(''));
   const lastWritten = React.useRef<string>('');
@@ -60,6 +72,28 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const rfRef = React.useRef<ReactFlowInstance<AfdagFlowNode, Edge> | null>(
     null
   );
+
+  // Fetch the operator registry (GET operators) once at activation. The palette
+  // and node forms are generated from it; getOperator/validateNodeParams read
+  // the cached index synchronously once this resolves.
+  React.useEffect(() => {
+    let cancelled = false;
+    loadOperators()
+      .then(list => {
+        if (!cancelled) {
+          setOperators(list);
+          setOpsLoaded(true);
+        }
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setOpsError(String((error && error.message) || error));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load the IR from the document model, and reload on external changes.
   React.useEffect(() => {
@@ -179,7 +213,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   );
 
   const updateNode = React.useCallback(
-    (id: string, patch: Partial<AfdagNodeData>): void => {
+    (id: string, patch: Partial<IAfdagNodeData>): void => {
       setNodes(nds =>
         nds.map(n =>
           n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
@@ -204,7 +238,21 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
 
   const selected = nodes.find(n => n.id === selectedId) ?? null;
 
-  if (!ready) {
+  // The IR projected from the live graph, fed to the CODE preview.
+  const currentIR = React.useMemo(
+    () => flowToIR(nodes, edges, dag, baseRef.current),
+    [nodes, edges, dag]
+  );
+
+  if (opsError) {
+    return (
+      <div className="jp-afdag-loading jp-mod-error">
+        Could not load the operator registry: {opsError}
+      </div>
+    );
+  }
+
+  if (!ready || !opsLoaded) {
     return <div className="jp-afdag-loading">Loading…</div>;
   }
 
@@ -237,7 +285,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         </button>
       </div>
       <div className="jp-afdag-body">
-        <Palette operators={OPERATORS} onAdd={addNode} />
+        <Palette operators={operators} onAdd={addNode} />
         <div className="jp-afdag-canvas">
           <ReactFlow
             nodes={nodes}
@@ -265,12 +313,44 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             </div>
           )}
         </div>
-        <Inspector
-          dag={dag}
-          node={selected}
-          onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
-          onNodeChange={updateNode}
-        />
+        <div className="jp-afdag-rightpanel">
+          <div className="jp-afdag-tabs" role="tablist">
+            <button
+              className={
+                rightTab === 'build'
+                  ? 'jp-afdag-tab jp-mod-active'
+                  : 'jp-afdag-tab'
+              }
+              role="tab"
+              aria-selected={rightTab === 'build'}
+              onClick={() => setRightTab('build')}
+            >
+              Build
+            </button>
+            <button
+              className={
+                rightTab === 'code'
+                  ? 'jp-afdag-tab jp-mod-active'
+                  : 'jp-afdag-tab'
+              }
+              role="tab"
+              aria-selected={rightTab === 'code'}
+              onClick={() => setRightTab('code')}
+            >
+              Code
+            </button>
+          </div>
+          {rightTab === 'build' ? (
+            <Inspector
+              dag={dag}
+              node={selected}
+              onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
+              onNodeChange={updateNode}
+            />
+          ) : (
+            <CodePanel ir={currentIR} />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,0 +1,27 @@
+id: python_task
+label: Python @task
+category: Python/Bash
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+import_taskflow: 'from airflow.sdk import task'
+import: 'from airflow.providers.standard.operators.python import PythonOperator'
+handles: { in: true, out: true }
+taskflow: native
+task_id_prefix: task
+# A code node: its single param is the user's Python body, emitted verbatim
+# INSIDE a @task function (the only place inline user code is allowed).
+params:
+  - { name: code, label: 'Python code', type: string, required: true, widget: code }
+common_params: [retries, retry_delay, depends_on_past]
+template_taskflow: |
+  @task(task_id={{ task_id | pyrepr }})
+  def {{ task_id }}():
+  {{ params.code | indent(4, true) }}
+template_traditional: |
+  def _{{ task_id }}(**context):
+  {{ params.code | indent(4, true) }}
+  {{ task_id }} = PythonOperator(
+      task_id={{ task_id | pyrepr }},
+      python_callable=_{{ task_id }},
+      {{ common | pyargs }}
+  )

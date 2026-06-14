@@ -1,92 +1,56 @@
-// A small placeholder operator catalogue for the scaffold. In later milestones
-// this is replaced by the YAML operator registry served from the Jupyter server
-// extension (GET operators), which also drives server-side Jinja2 codegen.
+// The operator catalogue is served by the Jupyter server extension
+// (`GET operators`, backed by the YAML operator registry) and fetched once at
+// editor activation via `loadOperators`. The result is cached in a module-level
+// index so `getOperator` / `validateNodeParams` stay synchronous for the hot
+// render/validation paths. The authoritative validation (parse / DagBag) still
+// happens server-side before deploy.
 
-export type OperatorWidget = 'text' | 'textarea' | 'code' | 'json';
+import { listOperators } from './handler';
+import { IOperatorDef, IOperatorParam, OperatorWidget } from './interfaces';
 
-export interface IOperatorParam {
-  name: string;
-  label: string;
-  required?: boolean;
-  widget?: OperatorWidget;
-}
+// Re-export the registry types so existing `../operators` importers keep working.
+export type { IOperatorDef, IOperatorParam, OperatorWidget };
 
-export interface IOperatorDef {
-  id: string;
-  label: string;
-  category: string;
-  taskIdPrefix: string;
-  params: IOperatorParam[];
-}
+let operators: IOperatorDef[] = [];
+let operatorIndex: Record<string, IOperatorDef> = {};
+let pending: Promise<IOperatorDef[]> | null = null;
 
-export const OPERATORS: IOperatorDef[] = [
-  {
-    id: 'empty',
-    label: 'Empty operator',
-    category: 'Flow Control',
-    taskIdPrefix: 'empty',
-    params: []
-  },
-  {
-    id: 'bash',
-    label: 'Bash operator',
-    category: 'Python / Bash',
-    taskIdPrefix: 'bash',
-    params: [
-      {
-        name: 'bash_command',
-        label: 'Bash Command',
-        required: true,
-        widget: 'textarea'
-      }
-    ]
-  },
-  {
-    id: 'python_task',
-    label: 'Python @task',
-    category: 'Python / Bash',
-    taskIdPrefix: 'task',
-    params: [
-      { name: 'code', label: 'Python code', required: true, widget: 'code' }
-    ]
-  },
-  {
-    id: 'branch',
-    label: 'Branch operator',
-    category: 'Flow Control',
-    taskIdPrefix: 'branch',
-    params: [
-      {
-        name: 'code',
-        label: 'Branch code (return a task_id)',
-        required: true,
-        widget: 'code'
-      }
-    ]
-  },
-  {
-    id: 'trigger_dagrun',
-    label: 'Trigger DAG run',
-    category: 'Flow Control',
-    taskIdPrefix: 'trigger',
-    params: [
-      {
-        name: 'trigger_dag_id',
-        label: 'DAG to trigger',
-        required: true,
-        widget: 'text'
-      }
-    ]
+function reindex(list: IOperatorDef[]): void {
+  operators = list;
+  operatorIndex = {};
+  for (const operator of list) {
+    operatorIndex[operator.id] = operator;
   }
-];
+}
 
-const OPERATOR_INDEX: Record<string, IOperatorDef> = {};
-for (const operator of OPERATORS) {
-  OPERATOR_INDEX[operator.id] = operator;
+/**
+ * Fetch the operator registry from the server extension and cache it. Safe to
+ * call repeatedly: concurrent calls share one request and later calls return the
+ * cached list unless `force` is set. Rejects if the registry can't be loaded
+ * (the caller surfaces this; a retry is allowed because the cache isn't poisoned).
+ */
+export function loadOperators(force = false): Promise<IOperatorDef[]> {
+  if (pending && !force) {
+    return pending;
+  }
+  pending = listOperators().then(res => {
+    if (res.status !== 'OK' || !res.data) {
+      pending = null; // allow a retry
+      throw new Error(res.error || 'Failed to load the operator registry');
+    }
+    reindex(res.data);
+    return operators;
+  });
+  return pending;
+}
+
+/** The cached registry (empty until {@link loadOperators} resolves). */
+export function getOperators(): IOperatorDef[] {
+  return operators;
 }
 
 export function getOperator(id: string): IOperatorDef | undefined {
-  return OPERATOR_INDEX[id];
+  return operatorIndex[id];
 }
 
 export interface IValidationResult {

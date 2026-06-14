@@ -1,0 +1,25 @@
+id: branch
+label: Branch operator
+category: Flow Control
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+import: 'from airflow.providers.standard.operators.python import BranchPythonOperator'
+import_taskflow: 'from airflow.sdk import task'
+handles: { in: true, out: true }
+taskflow: native
+task_id_prefix: branch
+params:
+  - { name: code, label: 'Branch code (return a task_id)', type: string, required: true, widget: code }
+common_params: [retries, retry_delay, depends_on_past]
+template_taskflow: |
+  @task.branch(task_id={{ task_id | pyrepr }})
+  def {{ task_id }}():
+  {{ params.code | indent(4, true) }}
+template_traditional: |
+  def _{{ task_id }}(**context):
+  {{ params.code | indent(4, true) }}
+  {{ task_id }} = BranchPythonOperator(
+      task_id={{ task_id | pyrepr }},
+      python_callable=_{{ task_id }},
+      {{ common | pyargs }}
+  )

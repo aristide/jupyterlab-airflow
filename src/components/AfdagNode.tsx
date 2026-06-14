@@ -2,13 +2,13 @@ import { Handle, Position } from '@xyflow/react';
 import type { NodeProps } from '@xyflow/react';
 import * as React from 'react';
 
-import type { AfdagNodeData } from '../graph';
+import type { IAfdagNodeData } from '../graph';
 import { getOperator, validateNodeParams } from '../operators';
 
 // A single Airflow task rendered as a ReactFlow node. The validity flag is
 // icon + text + ARIA (never colour-only) so it is accessible.
 function AfdagNodeImpl(props: NodeProps): JSX.Element {
-  const data = props.data as unknown as AfdagNodeData;
+  const data = props.data as unknown as IAfdagNodeData;
   const def = getOperator(data.op);
   const result = validateNodeParams(data.op, data.params);
   const className = [

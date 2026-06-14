@@ -14,8 +14,6 @@ _(none)_
 
 Next steps follow the MVP milestones in `docs/PRD.md` (§5, §14).
 
-- [ ] Server `GET operators`: serve the YAML operator registry; replace the placeholder `src/operators.ts`
-- [ ] Server `POST generate`: IR → Airflow 3.x Python (Jinja2 + registry); wire the CODE inspector tab preview
 - [ ] Registry-driven RJSF forms + the four inspector tabs (DAG / NODE / CODE / SAVED)
 - [ ] Server `POST validate` + `POST deploy`: validation pipeline (PRD Appendix E), atomic shared-volume write, provenance header
 - [ ] Deploy lifecycle: poll `/api/v2/dags` + `/api/v2/importErrors`, tri-state UI (Writing / Waiting / Registered-Failed-Processing)
@@ -25,6 +23,8 @@ Next steps follow the MVP milestones in `docs/PRD.md` (§5, §14).
 
 ## Done
 
+- [x] 2026-06-14 — Server `POST generate`: IR → Airflow 3.x TaskFlow Python via `codegen.py` (Jinja2 `autoescape=False` + `pyrepr`/`pyargs`, registry templates, Kahn topo order, Appendix E validation: identifiers/cycle/`ast.parse`/`compile`, provenance header); `GenerateHandler` route; frontend `generateDag` + `CodePanel` (debounced) wired as a Build/Code tab in the inspector; tests added (codegen, endpoint, handler)
+- [x] 2026-06-14 — Server `GET operators`: YAML operator registry (`jupyterlab_airflow/operators/*.yaml` + `registry.py` with mtime hot-reload + `AIRFLOW_OPERATORS_DIR` override) served via `OperatorsHandler`; `src/operators.ts` now fetches/caches the registry (`loadOperators`) instead of a hardcoded list; tests added (registry, endpoint, loader)
 - [x] 2026-06-13 — Establish this `TODO.md` task-history convention (documented in `CLAUDE.md`)
 - [x] 2026-06-13 — Add `CLAUDE.md` (commands + architecture for future instances)
 - [x] 2026-06-13 — Scaffold the `.afdag` document widget: IR/model/factory/widget + ReactFlow editor + two-plugin wiring; `tsc` clean and jest passing

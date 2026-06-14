@@ -40,6 +40,38 @@ async def test_dags_endpoint(jp_fetch):
     assert payload["data"]["total_entries"] == 1
 
 
+async def test_operators_endpoint(jp_fetch):
+    response = await jp_fetch("jupyterlab-airflow", "operators")
+    assert response.code == 200
+    payload = json.loads(response.body)
+    ops = payload["data"]
+    ids = {op["id"] for op in ops}
+    assert "bash" in ids
+    bash = next(op for op in ops if op["id"] == "bash")
+    assert bash["taskIdPrefix"] == "bash"
+    # Codegen-only fields stay server-side.
+    assert "import" not in bash and "template_taskflow" not in bash
+
+
+async def test_generate_endpoint(jp_fetch):
+    ir = {
+        "dag": {"dag_id": "gen_dag", "schedule": "@daily", "start_date": "2026-01-01"},
+        "nodes": [
+            {"id": "n", "op": "bash", "task_id": "t",
+             "params": {"bash_command": "echo hi"}}
+        ],
+        "edges": [],
+    }
+    response = await jp_fetch(
+        "jupyterlab-airflow", "generate", method="POST", body=json.dumps(ir)
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["valid"] is True
+    assert "from airflow.sdk import dag, task" in data["code"]
+    assert "@task.bash(task_id='t')" in data["code"]
+
+
 async def test_trigger_endpoint(jp_fetch):
     response = await jp_fetch(
         "jupyterlab-airflow",

@@ -47,3 +47,34 @@ export interface IHealth {
   base_url: string;
   username: string;
 }
+
+// Operator registry, served by `GET operators` (the server reads the bundled
+// + optional user operator YAML files). Drives the palette and node forms.
+export type OperatorWidget = 'text' | 'textarea' | 'code' | 'json';
+
+export interface IOperatorParam {
+  name: string;
+  label: string;
+  required?: boolean;
+  widget?: OperatorWidget;
+  type?: string;
+  default?: unknown;
+}
+
+export interface IOperatorDef {
+  id: string;
+  label: string;
+  category: string;
+  taskIdPrefix: string;
+  params: IOperatorParam[];
+  taskflow?: 'native' | 'operator';
+  handles?: { in?: boolean; out?: boolean };
+}
+
+// Result of `POST generate` (IR → Airflow 3.x Python). Validation failures come
+// back in `errors` with `valid: false`; `code` is best-effort.
+export interface IGenerateRes {
+  code: string;
+  valid: boolean;
+  errors: string[];
+}

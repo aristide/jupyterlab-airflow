@@ -1,0 +1,24 @@
+id: trigger_dagrun
+label: Trigger DAG run
+category: Flow Control
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+import: 'from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator'
+handles: { in: true, out: true }
+taskflow: operator            # no TaskFlow-native form — render as an operator in both modes
+task_id_prefix: trigger
+params:
+  - { name: trigger_dag_id, label: 'DAG to trigger', type: string, required: true, widget: text }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = TriggerDagRunOperator(
+      task_id={{ task_id | pyrepr }},
+      trigger_dag_id={{ params.trigger_dag_id | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = TriggerDagRunOperator(
+      task_id={{ task_id | pyrepr }},
+      trigger_dag_id={{ params.trigger_dag_id | pyrepr }},
+      {{ common | pyargs }}
+  )

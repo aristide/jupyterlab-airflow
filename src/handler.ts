@@ -6,8 +6,11 @@ import {
   IDagListRes,
   IDagRunsRes,
   IDagRun,
-  IHealth
+  IGenerateRes,
+  IHealth,
+  IOperatorDef
 } from './interfaces';
+import { IAfdagIR } from './ir';
 
 const NAMESPACE = 'jupyterlab-airflow';
 
@@ -72,6 +75,12 @@ async function POST<T>(
 
 export const getHealth = (): Promise<IApiRes<IHealth>> =>
   GET<IHealth>('health');
+
+export const listOperators = (): Promise<IApiRes<IOperatorDef[]>> =>
+  GET<IOperatorDef[]>('operators');
+
+export const generateDag = (ir: IAfdagIR): Promise<IApiRes<IGenerateRes>> =>
+  POST<IGenerateRes>('generate', ir as unknown as Record<string, unknown>);
 
 export const listDags = (limit = 100): Promise<IApiRes<IDagListRes>> =>
   GET<IDagListRes>('dags', { limit: String(limit) });

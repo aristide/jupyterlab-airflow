@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { AfdagFlowNode, AfdagNodeData } from '../graph';
+import { AfdagFlowNode, IAfdagNodeData } from '../graph';
 import { IAfdagIR } from '../ir';
 import { getOperator } from '../operators';
 
@@ -8,7 +8,7 @@ export interface IInspectorProps {
   dag: IAfdagIR['dag'];
   node: AfdagFlowNode | null;
   onDagChange: (patch: Partial<IAfdagIR['dag']>) => void;
-  onNodeChange: (id: string, patch: Partial<AfdagNodeData>) => void;
+  onNodeChange: (id: string, patch: Partial<IAfdagNodeData>) => void;
 }
 
 /**
@@ -49,7 +49,7 @@ export function Inspector(props: IInspectorProps): JSX.Element {
 
 interface INodeFormProps {
   node: AfdagFlowNode;
-  onNodeChange: (id: string, patch: Partial<AfdagNodeData>) => void;
+  onNodeChange: (id: string, patch: Partial<IAfdagNodeData>) => void;
 }
 
 function NodeForm(props: INodeFormProps): JSX.Element {

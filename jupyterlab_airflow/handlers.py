@@ -7,6 +7,8 @@ from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
 from .client import AirflowError, get_client
+from .codegen import generate_dag
+from .registry import client_view
 
 NAMESPACE = "jupyterlab-airflow"
 
@@ -37,6 +39,33 @@ class HealthHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def get(self):
         await self.respond(get_client().health)
+
+
+class OperatorsHandler(_AirflowHandler):
+    """Serve the operator registry to the editor palette + node forms.
+
+    This endpoint does not talk to Airflow; it reads the bundled (and optional
+    user) operator YAML registry. The file I/O still runs off the event loop via
+    :meth:`respond`/``run_in_executor``.
+    """
+
+    @tornado.web.authenticated
+    async def get(self):
+        await self.respond(client_view)
+
+
+class GenerateHandler(_AirflowHandler):
+    """Render an `.afdag` IR (POST body) to Airflow 3.x Python for the CODE tab.
+
+    Pure codegen — never touches Airflow and never executes user code. Returns
+    ``{code, valid, errors}``; validation failures come back in ``errors`` (200),
+    not as HTTP errors.
+    """
+
+    @tornado.web.authenticated
+    async def post(self):
+        ir = self.get_json_body() or {}
+        await self.respond(generate_dag, ir)
 
 
 class DagsHandler(_AirflowHandler):
@@ -102,6 +131,8 @@ def setup_handlers(web_app):
     base_url = web_app.settings["base_url"]
     handlers = [
         (_url(base_url, "health"), HealthHandler),
+        (_url(base_url, "operators"), OperatorsHandler),
+        (_url(base_url, "generate"), GenerateHandler),
         (_url(base_url, "dags"), DagsHandler),
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),
