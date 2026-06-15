@@ -207,3 +207,35 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) 
         "errors": [],
         "dagbag": result["dagbag"],
     }
+
+
+def purge_dag(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:
+    """Delete a DAG: remove its `.py` **first** (so it isn't re-imported), then
+    purge its history via ``DELETE /api/v2/dags/{id}``. Tolerates a missing file
+    or a DAG that Airflow hasn't recorded yet (404)."""
+    from .client import AirflowError, get_client
+
+    target = target or SharedVolumeTarget()
+    filename = f"{dag_id}.py"
+    removed_file = False
+    try:
+        if target.exists(filename):
+            target.delete(filename)
+            removed_file = True
+    except DeployError:
+        # dag_id isn't a safe/managed filename (e.g. a hand-written DAG) — skip.
+        pass
+
+    purged_history = False
+    try:
+        get_client().delete_dag(dag_id)
+        purged_history = True
+    except AirflowError as err:
+        if err.status != 404:
+            raise
+
+    return {
+        "dag_id": dag_id,
+        "removed_file": removed_file,
+        "purged_history": purged_history,
+    }

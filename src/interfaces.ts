@@ -20,6 +20,40 @@ export interface IDag {
   owners?: string[];
   next_dagrun_logical_date?: string | null;
   last_parsed_time?: string | null;
+  has_import_errors?: boolean;
+}
+
+export interface ITaskInstance {
+  task_id: string;
+  dag_run_id?: string;
+  dag_id?: string;
+  state?: string | null;
+  try_number?: number;
+  start_date?: string | null;
+  end_date?: string | null;
+  duration?: number | null;
+}
+
+export interface ITaskInstancesRes {
+  task_instances: ITaskInstance[];
+  total_entries: number;
+}
+
+export interface ITaskLogsRes {
+  content: string;
+}
+
+// `clearTaskInstances` returns the affected set (used as a dry-run preview).
+export interface IClearRes {
+  task_instances: ITaskInstance[];
+  total_entries: number;
+}
+
+// Result of deleting a DAG (file removed, history purged).
+export interface IPurgeRes {
+  dag_id: string;
+  removed_file: boolean;
+  purged_history: boolean;
 }
 
 export interface IDagListRes {

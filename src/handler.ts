@@ -3,6 +3,7 @@ import { ServerConnection } from '@jupyterlab/services';
 
 import {
   IApiRes,
+  IClearRes,
   IDagListRes,
   IDagRunsRes,
   IDagRun,
@@ -12,6 +13,9 @@ import {
   IHealth,
   IImportErrorsRes,
   IOperatorDef,
+  IPurgeRes,
+  ITaskInstancesRes,
+  ITaskLogsRes,
   IValidateRes
 } from './interfaces';
 import { IAfdagIR } from './ir';
@@ -101,8 +105,14 @@ export const deployStatus = (
 export const listImportErrors = (): Promise<IApiRes<IImportErrorsRes>> =>
   GET<IImportErrorsRes>('importerrors');
 
-export const listDags = (limit = 100): Promise<IApiRes<IDagListRes>> =>
-  GET<IDagListRes>('dags', { limit: String(limit) });
+export const listDags = (
+  limit = 100,
+  dagIdPattern = ''
+): Promise<IApiRes<IDagListRes>> =>
+  GET<IDagListRes>('dags', {
+    limit: String(limit),
+    ...(dagIdPattern ? { dag_id_pattern: dagIdPattern } : {})
+  });
 
 export const setDagPaused = (
   dagId: string,
@@ -115,8 +125,43 @@ export const triggerDag = (
   conf: Record<string, unknown> = {}
 ): Promise<IApiRes<IDagRun>> => POST('dags/trigger', { dag_id: dagId, conf });
 
+export const deleteDag = (dagId: string): Promise<IApiRes<IPurgeRes>> =>
+  POST<IPurgeRes>('dags/delete', { dag_id: dagId });
+
 export const listDagRuns = (
   dagId: string,
   limit = 10
 ): Promise<IApiRes<IDagRunsRes>> =>
   GET<IDagRunsRes>('dagruns', { dag_id: dagId, limit: String(limit) });
+
+export const listTaskInstances = (
+  dagId: string,
+  runId: string
+): Promise<IApiRes<ITaskInstancesRes>> =>
+  GET<ITaskInstancesRes>('taskinstances', { dag_id: dagId, run_id: runId });
+
+export const getTaskLogs = (
+  dagId: string,
+  runId: string,
+  taskId: string,
+  tryNumber = 1
+): Promise<IApiRes<ITaskLogsRes>> =>
+  GET<ITaskLogsRes>('taskinstances/logs', {
+    dag_id: dagId,
+    run_id: runId,
+    task_id: taskId,
+    try_number: String(tryNumber)
+  });
+
+export const clearTasks = (
+  dagId: string,
+  runId: string,
+  taskIds: string[],
+  dryRun = true
+): Promise<IApiRes<IClearRes>> =>
+  POST<IClearRes>('taskinstances/clear', {
+    dag_id: dagId,
+    run_id: runId,
+    task_ids: taskIds,
+    dry_run: dryRun
+  });

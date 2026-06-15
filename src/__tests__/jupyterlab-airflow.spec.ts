@@ -1,6 +1,12 @@
 import { ServerConnection } from '@jupyterlab/services';
 
-import { deployDag, deployStatus, generateDag, listDags } from '../handler';
+import {
+  deployDag,
+  deployStatus,
+  generateDag,
+  listDags,
+  listTaskInstances
+} from '../handler';
 import { createEmptyIR } from '../ir';
 import {
   getOperator,
@@ -196,6 +202,37 @@ describe('deployStatus handler', () => {
       expect(url).toContain('deploy/status');
       expect(url).toContain('dag_id=d');
       expect(url).toContain('filename=d.py');
+    } finally {
+      makeRequest.mockRestore();
+    }
+  });
+});
+
+// The manager drills into a run's task instances.
+describe('listTaskInstances handler', () => {
+  it('GETs taskinstances with dag_id and run_id', async () => {
+    const makeRequest = jest
+      .spyOn(ServerConnection, 'makeRequest')
+      .mockResolvedValue({
+        ok: true,
+        statusText: 'OK',
+        text: async () =>
+          JSON.stringify({
+            data: {
+              task_instances: [{ task_id: 't', state: 'success' }],
+              total_entries: 1
+            }
+          })
+      } as unknown as Response);
+
+    try {
+      const res = await listTaskInstances('d', 'r1');
+      expect(res.status).toBe('OK');
+      expect(res.data?.task_instances[0].task_id).toBe('t');
+      const url = makeRequest.mock.calls[0][0] as string;
+      expect(url).toContain('taskinstances');
+      expect(url).toContain('dag_id=d');
+      expect(url).toContain('run_id=r1');
     } finally {
       makeRequest.mockRestore();
     }

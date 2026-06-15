@@ -115,10 +115,7 @@
 }
 
 .jp-airflow-run {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0;
+  display: block;
   font-size: var(--jp-ui-font-size0);
 }
 
@@ -150,4 +147,207 @@
 
 .jp-airflow-state-failed {
   background: var(--jp-error-color1, #e63558);
+}
+
+/* --- Resource Manager: search, import errors, task drill-down, modals --- */
+.jp-airflow-search {
+  box-sizing: border-box;
+  width: calc(100% - 16px);
+  margin: 0 8px 6px;
+  padding: 3px 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background: var(--jp-input-active-background, var(--jp-layout-color0));
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-airflow-toast {
+  margin: 0 8px 6px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: var(--jp-success-color3, var(--jp-layout-color2));
+  color: var(--jp-success-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-importerrors {
+  margin: 0 8px 8px;
+  border: 1px solid var(--jp-error-color1);
+  border-radius: 3px;
+  background: var(--jp-error-color3, rgb(230 53 88 / 8%));
+}
+
+.jp-airflow-importerrors-head {
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--jp-error-color1);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jp-airflow-ie {
+  padding: 2px 8px 6px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-ie pre {
+  margin: 4px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--jp-error-color1);
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+}
+
+.jp-airflow-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.jp-airflow-badge.jp-mod-error {
+  background: var(--jp-error-color1);
+}
+
+.jp-airflow-iconbtn.jp-mod-danger:hover {
+  color: var(--jp-error-color1);
+}
+
+/* Run row now contains a header + nested task list */
+.jp-airflow-runrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.jp-airflow-tasks {
+  padding: 0 0 4px 26px;
+  list-style: none;
+  margin: 0;
+}
+
+.jp-airflow-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-taskid {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-airflow-linkbtn {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  color: var(--jp-content-link-color, var(--jp-brand-color1));
+  font-size: var(--jp-ui-font-size0);
+  cursor: pointer;
+}
+
+.jp-airflow-linkbtn:hover {
+  text-decoration: underline;
+}
+
+/* Modals (logs viewer + confirmations) */
+.jp-airflow-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 35%);
+}
+
+.jp-airflow-modal {
+  display: flex;
+  flex-direction: column;
+  max-width: 640px;
+  max-height: 80vh;
+  min-width: 280px;
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  box-shadow: var(--jp-elevation-z6, 0 4px 16px rgb(0 0 0 / 30%));
+}
+
+.jp-airflow-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color2);
+  font-weight: 600;
+}
+
+.jp-airflow-modal-body {
+  padding: 12px;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-airflow-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--jp-border-color2);
+}
+
+.jp-airflow-btn {
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  padding: 3px 12px;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+}
+
+.jp-airflow-btn.jp-mod-accent {
+  border-color: var(--jp-brand-color1);
+  background: var(--jp-brand-color1);
+  color: #fff;
+}
+
+.jp-airflow-btn.jp-mod-danger {
+  border-color: var(--jp-error-color1);
+  background: var(--jp-error-color1);
+  color: #fff;
+}
+
+.jp-airflow-logs {
+  width: 640px;
+}
+
+.jp-airflow-logtext {
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  color: var(--jp-content-font-color1);
 }

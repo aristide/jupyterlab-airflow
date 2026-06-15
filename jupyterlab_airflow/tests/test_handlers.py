@@ -15,9 +15,6 @@ class FakeClient:
     def health(self):
         return {"ok": True, "base_url": "http://airflow.test", "username": "admin"}
 
-    def list_dags(self, limit=100, offset=0):
-        return {"dags": [{"dag_id": "demo", "is_paused": False}], "total_entries": 1}
-
     def trigger_dag(self, dag_id, conf=None, logical_date=None):
         return {"dag_run_id": "manual__1", "dag_id": dag_id, "state": "queued"}
 
@@ -29,6 +26,24 @@ class FakeClient:
 
     def list_import_errors(self, limit=100):
         return {"import_errors": [], "total_entries": 0}
+
+    def list_dags(self, limit=100, offset=0, dag_id_pattern=None, **kwargs):
+        return {"dags": [{"dag_id": "demo", "is_paused": False}], "total_entries": 1}
+
+    def list_task_instances(self, dag_id, dag_run_id):
+        return {
+            "task_instances": [{"task_id": "t", "state": "success", "try_number": 1}],
+            "total_entries": 1,
+        }
+
+    def get_task_logs(self, dag_id, dag_run_id, task_id, try_number=1):
+        return {"content": "log line"}
+
+    def clear_task_instances(self, dag_id, **kwargs):
+        return {"task_instances": [{"task_id": "t"}], "total_entries": 1}
+
+    def delete_dag(self, dag_id):
+        return {}
 
 
 @pytest.fixture(autouse=True)
@@ -131,6 +146,55 @@ async def test_import_errors_endpoint(jp_fetch):
     assert response.code == 200
     data = json.loads(response.body)["data"]
     assert data["total_entries"] == 0
+
+
+async def test_task_instances_endpoint(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "taskinstances",
+        params={"dag_id": "demo", "run_id": "r1"},
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["task_instances"][0]["task_id"] == "t"
+
+
+async def test_task_logs_endpoint(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "taskinstances",
+        "logs",
+        params={"dag_id": "demo", "run_id": "r1", "task_id": "t"},
+    )
+    assert response.code == 200
+    assert json.loads(response.body)["data"]["content"] == "log line"
+
+
+async def test_task_clear_endpoint(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "taskinstances",
+        "clear",
+        method="POST",
+        body=json.dumps({"dag_id": "demo", "run_id": "r1", "task_ids": ["t"]}),
+    )
+    assert response.code == 200
+    assert json.loads(response.body)["data"]["total_entries"] == 1
+
+
+async def test_dag_delete_endpoint(jp_fetch, tmp_path, monkeypatch):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "dags",
+        "delete",
+        method="POST",
+        body=json.dumps({"dag_id": "demo"}),
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["dag_id"] == "demo"
+    assert data["purged_history"] is True
 
 
 async def test_trigger_endpoint(jp_fetch):

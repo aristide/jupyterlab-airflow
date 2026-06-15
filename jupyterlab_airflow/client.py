@@ -122,16 +122,29 @@ class AirflowClient:
             "username": self._config.username,
         }
 
-    def list_dags(self, limit: int = 100, offset: int = 0, only_active: bool = True) -> dict:
-        return self._request(
-            "GET",
-            "/dags",
-            params={
-                "limit": limit,
-                "offset": offset,
-                "only_active": str(only_active).lower(),
-            },
-        )
+    def list_dags(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        exclude_stale: bool = True,
+        paused=None,
+        dag_id_pattern=None,
+        tags=None,
+    ) -> dict:
+        # Airflow 3 /api/v2: `only_active` was removed -> `exclude_stale`;
+        # list filters are form-exploded (requests repeats list params).
+        params = {
+            "limit": limit,
+            "offset": offset,
+            "exclude_stale": str(exclude_stale).lower(),
+        }
+        if paused is not None:
+            params["paused"] = str(paused).lower()
+        if dag_id_pattern:
+            params["dag_id_pattern"] = dag_id_pattern
+        if tags:
+            params["tags"] = tags
+        return self._request("GET", "/dags", params=params)
 
     def get_dag(self, dag_id: str) -> dict:
         return self._request("GET", f"/dags/{dag_id}")
@@ -193,6 +206,52 @@ class AirflowClient:
                 "is_paused": dag.get("is_paused", True),
             },
         }
+
+    def list_task_instances(self, dag_id: str, dag_run_id: str) -> dict:
+        return self._request(
+            "GET",
+            f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances",
+        )
+
+    def get_task_logs(
+        self, dag_id: str, dag_run_id: str, task_id: str, try_number: int = 1
+    ) -> dict:
+        """Task-instance log text for one try, normalised to ``{content: str}``."""
+        raw = self._request(
+            "GET",
+            f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_id}/logs/{try_number}",
+            params={"full_content": "true"},
+        )
+        content = raw.get("content") if isinstance(raw, dict) else raw
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, (list, tuple)):
+                    parts.append(" ".join(str(piece) for piece in item))
+                else:
+                    parts.append(str(item))
+            content = "\n".join(parts)
+        return {"content": content if isinstance(content, str) else str(raw)}
+
+    def clear_task_instances(
+        self,
+        dag_id: str,
+        *,
+        task_ids=None,
+        dag_run_id=None,
+        dry_run: bool = True,
+        reset_dag_runs: bool = True,
+    ) -> dict:
+        """Clear (retry) task instances. ``dry_run`` previews the affected set."""
+        body: dict = {"dry_run": dry_run, "reset_dag_runs": reset_dag_runs}
+        if task_ids:
+            body["task_ids"] = task_ids
+        if dag_run_id:
+            body["dag_run_id"] = dag_run_id
+        return self._request("POST", f"/dags/{dag_id}/clearTaskInstances", json=body)
+
+    def delete_dag(self, dag_id: str) -> dict:
+        return self._request("DELETE", f"/dags/{dag_id}")
 
 
 def _safe_json(resp):

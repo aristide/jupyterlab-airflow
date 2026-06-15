@@ -8,7 +8,7 @@ from jupyter_server.utils import url_path_join
 
 from .client import AirflowError, get_client
 from .codegen import generate_dag
-from .deploy import deploy_dag
+from .deploy import deploy_dag, purge_dag
 from .registry import client_view
 from .validation import validate_dag
 
@@ -125,7 +125,13 @@ class DagsHandler(_AirflowHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "limit and offset must be integers"}))
             return
-        await self.respond(get_client().list_dags, limit=limit, offset=offset)
+        pattern = self.get_argument("dag_id_pattern", "") or None
+        await self.respond(
+            get_client().list_dags,
+            limit=limit,
+            offset=offset,
+            dag_id_pattern=pattern,
+        )
 
 
 class DagPauseHandler(_AirflowHandler):
@@ -169,6 +175,63 @@ class DagRunsHandler(_AirflowHandler):
         await self.respond(get_client().list_dag_runs, dag_id, limit=limit)
 
 
+class TaskInstancesHandler(_AirflowHandler):
+    @tornado.web.authenticated
+    async def get(self):
+        dag_id = self.get_argument("dag_id")
+        run_id = self.get_argument("run_id")
+        await self.respond(get_client().list_task_instances, dag_id, run_id)
+
+
+class TaskLogsHandler(_AirflowHandler):
+    @tornado.web.authenticated
+    async def get(self):
+        dag_id = self.get_argument("dag_id")
+        run_id = self.get_argument("run_id")
+        task_id = self.get_argument("task_id")
+        try:
+            try_number = int(self.get_argument("try_number", "1"))
+        except ValueError:
+            try_number = 1
+        await self.respond(
+            get_client().get_task_logs, dag_id, run_id, task_id, try_number
+        )
+
+
+class TaskClearHandler(_AirflowHandler):
+    """Clear (retry) task instances. ``dry_run`` previews the affected set first."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self.get_json_body() or {}
+        dag_id = body.get("dag_id")
+        if not dag_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id required"}))
+            return
+        await self.respond(
+            get_client().clear_task_instances,
+            dag_id,
+            task_ids=body.get("task_ids"),
+            dag_run_id=body.get("run_id"),
+            dry_run=bool(body.get("dry_run", True)),
+        )
+
+
+class DagDeleteHandler(_AirflowHandler):
+    """Delete a DAG: remove the deployed `.py` first, then purge its history."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self.get_json_body() or {}
+        dag_id = body.get("dag_id")
+        if not dag_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id required"}))
+            return
+        await self.respond(purge_dag, dag_id)
+
+
 def _url(base_url, act):
     return url_path_join(base_url, NAMESPACE, act)
 
@@ -187,6 +250,10 @@ def setup_handlers(web_app):
         (_url(base_url, "dags"), DagsHandler),
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),
+        (_url(base_url, "dags/delete"), DagDeleteHandler),
         (_url(base_url, "dagruns"), DagRunsHandler),
+        (_url(base_url, "taskinstances"), TaskInstancesHandler),
+        (_url(base_url, "taskinstances/logs"), TaskLogsHandler),
+        (_url(base_url, "taskinstances/clear"), TaskClearHandler),
     ]
     web_app.add_handlers(host_pattern, handlers)
