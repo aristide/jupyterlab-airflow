@@ -91,6 +91,11 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   );
   // Cancellation token for the in-flight deploy poll loop.
   const pollRef = React.useRef<{ cancelled: boolean } | null>(null);
+  // While a node drag is in progress we hold off committing the IR (ReactFlow
+  // fires a position change every frame); the latest graph is read on drag-stop.
+  const draggingRef = React.useRef<boolean>(false);
+  const latestRef = React.useRef({ nodes, edges, dag });
+  latestRef.current = { nodes, edges, dag };
 
   // Fetch the operator registry (GET operators) once at activation. The palette
   // and node forms are generated from it; getOperator/validateNodeParams read
@@ -167,7 +172,21 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     };
   }, [context, model, setNodes, setEdges]);
 
-  // Persist the IR back to the model whenever the graph or DAG config changes.
+  // Serialize the latest graph into the model, but only when it actually
+  // changed (the compare also skips selection-only churn).
+  const commit = React.useCallback((): void => {
+    const { nodes, edges, dag } = latestRef.current;
+    const ir = flowToIR(nodes, edges, dag, baseRef.current);
+    const next = stringifyIR(ir);
+    if (next !== lastWritten.current) {
+      lastWritten.current = next;
+      model.setIR(ir);
+    }
+  }, [model]);
+
+  // Persist the IR back to the model whenever the graph or DAG config changes —
+  // except mid-drag, where the commit is deferred to onNodeDragStop so a drag is
+  // one model write rather than one per frame.
   React.useEffect(() => {
     if (!ready) {
       return;
@@ -176,13 +195,20 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       loadingRef.current = false;
       return;
     }
-    const ir = flowToIR(nodes, edges, dag, baseRef.current);
-    const next = stringifyIR(ir);
-    if (next !== lastWritten.current) {
-      lastWritten.current = next;
-      model.setIR(ir);
+    if (draggingRef.current) {
+      return;
     }
-  }, [nodes, edges, dag, ready, model]);
+    commit();
+  }, [nodes, edges, dag, ready, commit]);
+
+  const onNodeDragStart = React.useCallback((): void => {
+    draggingRef.current = true;
+  }, []);
+
+  const onNodeDragStop = React.useCallback((): void => {
+    draggingRef.current = false;
+    commit();
+  }, [commit]);
 
   // Re-fit the canvas when the Lumino widget is shown or resized.
   React.useEffect(() => {
@@ -483,6 +509,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onNodeDragStart={onNodeDragStart}
+            onNodeDragStop={onNodeDragStop}
             onInit={instance => {
               rfRef.current = instance;
               instance.fitView();

@@ -14,10 +14,11 @@ _(none)_
 
 Next steps follow the MVP milestones in `docs/PRD.md` (§5, §14).
 
-- [ ] Debounce the IR→model commit to node drag-stop (currently commits on every drag tick — `StudioApp.tsx`)
 - [ ] Bump `requires-python` to `>=3.9` in `pyproject.toml` (Airflow 3 needs 3.9+)
 
 ## Done
+
+- [x] 2026-06-15 — Debounce IR→model commit to node drag-stop (`StudioApp.tsx`): a `draggingRef` (set on `onNodeDragStart`, cleared on `onNodeDragStop`) gates the persist effect so a node drag commits **once** at drag-stop instead of every ReactFlow frame; extracted a `commit()` that reads the latest graph via a ref. Non-drag edits still commit immediately; selection-only churn was already deduped by the serialized-IR compare.
 
 - [x] 2026-06-15 — Manager expansion: fixed `list_dags` (`only_active`→`exclude_stale`, form-exploded params, `dag_id_pattern` search); added client `list_task_instances`/`get_task_logs` (list→text normalise)/`clear_task_instances`/`delete_dag` + `deploy.purge_dag` (remove `.py` first, then `DELETE /dags/{id}`); routes `taskinstances`, `taskinstances/logs`, `taskinstances/clear`, `dags/delete`. Refactored `AirflowPanel` into a thin shell + functional `ManagerApp`: dag_id search, import-errors panel + per-DAG `has_import_errors` badge, run→task-instance drill-down, log viewer modal, clear/retry (dry-run preview→confirm), delete (confirm→purge). Tests: client (exclude_stale, clear payload, logs normalise, delete) + 4 endpoints + `listTaskInstances` handler. Follow-up: tiered visibility-gated auto-refresh (PRD §6.5.4) and trigger-conf form from `/dags/{id}/details` not yet built.
 - [x] 2026-06-15 — Deploy lifecycle (PRD §6.5.4): `AirflowClient.deploy_status(dag_id, filename)` composes `GET /importErrors` (basename-matched) + `GET /dags/{id}` (404 = not-yet) into a tri-state (`registered`/`failed`/`processing`); `list_import_errors`; `deploy/status` + `importerrors` routes. Frontend `deployStatus`/`listImportErrors` handlers; `StudioApp` runs the Writing→Waiting→(Registered|Failed|Processing) state machine with bounded backoff polling (2s→8s, 3-min timeout, cancel-on-unmount/dismiss); `DeployBanner` renders the tri-state with Unpause&trigger / traceback expander / Keep-waiting / Dismiss. Tests: client deploy_status (3 states), deploy/status + importerrors endpoints, deployStatus handler.
