@@ -7,8 +7,10 @@ import {
   IDagRunsRes,
   IDagRun,
   IDeployRes,
+  IDeployStatusRes,
   IGenerateRes,
   IHealth,
+  IImportErrorsRes,
   IOperatorDef,
   IValidateRes
 } from './interfaces';
@@ -89,6 +91,15 @@ export const validateDag = (ir: IAfdagIR): Promise<IApiRes<IValidateRes>> =>
 
 export const deployDag = (ir: IAfdagIR): Promise<IApiRes<IDeployRes>> =>
   POST<IDeployRes>('deploy', ir as unknown as Record<string, unknown>);
+
+export const deployStatus = (
+  dagId: string,
+  filename: string
+): Promise<IApiRes<IDeployStatusRes>> =>
+  GET<IDeployStatusRes>('deploy/status', { dag_id: dagId, filename });
+
+export const listImportErrors = (): Promise<IApiRes<IImportErrorsRes>> =>
+  GET<IImportErrorsRes>('importerrors');
 
 export const listDags = (limit = 100): Promise<IApiRes<IDagListRes>> =>
   GET<IDagListRes>('dags', { limit: String(limit) });

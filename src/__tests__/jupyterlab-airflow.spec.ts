@@ -1,6 +1,6 @@
 import { ServerConnection } from '@jupyterlab/services';
 
-import { deployDag, generateDag, listDags } from '../handler';
+import { deployDag, deployStatus, generateDag, listDags } from '../handler';
 import { createEmptyIR } from '../ir';
 import {
   getOperator,
@@ -168,6 +168,34 @@ describe('deployDag handler', () => {
       expect(res.data?.filename).toBe('demo.py');
       const init = makeRequest.mock.calls[0][1] as RequestInit;
       expect(init.method).toBe('POST');
+    } finally {
+      makeRequest.mockRestore();
+    }
+  });
+});
+
+// The deploy lifecycle polls deploy/status (GET with dag_id + filename).
+describe('deployStatus handler', () => {
+  it('GETs the tri-state with dag_id and filename in the query', async () => {
+    const makeRequest = jest
+      .spyOn(ServerConnection, 'makeRequest')
+      .mockResolvedValue({
+        ok: true,
+        statusText: 'OK',
+        text: async () =>
+          JSON.stringify({
+            data: { state: 'registered', dag: { dag_id: 'd', is_paused: true } }
+          })
+      } as unknown as Response);
+
+    try {
+      const res = await deployStatus('d', 'd.py');
+      expect(res.status).toBe('OK');
+      expect(res.data?.state).toBe('registered');
+      const url = makeRequest.mock.calls[0][0] as string;
+      expect(url).toContain('deploy/status');
+      expect(url).toContain('dag_id=d');
+      expect(url).toContain('filename=d.py');
     } finally {
       makeRequest.mockRestore();
     }

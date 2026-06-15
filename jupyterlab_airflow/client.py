@@ -155,12 +155,58 @@ class AirflowClient:
             params={"limit": limit, "order_by": "-logical_date"},
         )
 
+    def list_import_errors(self, limit: int = 100) -> dict:
+        """All current DAG-file import errors (the deploy recovery surface)."""
+        return self._request("GET", "/importErrors", params={"limit": limit})
+
+    def deploy_status(self, dag_id: str, filename: str) -> dict:
+        """One observation of a deploy's tri-state (PRD §6.5.4).
+
+        Returns ``{state, import_error?, dag?}`` where ``state`` is:
+          - ``failed``     — an import error references the deployed file;
+          - ``registered`` — the DAG appears with no import error;
+          - ``processing`` — not visible yet (Airflow hasn't re-parsed).
+        The frontend polls this with bounded backoff and a timeout.
+        """
+        errors = self.list_import_errors().get("import_errors", []) or []
+        match = next(
+            (
+                err
+                for err in errors
+                if _basename(err.get("filename")) == filename
+            ),
+            None,
+        )
+        if match is not None:
+            return {"state": "failed", "import_error": match}
+
+        try:
+            dag = self.get_dag(dag_id)
+        except AirflowError as err:
+            if err.status == 404:
+                return {"state": "processing"}
+            raise
+        return {
+            "state": "registered",
+            "dag": {
+                "dag_id": dag.get("dag_id", dag_id),
+                "is_paused": dag.get("is_paused", True),
+            },
+        }
+
 
 def _safe_json(resp):
     try:
         return resp.json()
     except ValueError:
         return resp.text
+
+
+def _basename(path) -> str:
+    """Last path segment of an import-error filename (handles / and \\)."""
+    if not path:
+        return ""
+    return str(path).replace("\\", "/").rsplit("/", 1)[-1]
 
 
 _CLIENT = None

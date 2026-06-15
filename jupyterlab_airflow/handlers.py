@@ -94,6 +94,27 @@ class DeployHandler(_AirflowHandler):
         await self.respond(deploy_dag, ir)
 
 
+class DeployStatusHandler(_AirflowHandler):
+    """One observation of a deploy's tri-state (registered/failed/processing).
+    The frontend polls this with bounded backoff after a successful write."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        dag_id = self.get_argument("dag_id")
+        filename = self.get_argument("filename")
+        await self.respond(get_client().deploy_status, dag_id, filename)
+
+
+class ImportErrorsHandler(_AirflowHandler):
+    @tornado.web.authenticated
+    async def get(self):
+        try:
+            limit = int(self.get_argument("limit", "100"))
+        except ValueError:
+            limit = 100
+        await self.respond(get_client().list_import_errors, limit=limit)
+
+
 class DagsHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def get(self):
@@ -161,6 +182,8 @@ def setup_handlers(web_app):
         (_url(base_url, "generate"), GenerateHandler),
         (_url(base_url, "validate"), ValidateHandler),
         (_url(base_url, "deploy"), DeployHandler),
+        (_url(base_url, "deploy/status"), DeployStatusHandler),
+        (_url(base_url, "importerrors"), ImportErrorsHandler),
         (_url(base_url, "dags"), DagsHandler),
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),

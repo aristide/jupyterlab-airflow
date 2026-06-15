@@ -66,3 +66,46 @@ def test_raises_airflow_error_on_bad_credentials(requests_mock):
     client = make_client()
     with pytest.raises(AirflowError):
         client.list_dags()
+
+
+def test_deploy_status_registered(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/importErrors", json={"import_errors": []}
+    )
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/my_dag",
+        json={"dag_id": "my_dag", "is_paused": True},
+    )
+
+    out = make_client().deploy_status("my_dag", "my_dag.py")
+    assert out["state"] == "registered"
+    assert out["dag"]["is_paused"] is True
+
+
+def test_deploy_status_failed_matches_filename(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/importErrors",
+        json={
+            "import_errors": [
+                {"filename": "/opt/airflow/dags/my_dag.py", "stack_trace": "boom"}
+            ]
+        },
+    )
+
+    out = make_client().deploy_status("my_dag", "my_dag.py")
+    assert out["state"] == "failed"
+    assert out["import_error"]["stack_trace"] == "boom"
+
+
+def test_deploy_status_processing_when_dag_absent(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/importErrors",
+        json={"import_errors": [{"filename": "/opt/airflow/dags/other.py"}]},
+    )
+    requests_mock.get(f"{BASE}{API_PREFIX}/dags/my_dag", status_code=404, json={})
+
+    out = make_client().deploy_status("my_dag", "my_dag.py")
+    assert out["state"] == "processing"

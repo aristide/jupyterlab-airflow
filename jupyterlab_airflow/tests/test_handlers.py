@@ -21,6 +21,15 @@ class FakeClient:
     def trigger_dag(self, dag_id, conf=None, logical_date=None):
         return {"dag_run_id": "manual__1", "dag_id": dag_id, "state": "queued"}
 
+    def deploy_status(self, dag_id, filename):
+        return {
+            "state": "registered",
+            "dag": {"dag_id": dag_id, "is_paused": True},
+        }
+
+    def list_import_errors(self, limit=100):
+        return {"import_errors": [], "total_entries": 0}
+
 
 @pytest.fixture(autouse=True)
 def fake_client(monkeypatch):
@@ -103,6 +112,25 @@ async def test_deploy_endpoint(jp_fetch, tmp_path, monkeypatch):
     assert data["deployed"] is True
     assert data["filename"] == "ep_dag.py"
     assert (tmp_path / "ep_dag.py").exists()
+
+
+async def test_deploy_status_endpoint(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "deploy",
+        "status",
+        params={"dag_id": "my_dag", "filename": "my_dag.py"},
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["state"] == "registered"
+
+
+async def test_import_errors_endpoint(jp_fetch):
+    response = await jp_fetch("jupyterlab-airflow", "importerrors")
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["total_entries"] == 0
 
 
 async def test_trigger_endpoint(jp_fetch):

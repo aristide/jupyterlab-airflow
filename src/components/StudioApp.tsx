@@ -26,7 +26,7 @@ import {
   hasCycle,
   irToFlow
 } from '../graph';
-import { deployDag } from '../handler';
+import { deployDag, deployStatus, setDagPaused, triggerDag } from '../handler';
 import { IOperatorDef } from '../interfaces';
 import { IAfdagIR, createEmptyIR, dagIdFromPath, stringifyIR } from '../ir';
 import { AfdagModel } from '../model';
@@ -38,8 +38,18 @@ import {
 } from '../operators';
 import { IStudioServices } from '../services';
 import { AfdagNode } from './AfdagNode';
+import { DeployBanner, IDeployState } from './DeployBanner';
 import { Inspector } from './Inspector';
 import { Palette } from './Palette';
+
+// Deploy poll cadence: a few minutes total, backing off from 2s to 8s. Airflow
+// re-parses on min_file_process_interval (~30s) so sub-second polling is wasteful.
+const POLL_TIMEOUT_MS = 180000;
+const POLL_START_MS = 2000;
+const POLL_MAX_MS = 8000;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => window.setTimeout(resolve, ms));
 
 // Custom node types must be a stable, module-scope object or ReactFlow
 // re-renders endlessly.
@@ -68,10 +78,10 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   );
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
-  const [deploy, setDeploy] = React.useState<{
-    status: 'idle' | 'busy' | 'ok' | 'error';
-    message: string;
-  }>({ status: 'idle', message: '' });
+  const [deploy, setDeploy] = React.useState<IDeployState>({
+    phase: 'idle',
+    message: ''
+  });
 
   const baseRef = React.useRef<IAfdagIR>(createEmptyIR(''));
   const lastWritten = React.useRef<string>('');
@@ -79,6 +89,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const rfRef = React.useRef<ReactFlowInstance<AfdagFlowNode, Edge> | null>(
     null
   );
+  // Cancellation token for the in-flight deploy poll loop.
+  const pollRef = React.useRef<{ cancelled: boolean } | null>(null);
 
   // Fetch the operator registry (GET operators) once at activation. The palette
   // and node forms are generated from it; getOperator/validateNodeParams read
@@ -272,23 +284,129 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     return messages;
   }, [nodes, edges]);
 
-  // Deploy: server validates (full pipeline) then atomically writes the .py.
+  // Stop any in-flight poll loop (dismiss / unmount / re-deploy).
+  const cancelPoll = React.useCallback((): void => {
+    if (pollRef.current) {
+      pollRef.current.cancelled = true;
+      pollRef.current = null;
+    }
+  }, []);
+
+  // Phase 2-3: poll deploy/status with bounded backoff until the DAG registers,
+  // fails to import, or we time out (→ "still processing").
+  const pollLifecycle = React.useCallback(
+    async (dagId: string, filename: string): Promise<void> => {
+      const token = { cancelled: false };
+      pollRef.current = token;
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      let delay = POLL_START_MS;
+
+      while (!token.cancelled && Date.now() < deadline) {
+        await sleep(delay);
+        if (token.cancelled) {
+          return;
+        }
+        const res = await deployStatus(dagId, filename);
+        if (token.cancelled) {
+          return;
+        }
+        if (res.status === 'OK' && res.data) {
+          if (res.data.state === 'registered') {
+            setDeploy({
+              phase: 'registered',
+              dagId,
+              filename,
+              isPaused: res.data.dag?.is_paused ?? true,
+              message: `Registered ${dagId} (paused).`
+            });
+            return;
+          }
+          if (res.data.state === 'failed') {
+            setDeploy({
+              phase: 'failed',
+              dagId,
+              filename,
+              importError: res.data.import_error,
+              message: `${filename} failed to import.`
+            });
+            return;
+          }
+        }
+        delay = Math.min(delay + 1000, POLL_MAX_MS);
+      }
+
+      if (!token.cancelled) {
+        setDeploy({
+          phase: 'processing',
+          dagId,
+          filename,
+          message:
+            'Still processing — Airflow has not picked up the file yet. ' +
+            'This can take a few minutes.'
+        });
+      }
+    },
+    []
+  );
+
+  // Phase 1: validate + atomic write, then enter the polling lifecycle.
   const onDeploy = React.useCallback(async (): Promise<void> => {
-    setDeploy({ status: 'busy', message: 'Deploying…' });
+    cancelPoll();
+    setDeploy({ phase: 'writing', message: 'Writing the DAG file…' });
     const res = await deployDag(currentIR);
-    if (res.status === 'OK' && res.data?.deployed) {
-      setDeploy({
-        status: 'ok',
-        message: `Deployed ${res.data.filename}${
-          res.data.warnings.length ? ' (Airflow will validate on import)' : ''
-        }`
-      });
-    } else {
+    if (res.status !== 'OK' || !res.data?.deployed) {
       const detail =
         res.data?.errors?.join('; ') || res.error || 'Deploy failed';
-      setDeploy({ status: 'error', message: detail });
+      setDeploy({ phase: 'error', message: detail });
+      return;
     }
-  }, [currentIR]);
+    const { dag_id: dagId, filename = '' } = res.data;
+    setDeploy({
+      phase: 'waiting',
+      dagId,
+      filename,
+      message: 'Waiting for Airflow to pick it up… (up to a few minutes)'
+    });
+    void pollLifecycle(dagId, filename);
+  }, [currentIR, cancelPoll, pollLifecycle]);
+
+  const onDismissDeploy = React.useCallback((): void => {
+    cancelPoll();
+    setDeploy({ phase: 'idle', message: '' });
+  }, [cancelPoll]);
+
+  const onKeepWaiting = React.useCallback((): void => {
+    if (deploy.dagId && deploy.filename) {
+      setDeploy({
+        phase: 'waiting',
+        dagId: deploy.dagId,
+        filename: deploy.filename,
+        message: 'Waiting for Airflow to pick it up…'
+      });
+      void pollLifecycle(deploy.dagId, deploy.filename);
+    }
+  }, [deploy.dagId, deploy.filename, pollLifecycle]);
+
+  const onUnpauseTrigger = React.useCallback(async (): Promise<void> => {
+    const dagId = deploy.dagId;
+    if (!dagId) {
+      return;
+    }
+    await setDagPaused(dagId, false);
+    const run = await triggerDag(dagId);
+    setDeploy(prev => ({
+      ...prev,
+      isPaused: false,
+      triggered: true,
+      message:
+        run.status === 'OK'
+          ? `Unpaused and triggered ${dagId}.`
+          : `Unpaused ${dagId}, but the trigger failed: ${run.error ?? ''}`
+    }));
+  }, [deploy.dagId]);
+
+  // Cancel any poll loop if the editor unmounts.
+  React.useEffect(() => cancelPoll, [cancelPoll]);
 
   if (opsError) {
     return (
@@ -321,20 +439,6 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
             : '✓ no errors'}
         </span>
-        {deploy.status !== 'idle' && (
-          <span
-            className={
-              deploy.status === 'error'
-                ? 'jp-afdag-deploy-status jp-mod-error'
-                : deploy.status === 'ok'
-                  ? 'jp-afdag-deploy-status jp-mod-ok'
-                  : 'jp-afdag-deploy-status'
-            }
-            title={deploy.message}
-          >
-            {deploy.message}
-          </span>
-        )}
         <span className="jp-afdag-spacer" />
         <button
           className="jp-afdag-btn"
@@ -351,13 +455,24 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
               : 'Validate and deploy the DAG to Airflow'
           }
           disabled={
-            deploy.status === 'busy' || errorCount > 0 || nodes.length === 0
+            deploy.phase === 'writing' ||
+            deploy.phase === 'waiting' ||
+            errorCount > 0 ||
+            nodes.length === 0
           }
           onClick={() => void onDeploy()}
         >
-          {deploy.status === 'busy' ? 'Deploying…' : 'Deploy'}
+          {deploy.phase === 'writing' || deploy.phase === 'waiting'
+            ? 'Deploying…'
+            : 'Deploy'}
         </button>
       </div>
+      <DeployBanner
+        state={deploy}
+        onDismiss={onDismissDeploy}
+        onUnpauseTrigger={() => void onUnpauseTrigger()}
+        onKeepWaiting={onKeepWaiting}
+      />
       <div className="jp-afdag-body">
         <Palette operators={operators} onAdd={addNode} />
         <div className="jp-afdag-canvas">

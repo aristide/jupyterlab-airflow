@@ -105,3 +105,24 @@ export interface IDeployRes {
   errors: string[];
   dagbag: IDagBagResult;
 }
+
+// A DAG-file import error from `GET /api/v2/importErrors`.
+export interface IImportError {
+  import_error_id?: number;
+  timestamp?: string;
+  filename?: string;
+  bundle_name?: string;
+  stack_trace?: string;
+}
+
+export interface IImportErrorsRes {
+  import_errors: IImportError[];
+  total_entries: number;
+}
+
+// One observation of a deploy's tri-state (PRD §6.5.4).
+export interface IDeployStatusRes {
+  state: 'registered' | 'failed' | 'processing';
+  import_error?: IImportError;
+  dag?: { dag_id: string; is_paused: boolean };
+}
