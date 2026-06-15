@@ -93,6 +93,8 @@ export interface IOperatorParam {
   widget?: OperatorWidget;
   type?: string;
   default?: unknown;
+  /** Plain-language contextual help (inline under the field + in the INFO tab). */
+  help?: string;
 }
 
 export interface IOperatorDef {
@@ -103,6 +105,12 @@ export interface IOperatorDef {
   params: IOperatorParam[];
   taskflow?: 'native' | 'operator';
   handles?: { in?: boolean; out?: boolean };
+  // INFO-tab documentation fields (data-only; see the operator registry YAML).
+  description?: string;
+  docsUrl?: string;
+  example?: string;
+  provider?: string;
+  airflowMinVersion?: string;
 }
 
 // Result of `POST generate` (IR → Airflow 3.x Python). Validation failures come

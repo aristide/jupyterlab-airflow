@@ -44,6 +44,19 @@ export interface IAfdagEdge {
   target: string;
 }
 
+/**
+ * An annotation note (PRD §6.1.7): a free-text card on the canvas for team
+ * documentation. Deliberately stored OUTSIDE `nodes[]`/`edges[]` so the
+ * executable task graph that codegen + validation read is untouched — a note
+ * never becomes a task, an edge, or a cycle/required-field error.
+ */
+export interface IAfdagNote {
+  id: string;
+  text: string;
+  position: { x: number; y: number };
+  size?: { width: number; height: number };
+}
+
 export interface IAfdagIR {
   schema_version: string;
   provenance: IAfdagProvenance;
@@ -51,6 +64,8 @@ export interface IAfdagIR {
   dag: IAfdagDagConfig;
   nodes: IAfdagNode[];
   edges: IAfdagEdge[];
+  /** Annotation cards (optional; absent on pre-notes `.afdag` files). */
+  notes?: IAfdagNote[];
 }
 
 export const AFDAG_SCHEMA_VERSION = '1.0';

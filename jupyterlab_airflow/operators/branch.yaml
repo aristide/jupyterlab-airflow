@@ -3,13 +3,24 @@ label: Branch operator
 category: Flow Control
 provider: apache-airflow-providers-standard
 airflow_min_version: '3.0'
+description: >-
+  Chooses which downstream task(s) to run next from your Python logic. Return a
+  task_id (or a list of them) to follow; the branches you do not return are
+  skipped. Use it for conditional workflows — for example a full reload on
+  Sundays and an incremental load on other days.
+docs_url: https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html#branching
+example: |
+  def choose():
+      from datetime import date
+      return "full_reload" if date.today().weekday() == 6 else "incremental"
 import: 'from airflow.providers.standard.operators.python import BranchPythonOperator'
 import_taskflow: 'from airflow.sdk import task'
 handles: { in: true, out: true }
 taskflow: native
 task_id_prefix: branch
 params:
-  - { name: code, label: 'Branch code (return a task_id)', type: string, required: true, widget: code }
+  - { name: code, label: 'Branch code (return a task_id)', type: string, required: true, widget: code,
+      help: 'Python that returns the task_id (or list of task_ids) to run next. The returned tasks run; their sibling tasks are skipped.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_taskflow: |
   @task.branch(task_id={{ task_id | pyrepr }})

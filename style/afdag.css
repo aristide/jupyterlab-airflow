@@ -98,6 +98,19 @@
   background: var(--jp-layout-color2);
 }
 
+.jp-afdag-btn-danger {
+  background: var(--jp-error-color1, #e63558);
+  border-color: var(--jp-error-color1, #e63558);
+}
+
+.jp-afdag-btn-danger:hover {
+  background: var(--jp-error-color0, #b3203b);
+}
+
+.jp-afdag-node-delete-btn {
+  margin-top: 12px;
+}
+
 /* Deploy lifecycle banner */
 .jp-afdag-deploybanner {
   display: flex;
@@ -179,6 +192,14 @@
   border-right: 1px solid var(--jp-border-color2);
   background: var(--jp-layout-color1);
   padding: 8px;
+  transition: flex-basis 0.12s ease;
+}
+
+.jp-afdag-palette-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
 }
 
 .jp-afdag-palette-title {
@@ -187,7 +208,45 @@
   letter-spacing: 0.5px;
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
-  margin-bottom: 6px;
+}
+
+/* Collapsed side-panel rail (palette + inspector) */
+.jp-afdag-palette.jp-mod-collapsed,
+.jp-afdag-inspector.jp-mod-collapsed {
+  flex: 0 0 30px;
+  min-width: 30px;
+  overflow: hidden;
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.jp-afdag-collapse-btn {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jp-afdag-collapse-btn:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-afdag-rail-label {
+  writing-mode: vertical-rl;
+  font-size: var(--jp-ui-font-size0);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--jp-ui-font-color3);
+  user-select: none;
 }
 
 .jp-afdag-search {
@@ -234,6 +293,40 @@
 
 .jp-afdag-canvas .react-flow {
   background: var(--jp-layout-color0);
+}
+
+/* Dependency edges (rounded smoothstep arrows), themed for light/dark */
+.jp-afdag-canvas .react-flow__edge-path {
+  stroke: var(--jp-border-color0);
+  stroke-width: 1.5;
+}
+
+.jp-afdag-canvas .react-flow__edge:hover .react-flow__edge-path,
+.jp-afdag-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--jp-brand-color1);
+}
+
+/* On-edge delete (×) button, rendered at the edge midpoint when selected */
+.jp-afdag-edge-del {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 50%;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: all;
+  box-shadow: var(--jp-elevation-z1);
+}
+
+.jp-afdag-edge-del:hover {
+  color: #fff;
+  background: var(--jp-error-color1, #e63558);
+  border-color: var(--jp-error-color1, #e63558);
 }
 
 .jp-afdag-empty {
@@ -286,7 +379,7 @@
 .jp-afdag-node-flag {
   position: absolute;
   top: 4px;
-  right: 6px;
+  right: 22px;
   font-weight: 700;
 }
 
@@ -298,6 +391,36 @@
   color: var(--jp-error-color1, #e63558);
 }
 
+/* Node delete (×) — revealed on hover/focus/selection (icon, themed) */
+.jp-afdag-node-del {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--jp-ui-font-color3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.jp-afdag-node-del:hover {
+  color: #fff;
+  background: var(--jp-error-color1, #e63558);
+}
+
+.jp-afdag-node:hover .jp-afdag-node-del,
+.jp-afdag-node:focus-within .jp-afdag-node-del,
+.jp-afdag-node.jp-mod-selected .jp-afdag-node-del {
+  opacity: 1;
+}
+
 /* Inspector */
 .jp-afdag-inspector {
   flex: 0 0 300px;
@@ -306,12 +429,21 @@
   min-height: 0;
   border-left: 1px solid var(--jp-border-color2);
   background: var(--jp-layout-color1);
+  transition: flex-basis 0.12s ease;
+}
+
+.jp-afdag-inspector-head {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--jp-border-color2);
 }
 
 .jp-afdag-tabs {
   display: flex;
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--jp-border-color2);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .jp-afdag-tab {
@@ -523,4 +655,186 @@
 .jp-afdag-hint {
   color: var(--jp-ui-font-color3);
   font-size: var(--jp-ui-font-size0);
+}
+
+/* INFO tab (learn-Airflow surface) */
+.jp-afdag-info {
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.45;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-afdag-info-cat {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--jp-ui-font-color3);
+}
+
+.jp-afdag-info-title {
+  margin: 2px 0 6px;
+  font-size: var(--jp-ui-font-size2);
+  font-weight: 600;
+}
+
+.jp-afdag-info-desc {
+  margin: 0 0 10px;
+}
+
+.jp-afdag-info-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-afdag-info-section {
+  margin-bottom: 12px;
+}
+
+.jp-afdag-info-heading {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  border-bottom: 1px solid var(--jp-border-color2);
+  padding-bottom: 3px;
+  margin-bottom: 6px;
+}
+
+.jp-afdag-info-params {
+  margin: 0;
+}
+
+.jp-afdag-info-params dt {
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-brand-color1);
+}
+
+.jp-afdag-info-params dd {
+  margin: 0 0 8px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-info-example {
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background: var(--jp-layout-color0);
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  white-space: pre-wrap;
+  color: var(--jp-content-font-color1);
+}
+
+.jp-afdag-info-docs {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--jp-brand-color1);
+  text-decoration: none;
+}
+
+.jp-afdag-info-docs:hover {
+  text-decoration: underline;
+}
+
+/* Annotation note cards (PRD §6.1.7) */
+.jp-afdag-addnote-btn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  border: 1px dashed var(--jp-border-color1);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+}
+
+.jp-afdag-addnote-btn:hover {
+  border-color: var(--jp-brand-color1);
+  background: var(--jp-layout-color2);
+}
+
+.jp-afdag-note {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 140px;
+  min-height: 70px;
+  overflow: hidden;
+  border: 1px solid var(--jp-warn-color1, #c9a227);
+  border-radius: 4px;
+  background: var(--jp-warn-color3, #fdf6c9);
+  box-shadow: var(--jp-elevation-z1);
+}
+
+.jp-afdag-note-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  height: 16px;
+  padding: 0 2px 0 4px;
+  color: var(--jp-ui-font-color3);
+  cursor: grab;
+}
+
+.jp-afdag-note-grip {
+  font-size: 10px;
+  letter-spacing: -2px;
+  user-select: none;
+}
+
+.jp-afdag-note-text {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  width: 100%;
+  padding: 0 6px 6px;
+  border: none;
+  background: transparent;
+  outline: none;
+  resize: none;
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.4;
+}
+
+.jp-afdag-note-text::placeholder {
+  color: var(--jp-ui-font-color3);
+}
+
+.jp-afdag-note-del {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.jp-afdag-note-del:hover {
+  color: #fff;
+  background: var(--jp-error-color1, #e63558);
+}
+
+.jp-afdag-note:hover .jp-afdag-note-del {
+  opacity: 1;
 }

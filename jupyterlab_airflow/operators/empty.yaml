@@ -3,6 +3,11 @@ label: Empty operator
 category: Flow Control
 provider: apache-airflow-providers-standard
 airflow_min_version: '3.0'
+description: >-
+  A do-nothing placeholder task that always succeeds instantly. Use it to join
+  or fan out dependencies, mark a clear start or end point, or stand in for a
+  step you have not built yet.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/empty.html
 import: 'from airflow.providers.standard.operators.empty import EmptyOperator'
 handles: { in: true, out: true }
 taskflow: operator            # no TaskFlow-native form — render as an operator in both modes

@@ -5,14 +5,21 @@ import { IOperatorDef } from '../operators';
 export interface IPaletteProps {
   operators: IOperatorDef[];
   onAdd: (id: string) => void;
+  /** Add an annotation note card to the canvas. */
+  onAddNote: () => void;
+  /** Whether the panel is collapsed to a rail (canvas reclaims the width). */
+  collapsed: boolean;
+  /** Toggle the collapsed state. */
+  onToggle: () => void;
 }
 
 /**
  * The searchable, category-grouped operator palette. Items are buttons
  * (click / keyboard to add a node) rather than drag-only, for accessibility.
+ * Collapses to a thin rail with an expand affordance to give the canvas room.
  */
 export function Palette(props: IPaletteProps): JSX.Element {
-  const { operators, onAdd } = props;
+  const { operators, onAdd, onAddNote, collapsed, onToggle } = props;
   const [query, setQuery] = React.useState('');
 
   const groups = React.useMemo(() => {
@@ -25,15 +32,50 @@ export function Palette(props: IPaletteProps): JSX.Element {
     return Array.from(map.entries());
   }, [operators, query]);
 
+  if (collapsed) {
+    return (
+      <div className="jp-afdag-palette jp-mod-collapsed">
+        <button
+          className="jp-afdag-collapse-btn"
+          title="Expand operators"
+          aria-label="Expand operators panel"
+          aria-expanded={false}
+          onClick={onToggle}
+        >
+          »
+        </button>
+        <div className="jp-afdag-rail-label">Operators</div>
+      </div>
+    );
+  }
+
   return (
     <div className="jp-afdag-palette">
-      <div className="jp-afdag-palette-title">Operators</div>
+      <div className="jp-afdag-palette-header">
+        <span className="jp-afdag-palette-title">Operators</span>
+        <button
+          className="jp-afdag-collapse-btn"
+          title="Collapse operators"
+          aria-label="Collapse operators panel"
+          aria-expanded={true}
+          onClick={onToggle}
+        >
+          «
+        </button>
+      </div>
       <input
         className="jp-afdag-search"
         placeholder="Search…"
         value={query}
         onChange={event => setQuery(event.target.value)}
       />
+      <button
+        className="jp-afdag-addnote-btn"
+        title="Add a note card to the canvas"
+        onClick={onAddNote}
+      >
+        + Add note
+      </button>
       {groups.map(([category, items]) => (
         <div key={category} className="jp-afdag-palette-group">
           <div className="jp-afdag-palette-cat">{category}</div>

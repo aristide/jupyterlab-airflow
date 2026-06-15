@@ -3,6 +3,15 @@ label: Python @task
 category: Python/Bash
 provider: apache-airflow-providers-standard
 airflow_min_version: '3.0'
+description: >-
+  Runs your own Python function as a task (an Airflow @task). Reach for it for
+  transforms, API calls, or any logic you would write in Python. The value you
+  return is passed to downstream tasks via XCom.
+docs_url: https://airflow.apache.org/docs/apache-airflow/stable/tutorial/taskflow.html
+example: |
+  def transform():
+      rows = [1, 2, 3]
+      return sum(rows)
 import_taskflow: 'from airflow.sdk import task'
 import: 'from airflow.providers.standard.operators.python import PythonOperator'
 handles: { in: true, out: true }
@@ -11,7 +20,8 @@ task_id_prefix: task
 # A code node: its single param is the user's Python body, emitted verbatim
 # INSIDE a @task function (the only place inline user code is allowed).
 params:
-  - { name: code, label: 'Python code', type: string, required: true, widget: code }
+  - { name: code, label: 'Python code', type: string, required: true, widget: code,
+      help: 'The body of your task function. Write normal Python and return a value to pass it to downstream tasks.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_taskflow: |
   @task(task_id={{ task_id | pyrepr }})

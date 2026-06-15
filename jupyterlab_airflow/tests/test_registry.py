@@ -36,10 +36,23 @@ def test_client_view_hides_codegen_fields():
     # camelCase key for the TS interface.
     assert bash["taskIdPrefix"] == "bash"
     # Codegen-only fields are not shipped to the browser.
-    for hidden in ("import", "template_traditional", "template_taskflow", "provider"):
+    for hidden in ("import", "import_taskflow", "template_traditional", "template_taskflow"):
         assert hidden not in bash
     required = {p["name"] for p in bash["params"] if p["required"]}
     assert required == {"bash_command"}
+
+
+def test_client_view_ships_doc_fields_for_info_tab():
+    bash = next(op for op in registry.client_view() if op["id"] == "bash")
+    # Operator-level learning fields, camelCased for the TS IOperatorDef.
+    assert bash["description"]
+    assert bash["docsUrl"].startswith("http")
+    assert bash["example"]
+    assert bash["provider"] == "apache-airflow-providers-standard"
+    assert bash["airflowMinVersion"] == "3.0"
+    # Per-param contextual help reaches the client.
+    cmd = next(p for p in bash["params"] if p["name"] == "bash_command")
+    assert cmd["help"]
 
 
 def test_caches_until_files_change():

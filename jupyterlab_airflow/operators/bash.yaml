@@ -3,15 +3,26 @@ label: Bash operator
 category: Python/Bash
 provider: apache-airflow-providers-standard
 airflow_min_version: '3.0'
+description: >-
+  Runs a shell command on an Airflow worker. Reach for it to run scripts, CLI
+  tools, or quick file and data operations. Pass secrets through Airflow
+  Connections or Variables rather than typing them into these fields.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/bash.html
+example: |
+  Bash Command:  python /opt/scripts/export.py --date {{ ds }}
+  Working dir:   /opt/scripts
 import: 'from airflow.providers.standard.operators.bash import BashOperator'
 import_taskflow: 'from airflow.sdk import task'
 handles: { in: true, out: true }
 taskflow: native
 task_id_prefix: bash
 params:
-  - { name: bash_command, label: 'Bash Command', type: string, required: true, widget: textarea }
-  - { name: env, label: 'Environment Vars', type: object, required: false, widget: json, default: {} }
-  - { name: cwd, label: 'Working dir', type: string, required: false, widget: text }
+  - { name: bash_command, label: 'Bash Command', type: string, required: true, widget: textarea,
+      help: 'The shell command to run, e.g. python etl.py --date 2026-01-01. Airflow Jinja templating such as {{ ds }} (the run date) is supported.' }
+  - { name: env, label: 'Environment Vars', type: object, required: false, widget: json, default: {},
+      help: 'A JSON object of NAME to value pairs exposed to the command as environment variables.' }
+  - { name: cwd, label: 'Working dir', type: string, required: false, widget: text,
+      help: 'Directory to run the command in. Leave blank to use a temporary directory.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
   {{ task_id }} = BashOperator(

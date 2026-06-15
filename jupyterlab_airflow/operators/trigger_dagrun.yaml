@@ -3,12 +3,19 @@ label: Trigger DAG run
 category: Flow Control
 provider: apache-airflow-providers-standard
 airflow_min_version: '3.0'
+description: >-
+  Kicks off a run of another DAG from this one. Use it to chain DAGs — for
+  example, have an ingestion DAG trigger a reporting DAG when it finishes.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/trigger_dagrun.html
+example: |
+  DAG to trigger:  daily_report
 import: 'from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator'
 handles: { in: true, out: true }
 taskflow: operator            # no TaskFlow-native form — render as an operator in both modes
 task_id_prefix: trigger
 params:
-  - { name: trigger_dag_id, label: 'DAG to trigger', type: string, required: true, widget: text }
+  - { name: trigger_dag_id, label: 'DAG to trigger', type: string, required: true, widget: text,
+      help: 'The dag_id of the DAG to start. It must already exist in Airflow.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
   {{ task_id }} = TriggerDagRunOperator(

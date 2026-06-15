@@ -24,9 +24,21 @@ import yaml
 
 BUNDLED_DIR = Path(__file__).parent / "operators"
 
-# The param fields a client needs for the palette + node form. Import lines and
-# code templates stay server-side (they only matter to codegen).
-_CLIENT_PARAM_FIELDS = ("name", "label", "type", "default", "widget", "required")
+# The param fields a client needs for the palette + node form (incl. `help`, the
+# inline contextual help / INFO-tab text). Import lines and code templates stay
+# server-side (they only matter to codegen).
+_CLIENT_PARAM_FIELDS = ("name", "label", "type", "default", "widget", "required", "help")
+
+# Operator-level documentation fields shipped to the client for the INFO tab.
+# Data-only (never executed); mapped to camelCase TS keys. Codegen-only fields
+# (imports, code templates) are still withheld.
+_CLIENT_DOC_FIELDS = (
+    ("description", "description"),
+    ("docs_url", "docsUrl"),
+    ("example", "example"),
+    ("provider", "provider"),
+    ("airflow_min_version", "airflowMinVersion"),
+)
 
 # Cache: signature (paths + mtimes) -> parsed operator list. A change to any
 # file's mtime invalidates it, giving hot-reload without a restart.
@@ -106,23 +118,27 @@ def _client_param(param: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def client_view() -> List[Dict[str, Any]]:
-    """The registry shaped for the frontend palette + node form.
+    """The registry shaped for the frontend palette + node form + INFO tab.
 
     Returns only what the browser needs; codegen-only fields (imports, code
-    templates, provider) stay on the server. Keys are camelCased to match the
-    TypeScript ``IOperatorDef`` interface.
+    templates) stay on the server. Operator docs fields (``description``,
+    ``docs_url``, ``example``, ``provider``, ``airflow_min_version``) and per-param
+    ``help`` are shipped for the INFO tab and inline field help — data-only, never
+    executed. Keys are camelCased to match the TypeScript ``IOperatorDef``.
     """
     view: List[Dict[str, Any]] = []
     for op in load_registry():
-        view.append(
-            {
-                "id": op["id"],
-                "label": op.get("label", op["id"]),
-                "category": op.get("category", "Other"),
-                "taskIdPrefix": op.get("task_id_prefix", op["id"]),
-                "taskflow": op.get("taskflow", "native"),
-                "handles": op.get("handles", {"in": True, "out": True}),
-                "params": [_client_param(p) for p in op.get("params", [])],
-            }
-        )
+        entry: Dict[str, Any] = {
+            "id": op["id"],
+            "label": op.get("label", op["id"]),
+            "category": op.get("category", "Other"),
+            "taskIdPrefix": op.get("task_id_prefix", op["id"]),
+            "taskflow": op.get("taskflow", "native"),
+            "handles": op.get("handles", {"in": True, "out": True}),
+            "params": [_client_param(p) for p in op.get("params", [])],
+        }
+        for src, dst in _CLIENT_DOC_FIELDS:
+            if op.get(src) is not None:
+                entry[dst] = op[src]
+        view.append(entry)
     return view

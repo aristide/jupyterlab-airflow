@@ -30,7 +30,12 @@ function isJsonParam(param: IOperatorParam): boolean {
 }
 
 function paramSchema(param: IOperatorParam): RJSFSchema {
+  // The registry `help` becomes the JSON-Schema `description`, which RJSF renders
+  // as inline field help (`.field-description`) — contextual learning per field.
   const base: RJSFSchema = { title: param.label };
+  if (param.help) {
+    base.description = param.help;
+  }
   if (isJsonParam(param)) {
     return { ...base, type: 'string' }; // edited as JSON text
   }
@@ -139,6 +144,22 @@ function parseJsonOr(value: unknown, fallback: unknown): unknown {
   }
 }
 
+/**
+ * Parse the comma-separated `tags` text field into a trimmed, de-duplicated
+ * list (an empty input yields `[]`). Tags are edited as plain text because
+ * RJSF's default array widget renders poorly without a Bootstrap theme.
+ */
+function parseTags(value: unknown): string[] {
+  const seen = new Set<string>();
+  for (const tag of String(value ?? '').split(',')) {
+    const trimmed = tag.trim();
+    if (trimmed) {
+      seen.add(trimmed);
+    }
+  }
+  return Array.from(seen);
+}
+
 // --------------------------------------------------------------------------- //
 // DAG form (fixed schema)
 // --------------------------------------------------------------------------- //
@@ -158,7 +179,11 @@ export function dagForm(): IFormSpec {
         title: 'retry_delay (seconds)',
         minimum: 0
       },
-      tags: { type: 'array', title: 'tags', items: { type: 'string' } },
+      tags: {
+        type: 'string',
+        title: 'tags',
+        description: 'Comma-separated, e.g. studio, etl'
+      },
       owner: { type: 'string', title: 'owner' },
       params: { type: 'string', title: 'params (JSON)' },
       default_args: { type: 'string', title: 'default_args (JSON)' }
@@ -180,6 +205,7 @@ export function dagForm(): IFormSpec {
     ],
     description: { 'ui:widget': 'textarea' },
     schedule: { 'ui:widget': 'schedule' },
+    tags: { 'ui:placeholder': 'studio, etl' },
     params: { 'ui:widget': 'json' },
     default_args: { 'ui:widget': 'json' }
   };
@@ -195,7 +221,7 @@ export function dagToFormData(dag: IAfdagDagConfig): Record<string, unknown> {
     catchup: dag.catchup ?? false,
     retries: dag.retries ?? 0,
     retry_delay_seconds: dag.retry_delay_seconds ?? 300,
-    tags: dag.tags ?? [],
+    tags: (dag.tags ?? []).join(', '),
     owner: dag.owner ?? '',
     params: dag.params ? JSON.stringify(dag.params, null, 2) : '',
     default_args: dag.default_args
@@ -216,7 +242,7 @@ export function formDataToDag(
     catchup: Boolean(formData.catchup),
     retries: Number(formData.retries ?? 0),
     retry_delay_seconds: Number(formData.retry_delay_seconds ?? 300),
-    tags: Array.isArray(formData.tags) ? (formData.tags as string[]) : [],
+    tags: parseTags(formData.tags),
     owner: String(formData.owner ?? ''),
     params: parseJsonOr(formData.params, {}) as Record<string, unknown>,
     default_args: parseJsonOr(formData.default_args, {}) as Record<

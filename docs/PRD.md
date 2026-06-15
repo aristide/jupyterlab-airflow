@@ -17,7 +17,7 @@
 
 Airflow Studio turns Airflow DAG authoring into a drag‑and‑drop experience inside JupyterLab, while keeping the produced artifact a **real, version‑controllable `.py` DAG that Airflow runs unchanged**. It has two surfaces in one extension:
 
-1. **Studio editor** — a main‑area document (a `.afdag` JSON graph) rendered as a ReactFlow canvas with an operator palette, a tabbed inspector (DAG / NODE / CODE / SAVED), live validation, a generated‑Python preview, and one‑click **Deploy**.
+1. **Studio editor** — a main‑area document (a `.afdag` JSON graph) rendered as a ReactFlow canvas with an operator palette, a tabbed inspector (DAG / NODE / **INFO** / CODE / SAVED), live validation, a generated‑Python preview, and one‑click **Deploy**. The canvas supports full graph editing — add, **delete**, connect, and **reconnect** nodes — with **collapsible side panels** so the canvas can take the whole width, and an **INFO** tab plus inline field help that double the editor as a way to *learn* Airflow.
 2. **Manager** — the existing left sidebar, extended into a full operations panel (list, pause, trigger, runs, **task instances, logs, import errors, retry/clear, delete**).
 
 **Four scope decisions are locked** for this release:
@@ -85,11 +85,12 @@ JupyterLab
       ┌───────────────────────────────────────────────────────────────────────────┐
       │ TopBar: logo · dag_id · N nodes · ✕ N errors · [Traditional|TaskFlow]       │
       │         · Undo · Reset · Save · Generate DAG · Deploy                       │
-      ├───────────┬───────────────────────────────────────────┬───────────────────┤
-      │ OPERATORS │  ReactFlow canvas (nodes, edges,           │ Inspector tabs:   │
-      │ (palette, │   minimap, zoom controls, empty‑state)     │ DAG · NODE ·      │
-      │  searchable, categorized) │                            │ CODE · SAVED      │
-      └───────────┴───────────────────────────────────────────┴───────────────────┘
+      ├──────────◂┬───────────────────────────────────────────┬▸──────────────────┤
+      │ OPERATORS │  ReactFlow canvas (nodes, rounded‑corner   │ Inspector tabs:   │
+      │ (palette, │   arrow edges, note cards, minimap, zoom,  │ DAG · NODE · INFO │
+      │  searchable, categorized) │   empty‑state)             │ · CODE · SAVED    │
+      └──────────◂┴───────────────────────────────────────────┴▸──────────────────┘
+      (◂ ▸ = each side panel collapses to a thin rail to give the canvas more room)
 ```
 
 Both surfaces talk to the **same Jupyter server extension** (namespace `jupyterlab-airflow`), which (a) proxies Airflow `/api/v2` (REST, for the manager + deploy verification) and (b) owns code generation + validation + the filesystem deploy (the labextension cannot reach Airflow's dags volume).
@@ -99,8 +100,8 @@ Both surfaces talk to the **same Jupyter server extension** (namespace `jupyterl
 The locked decisions are honored; the phasing applies the pre‑mortem's "ruthless MVP" guidance so the no‑code core is proven before the expensive long tail.
 
 ### MVP — v0.1 "vertical slice that actually runs"
-- **Editor:** ReactFlow canvas, searchable/categorized palette, four inspector tabs, top‑bar with live error badge, empty‑state, minimap + zoom, save/reopen via `.afdag`.
-- **Operators (core set):** `Empty`, `Bash`, `Python`/Custom `@task` (the code node — decision #3), `Branch` (BranchPython), `TriggerDagRun`. (~5–6 nodes covering the common shapes: linear, fan‑in/out, branch.)
+- **Editor:** ReactFlow canvas with **full graph editing** (add / **delete** / connect / **reconnect** nodes and edges), **rounded‑corner arrow edges**, searchable/categorized palette, **five inspector tabs** (DAG / NODE / **INFO** / CODE / SAVED) with **inline contextual field help**, **collapsible side panels**, top‑bar with live error badge, empty‑state, minimap + zoom, save/reopen via `.afdag`.
+- **Operators (core set):** `Empty`, `Bash`, `Python`/Custom `@task` (the code node — decision #3), `Branch` (BranchPython), `TriggerDagRun`. (~5–6 nodes covering the common shapes: linear, fan‑in/out, branch.) The catalogue's growth path — the next **P0** standard ops + first **Sensors**, then gated provider ops, with the user‑requested `KubernetesPodOperator` at **P2** — is the prioritized roadmap in **§6.2.1**.
 - **Codegen:** **TaskFlow backend only** (matches the repo's existing example DAG). The Traditional↔TaskFlow *toggle* is built into the IR/UI but defaults to (and only emits) TaskFlow in MVP. *Rationale: shipping both backends doubles the codegen + test surface; see §6.3.*
 - **Validation:** client‑side cycle detection + required‑field checks → live error badge & node dots; **server‑side authoritative re‑validation + parse‑check** before deploy.
 - **Deploy:** `SharedVolumeTarget` (atomic write) + **lifecycle polling** (appears? import error?) with tri‑state UI.
@@ -109,13 +110,14 @@ The locked decisions are honored; the phasing applies the pre‑mortem's "ruthle
 
 ### v1.1 — "dual syntax & breadth"
 - Traditional operator codegen backend + the working **Traditional↔TaskFlow toggle** (with golden‑file equivalence tests).
-- More standard operators + first provider operators (HTTP, common sensors) with provider‑availability validation.
+- **Operator breadth + provider gating (§6.2.1):** the **P1** tier — the **provider‑availability gating mechanism** (the prerequisite for any gated op), then `HTTP` (`HttpOperator`) and `SQL` (`SQLExecuteQueryOperator`/`SqlSensor`); plus any remaining **P0** standard ops/sensors (`ShortCircuit`, `LatestOnly`, `File`/`ExternalTask`/`DateTime`/`TimeDelta` sensors) not shipped in the MVP.
+- **Annotation / note cards** (§6.1.7) — resizable on‑canvas notes (Markdown) stored in IR `notes[]`, excluded from codegen/validation, for team documentation.
 - One‑click **Tidy layout** (dagre), richer undo/redo, optional minimap toggle.
 
 ### v1.2 — "beyond a single shared volume"
 - **Git** and **S3 / object‑storage** `DeployTarget` implementations (Airflow DAG‑bundle aware).
 - **Per‑user identity** on JupyterHub (Hub‑injected Airflow creds / OIDC) + Studio action audit trail.
-- Asset/dataset‑driven scheduling; provider sensor catalog (GCS/BigQuery/EMR/Glue/Dataproc) gated on installed providers.
+- Asset/dataset‑driven scheduling; provider sensor catalog (GCS/BigQuery/EMR/Glue/Dataproc) gated on installed providers. **Cloud/Kubernetes operators (§6.2.1 P2):** the user‑requested `KubernetesPodOperator` (`cncf‑kubernetes`) + cloud sensors (`S3KeySensor`, `GCSObjectExistenceSensor`, `BigQueryInsertJobOperator`).
 
 ### Explicitly deferred / out
 Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (NG4).
@@ -129,33 +131,66 @@ Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (N
 **6.1.1 Canvas (ReactFlow, `@xyflow/react` v12).**
 - Controlled graph via `useNodesState` / `useEdgesState`; one **node = one Airflow task**, one **edge = one dependency** (`a >> b`).
 - Custom node card: category label, operator name, `task_id`, a **validity indicator that is icon + text, not color‑only** (a11y), source/target `Handle`s. Branch/ShortCircuit nodes expose multiple labeled source handles for follow‑paths.
-- `onConnect` creates a dependency edge; `isValidConnection` rejects self‑loops and (optionally) duplicate edges. Arrow markers (`MarkerType.ArrowClosed`).
+- **Connect:** `onConnect` creates a dependency edge. A single **`isValidConnection`** guard — shared by connect *and* reconnect — rejects self‑loops **and duplicate `(source, target)` pairs**. The duplicate check is **required, not optional**: the IR↔flow mapping derives a deterministic edge id `e_{source}__{target}`, so two edges between the same pair would collide on reload — `isValidConnection` is what prevents it.
+- **Delete a node:** removable via the `Delete`/`Backspace` key (ReactFlow `deleteKeyCode`), a hover **✕** button on the node card (an in‑card button revealed on `:hover`/`:focus-within`/selection — simpler and more reliable than `NodeToolbar`), and a **Delete task** action in the NODE tab. The ✕ carries `nodrag nopan` + `stopPropagation` so it never starts a drag or re‑selects. Deleting a node **cascades to its incident edges** (the deps reproject `nodes`/`edges` so no dangling dependency persists; ReactFlow's own keyboard delete also removes connected edges).
+- **Delete an edge (connector):** a dependency edge is **independently deletable** without touching the nodes it joins. Affordances: (1) **select the edge** (click — it highlights with `--jp-brand-color1`) and press `Delete`/`Backspace`; (2) a **✕ button on the edge** — the custom edge renders a delete control at its midpoint via `EdgeLabelRenderer`, **shown when the edge is selected** (the button lives in a portal, so reveal is keyed off the reliable `selected` prop rather than cross‑portal CSS hover). Either removes the edge from the live graph; `flowToIR` reprojects `edges[]` so the dependency is gone from the IR (and the regenerated `.py`) on the next commit — the two nodes remain.
+- **Disconnect / reconnect an edge:** an existing edge can be grabbed by either endpoint and dropped onto a different node to **rewire the dependency without deleting and redrawing it** — `onReconnect` + the `reconnectEdge` helper (`@xyflow/react` ≥ 12), edges flagged `reconnectable`. An invalid or empty drop is rejected by the shared `isValidConnection` guard and the edge **snaps back unchanged** — deletion stays explicit (✕ / `Delete`) so a missed drop never silently destroys a dependency. (Cycle check remains authoritative server‑side.)
+- **Edge rendering:** **rounded‑corner orthogonal arrows** — a small custom edge (`AfdagEdge`) draws a `getSmoothStepPath` (`borderRadius: 8`) with `markerEnd: MarkerType.ArrowClosed`, applied to every edge via `defaultEdgeOptions` + the IR→flow mapping; the connection‑drag preview uses `ConnectionLineType.SmoothStep` to match. Stroke is themed from `--jp-*` (selected/hover → brand color) so it tracks light/dark. (Rationale: orthogonal routing with rounded corners reads as a clearer dependency than the default bézier and matches the reference UI.)
 - `Background`, `MiniMap` (bottom‑right), `Controls` (bottom‑left) — matching the reference UI. Empty‑state overlay "Drop operators here" when `nodes.length === 0`.
 - Drag‑from‑palette: HTML5 DnD writes the operator id to `dataTransfer`; canvas `onDrop` uses `screenToFlowPosition` and creates a node with an auto‑generated `task_id` (e.g. `bash_6`).
 - **Performance:** `nodeTypes`/`edgeTypes` defined at module scope; handlers `useCallback`; node component `React.memo`; narrow store selectors. (DAGs are typically tens of nodes; memoization matters more than viewport culling.)
-- **Accessibility (required, not optional):** a keyboard path to add a node (palette → Enter), connect nodes (select source → "connect to…" → target), and edit it (open inspector). Drag‑drop is an *enhancement*, never the only way. Full ARIA labeling; focus management across inspector tabs.
+- **Keyboard deletion (required):** nodes **and** edges are deletable from the keyboard, not just the mouse. ReactFlow keeps nodes/edges focusable (`nodesFocusable`/`edgesFocusable`, default true) — `Tab`/arrow to a node or click‑less‑focus an edge, `Enter`/`Space` to select, then **`Delete` or `Backspace`** removes it. Set `deleteKeyCode={['Delete', 'Backspace']}` so both keys work (some keyboards lack a dedicated `Delete`). Critically, the delete key **must not fire while the user is typing** in an inspector form, the palette search, or the code editor — ReactFlow ignores key events sourced from `input`/`textarea`/`contentEditable` by default; keep that behavior (don't bind a global document listener that bypasses it). Multi‑select (`Shift`/marquee) + `Delete` removes several elements at once. Node deletion still cascades to incident edges; edge deletion leaves the nodes.
+- **Accessibility (required, not optional):** a keyboard path to add a node (palette → Enter), connect nodes (select source → "connect to…" → target), edit it (open inspector), and **delete it (focus → `Delete`/`Backspace`)** — for both nodes and edges. Drag‑drop is an *enhancement*, never the only way. Full ARIA labeling (each node/edge has an `aria-label`); focus management across inspector tabs.
 
 **6.1.2 Operator palette (left).** Searchable, grouped by category (Python/Bash, Flow Control, HTTP, Sensors…). **Generated from the operator registry** (a `GET operators` server endpoint at activation, cached). Each item shows label + category and is draggable / keyboard‑activatable.
 
 **6.1.3 Inspector tabs (right).**
 - **DAG** — `dag_id`, description, **schedule** (dropdown of presets `@once/@hourly/@daily/@weekly/@monthly/None` + custom cron + `timedelta`), `start_date` (date picker), `catchup` (**default false** — Airflow 3 default), `retries`, `retry_delay`, `tags`, `owner`, `params`, `default_args`.
-- **NODE** — operator‑specific form **generated from the registry** (see §6.2), with required‑field validation feeding the error badge; common fields (`retries`, `retry_delay`, `depends_on_past`); JSON/dict fields (env vars, params) via a JSON editor widget; code fields via an embedded CodeMirror editor.
+- **NODE** — operator‑specific form **generated from the registry** (see §6.2), with required‑field validation feeding the error badge; common fields (`retries`, `retry_delay`, `depends_on_past`); JSON/dict fields (env vars, params) via a JSON editor widget; code fields via an embedded CodeMirror editor. **Each field carries inline contextual help** — a one‑line description rendered under the label (RJSF `description` / `ui:help`, already styled as `.field-description`) sourced from the registry param's `help`, so a non‑technical user understands *what a field is for and what a valid value looks like* without leaving the form. Longer or example‑bearing help can surface as an `(i)` tooltip.
+- **INFO** *(learn‑Airflow surface)* — a **read‑only educational tab** about the **currently selected node/operator**: a plain‑language description of what the operator does, when to use it, its required vs optional inputs (rendered from the registry param metadata), a worked example, the provider/`airflow_min_version` it needs, and a **"docs ↗" deep link** to the official Airflow/provider page. With no node selected it shows DAG‑level concepts (schedule/`start_date`/`catchup`/retries explained). Content is **data‑only**, sourced from new registry fields (`description`, `docs_url`, per‑param `help`; see §6.2) so adding an operator also teaches it — no code change (G6). This tab is the concrete expression of a secondary product goal: Studio should help users *learn* Airflow components, not just wire them.
 - **CODE** — live generated‑Python preview (read‑only), a **Generate DAG** button, and a validation panel that shows **both** client‑side messages (e.g. *"DAG contains a cycle — Airflow does not support cyclic dependencies"*) **and**, after deploy, the **authoritative Airflow import status**.
 - **SAVED** — lists `.afdag` documents in the workspace (via Contents API) to reopen; marks which are deployed.
+- **Tab order** is DAG · NODE · INFO · CODE · SAVED; selecting a node focuses NODE, and INFO sits beside it so "configure" and "understand" are one click apart.
 
 **6.1.4 Top bar.** Logo · live `dag_id` · node count · **live error badge** (`✕ N errors`, with text not just color) · Traditional↔TaskFlow toggle (v1.1; disabled/ taskflow‑locked in MVP) · Undo · **Reset** (revert to last saved IR) · **Save** (writes the `.afdag` via the document context) · **Generate DAG** (server codegen preview) · **Deploy**.
 
 **6.1.5 Save / reopen.** The editor is a JupyterLab **document** bound to the `.afdag` file; Save/dirty/restore come from the Contents API. Reopening loads the IR (never the generated `.py`). See §8.2–8.3.
 
+**6.1.6 Collapsible side panels.** Both the **left** operator palette and the **right** inspector can be **collapsed to a thin rail and re‑expanded** so the canvas can use the full window width when the user is arranging a large graph (and re‑expanded when they need the palette or a form). Each panel has a **chevron toggle in its header** (`«`/`»`, with an `aria-label` + `aria-expanded`); collapsed, it shows a ~30px rail with an **expand chevron** and a rotated panel label — the expand control is keyboard‑reachable, so the palette's add‑node path is always one click away (drag‑drop is never the only way in). The body is a flexbox (`palette · canvas · inspector`); collapsing sets the side panel's `flex-basis` to the rail width and the `flex:1` canvas reclaims the space (animated with a ≤150 ms `flex-basis` transition). **ReactFlow must remeasure** after the width change — but the change is *internal* (the Lumino widget itself doesn't resize, so the panel's `resized` signal never fires); nudge `rfRef.fitView()` on a short `setTimeout` keyed to the collapse state once the transition has settled, so the graph never renders against a stale viewport. Collapse state is **ephemeral UI state** in MVP (plain `useState`, not persisted in the `.afdag` — writing it into the IR would dirty the document on every toggle); persisting it later belongs in an IR `ui`/`layout` block or JupyterLab `IStateDB`, not the task graph.
+
+**6.1.7 Annotation / note nodes (post‑MVP — see §5).** A **note card** is a draggable, **resizable** sticky‑note on the canvas holding free‑form text (Markdown later) so a workflow designer can leave explanations for teammates ("this branch only runs on month‑end", "owner: data‑eng"). It is **annotation only**: it has **no source/target handles**, takes part in **no dependency edge**, and is **excluded from codegen, cycle detection, and required‑field validation** — it never becomes an Airflow task. Modeling (decided in §8.3): notes live in a **separate `notes[]` array in the IR**, *not* in `nodes[]`, so the task graph that codegen/validation iterate (`ir["nodes"]`/`ir["edges"]`) is untouched and zero codegen changes are needed. On the canvas, task nodes and note cards are merged into one ReactFlow `nodes` array with distinct `type`s (`afdagNode` / `noteNode`, the latter a `NodeResizer` text card) and split back apart on persist. Notes round‑trip through save/reopen like any IR content.
+
 ### 6.2 Operator registry
 
-A directory of **YAML files, one per operator**, read by **both** the client (palette + form schema) and the server (Jinja2 codegen). Adding an operator is pure data — no React/Python edits (G6). Each entry declares: `id`, `label`, `category`, `provider` + `airflow_min_version`, the **import line(s)**, required/optional **params** (name, type, widget, default, validation, required), `common_params`, handle topology, `task_id_prefix`, and **two code templates** (`template_traditional`, `template_taskflow`). See **Appendix A**.
+A directory of **YAML files, one per operator**, read by **both** the client (palette + form schema) and the server (Jinja2 codegen). Adding an operator is pure data — no React/Python edits (G6). Each entry declares: `id`, `label`, `category`, `provider` + `airflow_min_version`, the **import line(s)**, required/optional **params** (name, type, widget, default, validation, required, **`help`**), `common_params`, handle topology, `task_id_prefix`, **documentation fields** (`description`, `docs_url`, optional `example`) that feed the **INFO** tab, and **two code templates** (`template_traditional`, `template_taskflow`). See **Appendix A**.
 
 Requirements:
-- The registry is the single source of truth for: palette grouping/search, NODE‑tab JSON Schema (rendered with RJSF), and server codegen import paths + templates.
+- The registry is the single source of truth for: palette grouping/search, NODE‑tab JSON Schema (rendered with RJSF), the **INFO‑tab learning content**, and server codegen import paths + templates.
 - A param `widget: code` (Python) or `widget: json` (dict) selects the embedded editors.
+- A param's **`help`** string is the **inline contextual help** (§6.1.3 NODE) — it must be forwarded to the client; the operator‑level **`description`/`docs_url`/`example`** feed the INFO tab, which also surfaces **`provider`/`airflow_min_version`** (now shipped to the client as `provider`/`airflowMinVersion` for the "what this needs" line — previously withheld as codegen‑only). The server's `client_view()` projection (`_CLIENT_PARAM_FIELDS` + a `_CLIENT_DOC_FIELDS` map) must include these keys, and the TS `IOperatorDef`/`IOperatorParam` types must add them. These fields are **documentation, never executed** (rendered as React‑escaped plain text, §9), and are independent of codegen templates (imports + `template_*` stay server‑only).
+- **Help/INFO text is untrusted content** — the registry can be extended from a user/server `AIRFLOW_OPERATORS_DIR`, so `description`/`help`/`example`/`docs_url` must be rendered as **plain text (or sanitized Markdown), never raw HTML** (no `dangerouslySetInnerHTML` of registry strings), and `docs_url` links use `rel="noopener"`. See §9.
 - Each entry records its **provider package** so the system can warn when an operator's provider isn't installed in the *target Airflow* (not just the Jupyter env).
 - Operators with no TaskFlow equivalent (`Empty`, `TriggerDagRun`) declare `taskflow: operator` so the toggle renders them as operators even in TaskFlow mode.
+
+**6.2.1 Operator catalogue roadmap (prioritized) & provider‑availability gating.** The palette UI (search · categories · drag · keyboard‑add) and the registry mechanism are **built**; the catalogue is intentionally small — 5 ops: `Empty`, `Bash`, `Python`/`@task`, `Branch`, `TriggerDagRun` (all standard provider). Growth is **data‑only** (one YAML per operator, §6.2 / Appendix A) and is sequenced by *impact × gating cost*. Class names / import paths / provider packages below are verified against Airflow 3.x provider docs (use the **non‑deprecated** Airflow‑3 paths). The reference UI's palette (HTTP + a full Sensors group) is the breadth target; **do not** re‑build the palette — only add YAML.
+
+| Pri | Operator (class) | Provider pkg | Category | Impact / why |
+|---|---|---|---|---|
+| **P0** | `ShortCircuit` (ShortCircuitOperator) | standard *(bundled)* | Flow Control | Conditional gate that skips **all** downstream — the #2 flow primitive after the existing `Branch`; reuses the Python code‑node form. `@task.short_circuit` exists. |
+| **P0** | `LatestOnly` (LatestOnlyOperator) | standard *(bundled)* | Flow Control | Skip downstream on backfill/catchup so only the latest interval runs; **zero** required params; cheapest add. Render as operator in both modes. |
+| **P0** | `FileSensor` | standard *(bundled)* | Sensors | "Wait for input data to land" — most intuitive sensor; **establishes the Sensors category** + the sensor `common_params` (`mode` poke/reschedule · `poke_interval` · `timeout`). |
+| **P0** | `ExternalTaskSensor` | standard *(bundled)* | Sensors | Cross‑DAG wait; **read‑side complement** to the existing `TriggerDagRun` for no‑code multi‑DAG pipelines. Highest‑effort P0 (`execution_delta` vs `execution_date_fn` — mutually exclusive; needs careful help copy). |
+| **P0** | `DateTimeSensor` · `TimeDeltaSensor` | standard *(bundled)* | Sensors | Wait until a wall‑clock target / a relative delta; low‑effort, teachable. `TimeDelta` reuses the `timedelta` widget already needed for `retry_delay`. |
+| **P1** | `HTTP` (HttpOperator) | apache‑airflow‑providers‑http | HTTP | Call any REST/webhook/SaaS endpoint — universally useful; the **first gated op**. Use `HttpOperator`, **not** the deprecated `SimpleHttpOperator`; steer users to an Airflow HTTP **Connection**, not raw URLs/secrets. |
+| **P1** | `SQL query` (SQLExecuteQueryOperator) | apache‑airflow‑providers‑common‑sql | SQL | DB‑agnostic SQL — the Airflow‑3 path that **supersedes** per‑DB operators (`PostgresOperator`…); one op + a Connection covers Postgres/MySQL/Snowflake/… |
+| **P1** | `SqlSensor` | apache‑airflow‑providers‑common‑sql | Sensors | Poll a DB until a query returns truthy (row‑count / flag / partition‑loaded) — data‑readiness gate under the same provider. |
+| **P2** | `KubernetesPodOperator` | apache‑airflow‑providers‑cncf‑kubernetes | Kubernetes | Run any container image as a pod — the universal non‑Python/heavy‑job escape hatch (**the user's explicit ask**). HIGH impact / LOW breadth; flagship gated op — see below. |
+| **P2** | `S3KeySensor` | apache‑airflow‑providers‑amazon | Sensors/AWS | Wait for an S3 object — cloud analogue of `FileSensor`. |
+| **P2** | `GCSObjectExistenceSensor` | apache‑airflow‑providers‑google | Sensors/GCP | Wait for a GCS object — GCP analogue of `FileSensor`. |
+| **P2** | `BigQueryInsertJobOperator` | apache‑airflow‑providers‑google | Cloud/GCP | Run a BigQuery job (current non‑deprecated path; supersedes `BigQueryExecuteQueryOperator`). Nested‑JSON `configuration` → high‑effort form. |
+
+- **KubernetesPodOperator specifics.** Import `airflow.providers.cncf.kubernetes.operators.pod` (the legacy `operators.kubernetes_pod` module is **gone** in current providers). Ship a **starter** param set first — `image`* · `name` · `namespace` · `cmds` · `arguments` (lists → `json` widget) · `env_vars` (dict) · `on_finish_action` (enum: `delete_pod`/`delete_succeeded_pod`/`keep_pod`/`delete_active_pod`, replaces the old `is_delete_operator_pod` bool) — and **defer** the advanced surface (`volumes`, `secrets`, `affinity`, `container_resources`, `pod_template_file`) behind an "advanced" disclosure, or the node form is overwhelming for the no‑code audience. **Gating:** needs the `cncf‑kubernetes` provider in the *target* Airflow **and** cluster/executor access (`in_cluster` or `kubernetes_conn_id`/`config_file` + a K8s‑capable executor) — Studio can verify the **provider** but **not** the cluster, so surface the cluster prerequisites in the **INFO** tab. Caveat the INFO tab heavily: this runs an arbitrary image with worker/cluster privileges — the **same ACE blast‑radius** as code nodes (§9).
+- **Provider‑availability gating (new requirement — P1 prerequisite for every Tier‑2/3 op).** Gate on what's installed in the **target Airflow**, never the Jupyter/server env (the server parse‑check is best‑effort / false‑green, R2). Mechanism: (1) `provider` (already on every YAML) is the gating key; treat `apache‑airflow‑providers‑standard` / `(bundled)` as **always‑available** (standard is a core Airflow‑3 dep, present even in the slim image) so all **P0** ops are never gated. (2) Add a server capability that reads the target's installed providers (`GET /api/v2/providers` via the existing `AirflowClient`) and caches the package‑name+version set with a **short TTL / manual refresh** (installing a provider changes availability without a Studio restart). (3) `client_view()` annotates each palette entry `available | missing‑provider | version‑too‑old` (from target‑providers × `provider` × `airflow_min_version`). (4) UI: keep unavailable ops **visible but dimmed** with an `(i)` "Requires `apache‑airflow‑providers‑X` in your Airflow" tooltip + a copy‑paste `pip install` hint — **don't hide them** (they're teachable via INFO and the target may change), non‑color‑only, help‑never‑blocks. (5) **Hard‑gate at deploy:** the validate/deploy step re‑checks the IR's providers against the live target set and **fails fast** with a plain‑language "provider not installed in target Airflow" *before* writing the file, instead of an opaque `/importErrors` later. (6) `/api/v2/importErrors` stays the **authoritative** post‑deploy verdict (the worker env can still differ — provider present on the API node but a connection/cluster missing), so gating is a fast pre‑filter, not a correctness guarantee.
 
 ### 6.3 Code generation
 
@@ -214,7 +249,9 @@ Extends the existing `AirflowPanel`. Requirements (endpoints in Appendix D):
 ## 7. UX / UI specification
 
 - **Layout & theming.** Match the reference UI shape (top bar / palette / canvas / inspector). Style **exclusively with JupyterLab CSS variables** (`--jp-layout-color*`, `--jp-ui-font-color*`, `--jp-border-color*`, `--jp-brand-color1`, `--jp-error-color1`, `--jp-success-color1`); map ReactFlow's CSS vars onto `--jp-*` so dark mode reskins automatically.
+- **Reclaimable canvas.** The left palette and right inspector each **collapse to a rail and re‑expand** (§6.1.6) via a header chevron; the canvas grows to fill the freed width and ReactFlow re‑fits. A collapsed panel still exposes its **expand** control (keyboard‑reachable, so the user is never trapped and the palette's add‑node path stays one click away). Transitions are quick (≤150 ms) and the toggle has an ARIA label + state.
 - **First‑run onboarding.** Beyond "Drop operators here," provide a guided first‑DAG (seed a template DAG config; a 3‑step coachmark: add node → configure → deploy).
+- **Learning & contextual help (the "teach Airflow" goal).** Studio is also a way to *learn* Airflow: every NODE field shows a plain‑language one‑liner (what it is, a valid example), and the **INFO** tab explains the selected operator (purpose, when to use it, required inputs, provider/version, docs deep link) and, with nothing selected, core DAG concepts (schedule/`start_date`/`catchup`/retries). Help text avoids jargon, never blocks the form, and is non‑color‑only (an `(i)` glyph + text). All such copy goes through `trans.__()` (raw Airflow errors and generated code are **not** localized).
 - **Deploy feedback.** A persistent tri‑state indicator (Writing / Waiting / Registered‑Failed‑Processing) with timeout copy; never a silent success.
 - **Failure recovery (make‑or‑break).** On import error: pull `stack_trace`, **map back to the offending node/field** where possible, show a plain‑language card ("Your DAG couldn't be loaded — …") with a *Show technical details* expander and a **one‑click "Open in Studio to fix"** that loads the `.afdag` (not the broken `.py`). Provide **undeploy / rollback to previous working version**.
 - **Conflict/overwrite UX.** Clear dialogs for: filename/`dag_id` already exists; about to clobber another user's DAG; `.py` modified outside Studio.
@@ -262,7 +299,9 @@ Register a custom file type + document widget so JupyterLab owns open/save/dirty
 
 ### 8.3 The `.afdag` document & IR schema
 
-Versioned IR JSON: `{ schema_version, provenance, syntax_style, dag, nodes[], edges[], layout? }`. `node.id` is the stable ReactFlow id; `task_id` is the Airflow id (validated identifier, unique). `op` references a registry id (keeps IR decoupled from operator impl). `position` lives in the IR so layout round‑trips. `provenance` (`afdag_id`, `studio_version`, `ir-hash`) is **also embedded in the generated `.py`** so the manager can tell Studio‑created (editable) from hand‑written (read‑only) DAGs and detect drift. See **Appendix B**.
+Versioned IR JSON: `{ schema_version, provenance, syntax_style, dag, nodes[], edges[], notes?[], layout? }`. `node.id` is the stable ReactFlow id; `task_id` is the Airflow id (validated identifier, unique). `op` references a registry id (keeps IR decoupled from operator impl). `position` lives in the IR so layout round‑trips. `provenance` (`afdag_id`, `studio_version`, `ir-hash`) is **also embedded in the generated `.py`** so the manager can tell Studio‑created (editable) from hand‑written (read‑only) DAGs and detect drift. See **Appendix B**.
+
+**Annotation notes (§6.1.7)** live in an **optional, separate `notes[]` array** — `{ id, text, position, size? }` — deliberately **outside `nodes[]`/`edges[]`** so the executable task graph that codegen and validation read (`ir["nodes"]`/`ir["edges"]`) is unaffected and note cards can never become tasks, edges, or cycle/required‑field errors. The IR/flow mapping merges `notes[]` into ReactFlow `nodes` as `type:'noteNode'` and splits them back out on persist. `notes[]` is absent on older `.afdag` files (back‑compatible: default to `[]`).
 
 ### 8.4 Codegen pipeline & trust boundary
 
@@ -363,7 +402,8 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | Milestone | Acceptance |
 |---|---|
 | **M0 — Editor shell** | `.afdag` opens as a ReactFlow document; add/connect/delete nodes; save/reopen; dirty‑state; restore after reload |
-| **M1 — Registry + forms** | Palette + NODE forms generated from registry YAML for the core operator set; adding a YAML operator needs no code change (test) |
+| **M0.5 — Editing & learning UX** | **Delete an edge** (select+Delete, hover ✕, or drag‑off) leaving both nodes; **reconnect** an edge to a new node (drag endpoint); deleting a node **cascades to its edges** in the IR; edges render as **rounded‑corner arrows**; **palette + inspector collapse/expand** and the canvas re‑fits; **INFO** tab explains the selected operator and **per‑field inline help** renders from registry `description`/`help` |
+| **M1 — Registry + forms** | Palette + NODE forms generated from registry YAML for the core operator set; adding a YAML operator (incl. `description`/`docs_url`/param `help`) needs no code change (test) |
 | **M2 — Validation** | Client cycle/required → error badge + node dots; server re‑validates untrusted IR |
 | **M3 — Codegen (TaskFlow)** | IR → idiomatic Airflow‑3 TaskFlow `.py`; golden‑file tests green; safe literal emission verified by escaping tests |
 | **M4 — Deploy + lifecycle** | Atomic namespaced write; tri‑state polling; integration test deploys to `apache/airflow:3.0.2`, asserts **zero import errors + a green run** |
@@ -371,6 +411,211 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | **M6 — Recovery UX + a11y** | Friendly import‑error → node/field mapping + "Open in Studio to fix" + undeploy; keyboard path + non‑color‑only indicators |
 | **v1.1** | Traditional backend + working toggle (equivalence tests); Tidy layout; more operators |
 | **v1.2** | Git + S3 `DeployTarget`; per‑user identity + audit; asset scheduling |
+
+## 15. Wireframes (screen drafts)
+
+Low‑fidelity ASCII drafts of every Studio + Manager surface, reconstructed from a **frame‑by‑frame analysis of the reference product's demo GIFs** (extracted under `design-reference/airflow-studio/` — `gifs/`, `frames/<clip>/all/`, plus a feature‑analysis report) and **reconciled with the current implementation**. They are layout/skeleton drafts for a Data4Now‑branded redesign — *not* pixel specs; reconcile styling with the `data4now-design` skill + `--jp-*` theming.
+
+> **Keep these in sync** (CLAUDE.md): any UI change updates the matching wireframe in the same commit; a new screen/tab/dialog gets a new wireframe. Reference frames cited as `clip f####`.
+
+**Legend** — status of each screen vs. the codebase:
+✅ built · 📝 specced in this PRD, not yet built · 🔭 planned (recommended by this analysis)
+Controls: `«`/`»` collapse a side panel · `▾` group · `●` node validity dot · `*` required field.
+
+### 15.1 Studio editor — shell + DAG tab ✅
+
+The 3‑pane document: full‑width top bar, then collapsible **palette « · canvas · » inspector**. *(src: 04-main-demo f0000, 03-demo-b f0120)*
+
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ ✦ Airflow Studio   my_dag.afdag · 4 nodes · ✓ no errors                         │
+│            [ Traditional │▣TaskFlow ]   ↶ ↷   Reset   Save   ⚙ Generate DAG   ▶ Deploy │
+├──── OPERATORS ───«─┬─────────────── CANVAS ───────────────┬─»── INSPECTOR ───────┤
+│ 🔍 Search…         │                                      │ [DAG] NODE INFO CODE SAVED │
+│ ▾ PYTHON / BASH    │        ┌────────────────────┐        │ ─────────────────────│
+│   Bash operator    │        │ PYTHON_BASH        │        │ DAG CONFIGURATION    │
+│   Branch operator  │        │ ▷ Bash operator  ✕ │ ● green│ DAG ID    [ my_dag ] │
+│   Python operator  │        │ task_id: print1    │        │ DESCRIPTION [      ] │
+│   Custom @task     │        └─────────┬──────────┘        │ SCHEDULE  [ @daily ▾]│
+│ ▾ FLOW CONTROL     │                  ▼  (rounded         │ START DATE[01/01/2024]│
+│   Empty operator   │        ┌────────────────────┐  arrow)│ OWNER     [ data-team]│
+│   Short-circuit op │        │ ▷ Bash operator    │ ● green│ RETRIES[1] RTY-DLY[5]│
+│   Trigger DAG run  │        │ task_id: print2    │        │ TAGS  [ etl, prod  ] │
+│ ▾ HTTP   (P1 🔭)   │        └─────────┬──────────┘        │ PARAMS  { }          │
+│   HTTP             │                  ▼                   │ CATCHUP  ◯ off       │
+│ ▾ SENSORS (P0+ 🔭) │        ┌────────────────────┐        │                      │
+│   File / External… │        │  … print3 / print4 │ ● green│                      │
+│ ＋ Add note        │        └────────────────────┘ ┌────┐ │                      │
+│                    │     ⊕ ⊖ ⤢ (zoom/fit)         │mmap│ │                      │
+└────────────────────┴──────────────────────────────┴────┴─┴──────────────────────┘
+```
+Built: palette (search/categories/drag) · rounded‑corner arrow edges · minimap/zoom · DAG form (id/description/schedule/start_date/owner/retries/retry_delay/tags/params/catchup) · live `✓ no errors` badge · Reset/Save/Generate/Deploy. **Locked to TaskFlow** until the Traditional backend (v1.1). Palette **catalogue** grows per §6.2.1 (HTTP/Sensors 🔭).
+
+### 15.2 Studio editor — empty‑state / onboarding ✅
+
+0 nodes → drop‑zone. *(src: 01-small-demo f0000; the clip also demos the syntax toggle.)*
+
+```
+│ … palette …  │            ╭───────────────────────╮            │ DAG CONFIG … │
+│              │            │        ⬚  (icon)        │            │ DAG ID [my_dag]│
+│              │            │   Drop operators here   │            │  …           │
+│              │            │ Drag from the left      │            │              │
+│              │            │ panel to get started    │            │              │
+│              │            ╰───────────────────────╯            │              │
+                 top bar shows “0 nodes”; [Traditional│▣TaskFlow] toggle is the clip’s subject
+```
+Beyond the drop hint, §7 adds a 3‑step coachmark (add → configure → deploy) 🔭.
+
+### 15.3 Studio editor — NODE tab + live validation ✅
+
+Select a node → operator form; required‑field gaps drive the badge + the node's red `●`. *(src: 02-demo-a f0150/f0600)*
+
+```
+top bar:  … my_dag · 2 nodes · ✕ 2 errors      ← red while required fields empty
+
+  canvas node (invalid)              INSPECTOR — NODE tab
+  ┌────────────────────┐            ┌ DAG [NODE] INFO CODE SAVED ─────────────┐
+  │ PYTHON_BASH       ✕│            │ ⚠ 2 errors on this node                 │
+  │ ▷ Bash operator    │ ● red      │ BASH OPERATOR        node_173…_6        │
+  │ task_id: bash_7    │            │ TASK ID *         [ bash_7            ]  │
+  └────────────────────┘            │ BASH COMMAND *    [                  ]⛔│ ← red outline
+                                    │ ENVIRONMENT VARS  [ { }              ]  │
+                                    │ RETRIES           [ 1 ]                 │
+                                    │ RETRY DELAY (MIN) [ 5 ]                 │
+                                    │ DEPENDS ON PAST   ◯ off                 │
+                                    │ ─────────────────────────────────────  │
+                                    │                       [ 🗑 Delete task ] │
+                                    └─────────────────────────────────────────┘
+```
+Built: registry‑generated form, `validateNodeParams` required‑field check (red outline), top‑bar `✕ N errors` decrementing live, per‑node dots, in‑card ✕ + “Delete task”. New operators just add param YAML — no form code.
+
+### 15.4 Studio editor — CODE tab (+ cycle‑error variant) ✅
+
+Live generated‑Python preview + Copy; the cycle path replaces the code until the graph is acyclic. *(src: 03-demo-b f0500)*
+
+```
+ INSPECTOR — CODE tab (valid)                 cycle‑detection variant
+ ┌ DAG NODE INFO [CODE] SAVED ───────────┐    ┌ … [CODE] … ──────────────────────┐
+ │ GENERATED CODE            [ ⧉ Copy ]  │    │ ✕ Validation                     │
+ │ # airflow-studio: managed … taskflow  │    │ DAG contains a cycle — Airflow   │
+ │ from airflow.sdk import dag, task     │    │ does not support cyclic deps.    │
+ │ @dag(schedule="@daily", …)            │    │ Remove an edge on the path:      │
+ │ def my_dag():                         │    │     print3 → print1              │
+ │   @task.bash(task_id="print1")        │    │ (code preview hidden until the   │
+ │   def print1(): return "echo Hello"   │    │  graph is acyclic)               │
+ │   …                                   │    │                                  │
+ │   # --- Dependencies ---              │    │ [ ⚙ Generate DAG ]               │
+ │   print1 >> print2 >> print3 >> print4│    └──────────────────────────────────┘
+ │ [ ⚙ Generate DAG ]        ✓ Valid     │
+ └───────────────────────────────────────┘
+```
+Built: server codegen (TaskFlow), Copy, validation panel showing client errors **and** post‑deploy Airflow import status. **Traditional output is v1.1** (templates exist; backend + toggle unlock pending).
+
+### 15.5 Studio editor — INFO tab (learn‑Airflow) ✅
+
+Read‑only teaching surface for the selected operator (DAG concepts when nothing is selected). *(Studio enhancement — the reference UI has no INFO tab.)*
+
+```
+ ┌ DAG NODE [INFO] CODE SAVED ───────────────────────────────┐
+ │ ℹ Bash operator                          provider: standard│
+ │ Runs a shell command on an Airflow worker. Use it for      │
+ │ scripts, CLI tools, or quick file/data operations.         │
+ │ NEEDS  apache-airflow-providers-standard · Airflow ≥ 3.0   │
+ │ REQUIRED · Bash Command — the shell command, e.g.          │
+ │            `python etl.py --date {{ ds }}`                  │
+ │ OPTIONAL · Environment Vars · Working dir                  │
+ │ EXAMPLE   echo "hello $NAME"                                │
+ │ 📖 Docs ↗   (rel=noopener)                                  │
+ └────────────────────────────────────────────────────────────┘
+```
+Built: registry‑driven (`description`/`docs_url`/`example`/per‑param `help`/`provider`/`airflow_min_version`), all rendered as escaped plain text (registry is user‑extensible → no raw HTML). For **gated** ops (§6.2.1) this tab also states the missing provider + any non‑checkable prerequisite (e.g. a K8s cluster) 🔭.
+
+### 15.6 Deploy — top‑bar action + tri‑state banner ✅
+
+Deploy is an *observable* lifecycle (§6.5.4), not a silent success. *(src: 04-main-demo build→deploy→native‑Airflow run)*
+
+```
+ top-bar:   ▶ Deploy  ─►  ⏳ Deploying…  ─►  ✓ Deployed     /     ✕ Failed
+
+ DeployBanner (under the top bar):
+ ① ┌ ⏳ Writing my_dag.py to the dags folder…                          ┐
+ ② ┌ ⏳ Waiting for Airflow to pick it up (up to a few minutes)…       ┐
+   │                                       [ Keep waiting ]    [ × ]   │
+ ③a┌ ✓ Registered — my_dag is live (paused).  [ Unpause & trigger ][×]┐
+ ③b┌ ✕ Couldn’t load — “Bash Command” on node fetch_data is empty.    ┐
+   │   [ Show technical details ▾ ]                                    │
+   │   [ Open in Studio to fix ]   [ Undeploy ]                  [ × ] │
+```
+Built: atomic `SharedVolumeTarget` write + post‑deploy polling of `/dags` + `/importErrors`; banner renders writing/waiting/registered/failed/processing with the recovery actions.
+
+### 15.7 Palette — provider‑availability states 🔭
+
+How gated (Tier‑2/3) operators appear once gating lands (§6.2.1). Unavailable ops stay **visible but dimmed** — never hidden.
+
+```
+ ▾ HTTP
+   HTTP            ⚠ dimmed   ⓘ Requires apache-airflow-providers-http in your Airflow
+                                pip install apache-airflow-providers-http
+ ▾ SENSORS
+   File sensor               (available — standard provider is never gated)
+   S3 key sensor   ⚠ dimmed   ⓘ Requires …-amazon  + an AWS Connection
+   Kubernetes pod  ⚠ dimmed   ⓘ Requires …-cncf-kubernetes  + a reachable cluster
+```
+Server reads the **target** Airflow’s `/api/v2/providers`; palette payload annotates `available | missing-provider | version-too-old`; deploy hard‑fails on a missing provider before writing the file.
+
+### 15.8 Manager — DAG list (left sidebar) ✅
+
+The operations surface. *(Mirrors what the demo shows running in the **native** Airflow UI — src: 04-main-demo f0400 — but rendered inside JupyterLab.)*
+
+```
+ ┌ Airflow — DAGs ──────────────────────────────── ⟳ ┐
+ │ 🔍 Search dag_id…                      [ Tags ▾ ]  │
+ │ ⚠ 1 import error  ▾ (expand → plain-language fix)  │
+ │ ──────────────────────────────────────────────────│
+ │ ◐ my_dag         @daily   etl,prod      ⏸  ▶  🗑   │   ◐ run-status donut
+ │ ● ingestion_dag  15m  ⏵running          ⏸  ▶  🗑   │   ⏸ pause/unpause
+ │ ⚠ load_dag       (import error)         ⏸  ▶  🗑   │   ▶ trigger · 🗑 delete(purge)
+ │ ──────────────────────────────────────────────────│
+ └────────────────────────────────────────────────────┘
+```
+Built: list (search/tag filter, `exclude_stale`), pause, trigger, run‑status, `has_import_errors` badge + import‑errors panel, delete (file‑then‑history). *Trigger is bare* today — see 15.10.
+
+### 15.9 Manager — run / task drill‑down + logs ✅
+
+Expand a DAG → runs → task instances → logs. *(Mirrors native grid/logs — src: 04-main-demo f0600/f0850.)*
+
+```
+ ┌ my_dag ─────────────────────────────────┐   Log modal
+ │ RUNS                                     │   ┌ print2 · attempt 2 ▾ ───────────┐
+ │ ▾ 2026-03-14 17:25  ✓ success            │   │ [INFO] Running BashOperator…     │
+ │    • print1  ✓ success  try 1            │   │ [INFO] echo Hello                │
+ │    • print2  ✕ failed   try 2  [ logs ]──┼──▶│ [INFO] Command exited 0          │
+ │    • print3  ◷ queued                    │   │ …                                │
+ │ ▸ 2026-03-13 …      ✓                     │   │ [ Wrap ] [ Download ]      [ × ] │
+ │ ──────────────────────────────────────── │   └──────────────────────────────────┘
+ │ [ Clear/Retry ▸ dry-run preview ]  [ Mark state… ]                              │
+ └──────────────────────────────────────────┘
+```
+Built: task instances + states, paged logs with attempt selector, clear/retry (dry‑run preview → confirm), mark success/failed/skipped. *(Native grid/Gantt/XCom stay in Airflow’s own UI — NG3; optional deep‑link.)*
+
+### 15.10 Manager — trigger‑with‑conf dialog 📝
+
+The **only** missing piece of “triggers”: a conf form derived from the DAG’s `params` (already specced in §6.6; `triggerDag(id, conf)` + the server handler already accept a `conf` dict — UI‑only).
+
+```
+ ┌ Trigger my_dag ──────────────────────────────┐
+ │ This DAG accepts parameters:                 │   ← fields from GET /dags/{id}/details
+ │   start_date  [ 2026-06-15              ]     │
+ │   region      [ eu-west-1   ▾           ]     │
+ │   dry_run     [ ◯ off ]                       │
+ │ ─────────────────────────────────────────── │
+ │   logical_date  ◉ now    ○ [ pick…      ]     │   ← null logical_date = run now (AF3)
+ │              [ Cancel ]       [ ▶ Trigger ]   │
+ └───────────────────────────────────────────────┘
+   DAGs with no params skip the dialog → instant bare trigger (today’s behavior).
+```
+
+> **Triggers — already covered (do not re‑add):** the **TriggerDagRunOperator** ships as a palette operator (`operators/trigger_dagrun.yaml`) for composing multi‑DAG pipelines, and the Manager's **manual one‑click DAG‑run trigger** works end‑to‑end (`ManagerApp` → `triggerDag` → `POST /dags/trigger`). The single gap is the conf form above (15.10).
 
 ---
 
@@ -382,15 +627,23 @@ label: Bash operator
 category: Python/Bash
 provider: apache-airflow-providers-standard      # bundled with Airflow 3 base image
 airflow_min_version: '3.0'
+description: >                                    # INFO tab: plain-language "what & when"
+  Runs a shell command on an Airflow worker. Use it for scripts, CLI tools,
+  or quick file/data operations. The command runs in a temporary working
+  directory; set env vars below rather than pasting secrets.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/bash.html
 import: 'from airflow.providers.standard.operators.bash import BashOperator'
 import_taskflow: 'from airflow.sdk import task'
 handles: { in: true, out: true }                 # branch sets out: [true, false]
 taskflow: native                                 # native | operator (Empty/TriggerDagRun = operator)
 task_id_prefix: bash                             # -> bash_6, bash_7
-params:
-  - { name: bash_command, label: 'Bash Command', type: string, required: true, widget: textarea }
-  - { name: env,          label: 'Environment Vars', type: object, required: false, widget: json, default: {} }
-  - { name: cwd,          label: 'Working dir', type: string, required: false }
+params:                                          # `help` -> inline field help (INFO + NODE tabs)
+  - { name: bash_command, label: 'Bash Command', type: string, required: true, widget: textarea,
+      help: 'The shell command to run, e.g. `python etl.py --date {{ ds }}`. Jinja templating is supported.' }
+  - { name: env,          label: 'Environment Vars', type: object, required: false, widget: json, default: {},
+      help: 'JSON object of name→value passed to the command as environment variables.' }
+  - { name: cwd,          label: 'Working dir', type: string, required: false,
+      help: 'Directory to run the command in. Leave blank to use a temp dir.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
   {{ task_id }} = BashOperator(
@@ -435,7 +688,11 @@ A **code node** is a registry entry whose param is `{ name: code, type: string, 
       "params": {}, "code": "def transform(value):\n    return value.upper()",
       "position": { "x": 360, "y": 80 } }
   ],
-  "edges": [ { "source": "n1", "target": "n2" } ]
+  "edges": [ { "source": "n1", "target": "n2" } ],
+  "notes": [
+    { "id": "note1", "text": "Runs nightly; owner = data-eng. Holiday calendar TBD.",
+      "position": { "x": 120, "y": 220 }, "size": { "width": 220, "height": 90 } }
+  ]
 }
 ```
 

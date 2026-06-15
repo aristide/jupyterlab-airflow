@@ -51,6 +51,29 @@ describe('registry -> RJSF schema (nodeForm)', () => {
     expect(uiSchema.code).toEqual({ 'ui:widget': 'code' });
     expect(uiSchema.bash_command).toEqual({ 'ui:widget': 'textarea' });
   });
+
+  it('maps a param `help` to the schema description (inline field help)', () => {
+    const op: IOperatorDef = {
+      id: 'x',
+      label: 'X',
+      category: 'C',
+      taskIdPrefix: 'x',
+      params: [
+        {
+          name: 'cmd',
+          label: 'Cmd',
+          required: true,
+          widget: 'text',
+          help: 'Run this command.'
+        },
+        { name: 'plain', label: 'Plain', required: false, widget: 'text' }
+      ]
+    };
+    const { schema } = nodeForm(op);
+    const props = schema.properties as Record<string, { description?: string }>;
+    expect(props.cmd.description).toBe('Run this command.');
+    expect(props.plain.description).toBeUndefined();
+  });
 });
 
 describe('node IR <-> form data', () => {
@@ -111,16 +134,31 @@ describe('DAG form data', () => {
       params: { a: 1 }
     });
     expect(formData.schedule).toBe('@daily');
+    expect(formData.tags).toBe('studio');
     expect(formData.params).toBe(JSON.stringify({ a: 1 }, null, 2));
     const dag = formDataToDag(formData);
     expect(dag.schedule).toBe('@daily');
     expect(dag.owner).toBe('dana');
+    expect(dag.tags).toEqual(['studio']);
     expect(dag.params).toEqual({ a: 1 });
   });
 
-  it('builds a schema with the schedule widget wired', () => {
-    const { uiSchema } = dagForm();
+  it('edits tags as comma-separated text (trim + de-dup, empty -> [])', () => {
+    // IR array -> comma-separated string for the form.
+    expect(dagToFormData({ dag_id: 'd', tags: ['a', 'b'] }).tags).toBe('a, b');
+    // Form string -> trimmed, de-duplicated array for the IR.
+    expect(
+      formDataToDag({ dag_id: 'd', tags: 'studio, etl ,studio' }).tags
+    ).toEqual(['studio', 'etl']);
+    expect(formDataToDag({ dag_id: 'd', tags: '' }).tags).toEqual([]);
+  });
+
+  it('builds a schema with the schedule widget and a string tags field', () => {
+    const { schema, uiSchema } = dagForm();
     expect(uiSchema.schedule).toEqual({ 'ui:widget': 'schedule' });
     expect(uiSchema.params).toEqual({ 'ui:widget': 'json' });
+    // tags is a plain string field (no RJSF array widget).
+    const props = schema.properties as Record<string, { type?: string }>;
+    expect(props.tags.type).toBe('string');
   });
 });

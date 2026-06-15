@@ -5,6 +5,7 @@ import { AfdagFlowNode, IAfdagNodeData } from '../graph';
 import { IOperatorDef } from '../interfaces';
 import { getOperator } from '../operators';
 import { AfdagForm } from './AfdagForm';
+import { useEditorActions } from './editorContext';
 
 export interface INodeTabProps {
   node: AfdagFlowNode | null;
@@ -19,6 +20,7 @@ export interface INodeTabProps {
  */
 export function NodeTab(props: INodeTabProps): JSX.Element {
   const { node, onNodeChange } = props;
+  const { deleteNode } = useEditorActions();
   if (!node) {
     return (
       <div className="jp-afdag-tabpanel">
@@ -31,6 +33,12 @@ export function NodeTab(props: INodeTabProps): JSX.Element {
     return (
       <div className="jp-afdag-tabpanel">
         <div className="jp-afdag-hint">Unknown operator: {node.data.op}</div>
+        <button
+          className="jp-afdag-btn jp-afdag-btn-danger jp-afdag-node-delete-btn"
+          onClick={() => deleteNode(node.id)}
+        >
+          Delete task
+        </button>
       </div>
     );
   }
@@ -42,6 +50,13 @@ export function NodeTab(props: INodeTabProps): JSX.Element {
         def={def}
         onNodeChange={onNodeChange}
       />
+      <button
+        className="jp-afdag-btn jp-afdag-btn-danger jp-afdag-node-delete-btn"
+        title="Remove this task and its connections"
+        onClick={() => deleteNode(node.id)}
+      >
+        Delete task
+      </button>
     </div>
   );
 }

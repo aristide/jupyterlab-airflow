@@ -96,6 +96,7 @@ dmypy.json
 CLAUDE.md
 
 scope/
+design-reference/
 
 # MemSearch plugin
 .memsearch/

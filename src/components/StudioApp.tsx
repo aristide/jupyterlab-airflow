@@ -3,28 +3,37 @@ import { UUID } from '@lumino/coreutils';
 import { ISignal } from '@lumino/signaling';
 import {
   Background,
+  ConnectionLineType,
   Controls,
   MarkerType,
   MiniMap,
   ReactFlow,
   addEdge,
+  reconnectEdge,
   useEdgesState,
   useNodesState
 } from '@xyflow/react';
 import type {
   Connection,
   Edge,
+  EdgeTypes,
   NodeTypes,
   ReactFlowInstance
 } from '@xyflow/react';
 import * as React from 'react';
 
 import {
+  AFDAG_EDGE_TYPE,
+  AFDAG_NOTE_TYPE,
   AfdagFlowNode,
+  DEFAULT_NOTE_SIZE,
   IAfdagNodeData,
+  NOTE_OP,
+  canConnect,
   flowToIR,
   hasCycle,
-  irToFlow
+  irToFlow,
+  isNoteNode
 } from '../graph';
 import { deployDag, deployStatus, setDagPaused, triggerDag } from '../handler';
 import { IOperatorDef } from '../interfaces';
@@ -37,9 +46,12 @@ import {
   validateNodeParams
 } from '../operators';
 import { IStudioServices } from '../services';
+import { AfdagEdge } from './AfdagEdge';
 import { AfdagNode } from './AfdagNode';
 import { DeployBanner, IDeployState } from './DeployBanner';
+import { EditorActionsContext, IEditorActions } from './editorContext';
 import { Inspector } from './Inspector';
+import { NoteNode } from './NoteNode';
 import { Palette } from './Palette';
 
 // Deploy poll cadence: a few minutes total, backing off from 2s to 8s. Airflow
@@ -51,9 +63,21 @@ const POLL_MAX_MS = 8000;
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => window.setTimeout(resolve, ms));
 
-// Custom node types must be a stable, module-scope object or ReactFlow
+// Custom node/edge types must be a stable, module-scope object or ReactFlow
 // re-renders endlessly.
-const nodeTypes: NodeTypes = { afdagNode: AfdagNode };
+const nodeTypes: NodeTypes = {
+  afdagNode: AfdagNode,
+  [AFDAG_NOTE_TYPE]: NoteNode
+};
+const edgeTypes: EdgeTypes = { [AFDAG_EDGE_TYPE]: AfdagEdge };
+
+// Applied to every edge (loaded, drawn, or reconnected): a rounded-corner
+// smoothstep arrow that can be grabbed by either endpoint to rewire it.
+const defaultEdgeOptions = {
+  type: AFDAG_EDGE_TYPE,
+  reconnectable: true,
+  markerEnd: { type: MarkerType.ArrowClosed }
+};
 
 export interface IStudioAppProps {
   context: DocumentRegistry.IContext<AfdagModel>;
@@ -78,6 +102,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   );
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [leftCollapsed, setLeftCollapsed] = React.useState(false);
+  const [rightCollapsed, setRightCollapsed] = React.useState(false);
   const [deploy, setDeploy] = React.useState<IDeployState>({
     phase: 'idle',
     message: ''
@@ -96,6 +122,10 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const draggingRef = React.useRef<boolean>(false);
   const latestRef = React.useRef({ nodes, edges, dag });
   latestRef.current = { nodes, edges, dag };
+  // Latest selection, read by onNodesDelete (a stable callback) without
+  // re-subscribing on every selection change.
+  const selectedIdRef = React.useRef<string | null>(selectedId);
+  selectedIdRef.current = selectedId;
 
   // Fetch the operator registry (GET operators) once at activation. The palette
   // and node forms are generated from it; getOperator/validateNodeParams read
@@ -221,19 +251,101 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     };
   }, [resized]);
 
+  const toggleLeft = React.useCallback(
+    () => setLeftCollapsed(collapsed => !collapsed),
+    []
+  );
+  const toggleRight = React.useCallback(
+    () => setRightCollapsed(collapsed => !collapsed),
+    []
+  );
+
+  // Re-fit the canvas after a side panel collapses/expands. The width change is
+  // internal — the Lumino widget itself doesn't resize, so the `resized` signal
+  // never fires — so nudge fitView once the CSS width transition has settled.
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      rfRef.current?.fitView();
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [leftCollapsed, rightCollapsed]);
+
   const onConnect = React.useCallback(
     (connection: Connection): void => {
-      if (connection.source === connection.target) {
+      if (
+        !canConnect(
+          connection.source,
+          connection.target,
+          latestRef.current.edges
+        )
+      ) {
         return;
       }
+      setEdges(eds => addEdge({ ...connection, ...defaultEdgeOptions }, eds));
+    },
+    [setEdges]
+  );
+
+  // Shared connect/reconnect guard (no self-loops, no duplicate edges).
+  const isValidConnection = React.useCallback(
+    (connection: Connection | Edge): boolean =>
+      canConnect(connection.source, connection.target, latestRef.current.edges),
+    []
+  );
+
+  // Drag an edge endpoint onto a different node to rewire the dependency. An
+  // invalid or empty drop is rejected by isValidConnection and the edge snaps
+  // back unchanged — deletion stays explicit (× button / Delete key).
+  const onReconnect = React.useCallback(
+    (oldEdge: Edge, newConnection: Connection): void => {
+      setEdges(eds => reconnectEdge(oldEdge, newConnection, eds));
+    },
+    [setEdges]
+  );
+
+  // Remove a task node and its incident edges (× button / NODE-tab path).
+  const deleteNode = React.useCallback(
+    (id: string): void => {
+      setNodes(nds => nds.filter(node => node.id !== id));
       setEdges(eds =>
-        addEdge(
-          { ...connection, markerEnd: { type: MarkerType.ArrowClosed } },
-          eds
+        eds.filter(edge => edge.source !== id && edge.target !== id)
+      );
+      setSelectedId(current => (current === id ? null : current));
+    },
+    [setNodes, setEdges]
+  );
+
+  // Remove a single dependency edge, leaving both nodes (on-edge × button).
+  const deleteEdge = React.useCallback(
+    (id: string): void => {
+      setEdges(eds => eds.filter(edge => edge.id !== id));
+    },
+    [setEdges]
+  );
+
+  // Update an annotation note card's text (inline textarea edit).
+  const updateNoteText = React.useCallback(
+    (id: string, text: string): void => {
+      setNodes(nds =>
+        nds.map(node =>
+          node.id === id ? { ...node, data: { ...node.data, text } } : node
         )
       );
     },
-    [setEdges]
+    [setNodes]
+  );
+
+  // Clear the inspector selection when the selected node is removed via the
+  // keyboard (ReactFlow's built-in Delete path runs through onNodesChange).
+  const onNodesDelete = React.useCallback((deleted: AfdagFlowNode[]): void => {
+    if (deleted.some(node => node.id === selectedIdRef.current)) {
+      setSelectedId(null);
+    }
+  }, []);
+
+  const editorActions = React.useMemo<IEditorActions>(
+    () => ({ deleteNode, deleteEdge, updateNoteText }),
+    [deleteNode, deleteEdge, updateNoteText]
   );
 
   const addNode = React.useCallback(
@@ -270,20 +382,45 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     [setNodes]
   );
 
+  // Add an annotation note card (PRD §6.1.7). It shares the ReactFlow `nodes`
+  // array with task nodes but is tagged `noteNode` + a marker op, so flowToIR
+  // splits it into the IR's separate `notes[]` (never reaching codegen).
+  const addNote = React.useCallback((): void => {
+    setNodes(nds => {
+      const offset = nds.filter(isNoteNode).length * 24;
+      const note: AfdagFlowNode = {
+        id: UUID.uuid4(),
+        type: AFDAG_NOTE_TYPE,
+        position: { x: 100 + offset, y: 100 + offset },
+        width: DEFAULT_NOTE_SIZE.width,
+        height: DEFAULT_NOTE_SIZE.height,
+        data: { op: NOTE_OP, task_id: '', params: {}, text: '' }
+      };
+      return nds.concat(note);
+    });
+  }, [setNodes]);
+
+  // The Airflow-task nodes only (note cards are excluded from validation, the
+  // error badge, the node count, and inspector selection).
+  const taskNodes = React.useMemo(
+    () => nodes.filter(n => !isNoteNode(n)),
+    [nodes]
+  );
+
   const errorCount = React.useMemo(() => {
     let count = 0;
-    for (const node of nodes) {
+    for (const node of taskNodes) {
       if (!validateNodeParams(node.data.op, node.data.params).valid) {
         count += 1;
       }
     }
-    if (hasCycle(nodes, edges)) {
+    if (hasCycle(taskNodes, edges)) {
       count += 1;
     }
     return count;
-  }, [nodes, edges]);
+  }, [taskNodes, edges]);
 
-  const selected = nodes.find(n => n.id === selectedId) ?? null;
+  const selected = taskNodes.find(n => n.id === selectedId) ?? null;
 
   // The IR projected from the live graph, fed to the CODE preview.
   const currentIR = React.useMemo(
@@ -294,12 +431,12 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   // Instant, client-side validation messages for the CODE tab's panel.
   const clientErrors = React.useMemo(() => {
     const messages: string[] = [];
-    if (hasCycle(nodes, edges)) {
+    if (hasCycle(taskNodes, edges)) {
       messages.push(
         'DAG contains a cycle — Airflow does not support cyclic dependencies.'
       );
     }
-    for (const node of nodes) {
+    for (const node of taskNodes) {
       const result = validateNodeParams(node.data.op, node.data.params);
       if (!result.valid) {
         messages.push(
@@ -308,7 +445,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       }
     }
     return messages;
-  }, [nodes, edges]);
+  }, [taskNodes, edges]);
 
   // Stop any in-flight poll loop (dismiss / unmount / re-deploy).
   const cancelPoll = React.useCallback((): void => {
@@ -447,102 +584,121 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   }
 
   return (
-    <div className="jp-afdag-root">
-      <div className="jp-afdag-topbar">
-        <span className="jp-afdag-brand">Airflow Studio</span>
-        <span className="jp-afdag-dagid">{dag.dag_id || 'untitled'}</span>
-        <span className="jp-afdag-count">
-          {nodes.length} {nodes.length === 1 ? 'node' : 'nodes'}
-        </span>
-        <span
-          className={
-            errorCount
-              ? 'jp-afdag-errors jp-mod-error'
-              : 'jp-afdag-errors jp-mod-ok'
-          }
-        >
-          {errorCount
-            ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
-            : '✓ no errors'}
-        </span>
-        <span className="jp-afdag-spacer" />
-        <button
-          className="jp-afdag-btn"
-          title="Save (.afdag)"
-          onClick={() => void context.save()}
-        >
-          Save
-        </button>
-        <button
-          className="jp-afdag-btn jp-afdag-btn-primary"
-          title={
-            errorCount
-              ? 'Fix validation errors before deploying'
-              : 'Validate and deploy the DAG to Airflow'
-          }
-          disabled={
-            deploy.phase === 'writing' ||
-            deploy.phase === 'waiting' ||
-            errorCount > 0 ||
-            nodes.length === 0
-          }
-          onClick={() => void onDeploy()}
-        >
-          {deploy.phase === 'writing' || deploy.phase === 'waiting'
-            ? 'Deploying…'
-            : 'Deploy'}
-        </button>
-      </div>
-      <DeployBanner
-        state={deploy}
-        onDismiss={onDismissDeploy}
-        onUnpauseTrigger={() => void onUnpauseTrigger()}
-        onKeepWaiting={onKeepWaiting}
-      />
-      <div className="jp-afdag-body">
-        <Palette operators={operators} onAdd={addNode} />
-        <div className="jp-afdag-canvas">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeDragStart={onNodeDragStart}
-            onNodeDragStop={onNodeDragStop}
-            onInit={instance => {
-              rfRef.current = instance;
-              instance.fitView();
-            }}
-            onNodeClick={(_, node) => setSelectedId(node.id)}
-            onPaneClick={() => setSelectedId(null)}
-            fitView
-            proOptions={{ hideAttribution: true }}
+    <EditorActionsContext.Provider value={editorActions}>
+      <div className="jp-afdag-root">
+        <div className="jp-afdag-topbar">
+          <span className="jp-afdag-brand">Airflow Studio</span>
+          <span className="jp-afdag-dagid">{dag.dag_id || 'untitled'}</span>
+          <span className="jp-afdag-count">
+            {taskNodes.length} {taskNodes.length === 1 ? 'node' : 'nodes'}
+          </span>
+          <span
+            className={
+              errorCount
+                ? 'jp-afdag-errors jp-mod-error'
+                : 'jp-afdag-errors jp-mod-ok'
+            }
           >
-            <Background />
-            <MiniMap pannable zoomable />
-            <Controls />
-          </ReactFlow>
-          {nodes.length === 0 && (
-            <div className="jp-afdag-empty">
-              Add operators from the left panel to get started.
-            </div>
-          )}
+            {errorCount
+              ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
+              : '✓ no errors'}
+          </span>
+          <span className="jp-afdag-spacer" />
+          <button
+            className="jp-afdag-btn"
+            title="Save (.afdag)"
+            onClick={() => void context.save()}
+          >
+            Save
+          </button>
+          <button
+            className="jp-afdag-btn jp-afdag-btn-primary"
+            title={
+              errorCount
+                ? 'Fix validation errors before deploying'
+                : 'Validate and deploy the DAG to Airflow'
+            }
+            disabled={
+              deploy.phase === 'writing' ||
+              deploy.phase === 'waiting' ||
+              errorCount > 0 ||
+              taskNodes.length === 0
+            }
+            onClick={() => void onDeploy()}
+          >
+            {deploy.phase === 'writing' || deploy.phase === 'waiting'
+              ? 'Deploying…'
+              : 'Deploy'}
+          </button>
         </div>
-        <Inspector
-          dag={dag}
-          node={selected}
-          ir={currentIR}
-          services={services}
-          currentPath={context.path}
-          clientErrors={clientErrors}
-          reloadKey={reloadKey}
-          onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
-          onNodeChange={updateNode}
+        <DeployBanner
+          state={deploy}
+          onDismiss={onDismissDeploy}
+          onUnpauseTrigger={() => void onUnpauseTrigger()}
+          onKeepWaiting={onKeepWaiting}
         />
+        <div className="jp-afdag-body">
+          <Palette
+            operators={operators}
+            onAdd={addNode}
+            onAddNote={addNote}
+            collapsed={leftCollapsed}
+            onToggle={toggleLeft}
+          />
+          <div className="jp-afdag-canvas">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              defaultEdgeOptions={defaultEdgeOptions}
+              connectionLineType={ConnectionLineType.SmoothStep}
+              deleteKeyCode={['Delete', 'Backspace']}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              isValidConnection={isValidConnection}
+              onReconnect={onReconnect}
+              onNodesDelete={onNodesDelete}
+              onNodeDragStart={onNodeDragStart}
+              onNodeDragStop={onNodeDragStop}
+              onInit={instance => {
+                rfRef.current = instance;
+                instance.fitView();
+              }}
+              onNodeClick={(_, node) =>
+                setSelectedId(isNoteNode(node) ? null : node.id)
+              }
+              onPaneClick={() => setSelectedId(null)}
+              fitView
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background />
+              <MiniMap pannable zoomable />
+              <Controls />
+            </ReactFlow>
+            {nodes.length === 0 && (
+              <div className="jp-afdag-empty">
+                Add operators from the left panel to get started.
+              </div>
+            )}
+          </div>
+          <Inspector
+            dag={dag}
+            node={selected}
+            ir={currentIR}
+            services={services}
+            currentPath={context.path}
+            clientErrors={clientErrors}
+            reloadKey={reloadKey}
+            collapsed={rightCollapsed}
+            onToggle={toggleRight}
+            onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
+            onNodeChange={updateNode}
+          />
+        </div>
       </div>
-    </div>
+    </EditorActionsContext.Provider>
   );
 }
 
