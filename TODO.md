@@ -14,9 +14,11 @@ _(none)_
 
 Next steps follow the MVP milestones in `docs/PRD.md` (§5, §14).
 
-- [ ] Bump `requires-python` to `>=3.9` in `pyproject.toml` (Airflow 3 needs 3.9+)
+_(none — MVP backlog cleared; see `docs/PRD.md` §5/§14 for post-MVP work, e.g. tiered manager auto-refresh, trigger-conf form, Traditional codegen, per-node common params.)_
 
 ## Done
+
+- [x] 2026-06-15 — Bump `requires-python` to `>=3.9` in `pyproject.toml` (Airflow 3 needs 3.9+); dropped the now-stale `Python :: 3.8` classifier.
 
 - [x] 2026-06-15 — Debounce IR→model commit to node drag-stop (`StudioApp.tsx`): a `draggingRef` (set on `onNodeDragStart`, cleared on `onNodeDragStop`) gates the persist effect so a node drag commits **once** at drag-stop instead of every ReactFlow frame; extracted a `commit()` that reads the latest graph via a ref. Non-drag edits still commit immediately; selection-only churn was already deduped by the serialized-IR compare.
 
