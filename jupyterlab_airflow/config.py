@@ -13,6 +13,12 @@ by ``.devcontainer/docker-compose.yaml``.
     AIRFLOW_API_TOKEN     A pre-minted JWT. If set, username/password are not
                           used and no token is requested from /auth/token.
     AIRFLOW_VERIFY_SSL    "false" to disable TLS verification. Default: true
+    AIRFLOW_DAGS_DIR      Deploy target: the dags folder on the shared volume
+                          (read by ``deploy.py``). Default: /opt/airflow/dags.
+                          In the devcontainer this is the mounted host
+                          ``airflow-dags/`` folder.
+    AIRFLOW_OPERATORS_DIR Optional extra directory of operator YAML files that
+                          override/extend the bundled registry (``registry.py``).
 """
 
 import os

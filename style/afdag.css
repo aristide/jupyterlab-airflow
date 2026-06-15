@@ -78,6 +78,34 @@
   background: var(--jp-brand-color0);
 }
 
+.jp-afdag-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.jp-afdag-btn-primary {
+  margin-left: 6px;
+  font-weight: 600;
+}
+
+.jp-afdag-deploy-status {
+  margin-left: 12px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-afdag-deploy-status.jp-mod-ok {
+  color: var(--jp-success-color1);
+}
+
+.jp-afdag-deploy-status.jp-mod-error {
+  color: var(--jp-error-color1);
+}
+
 /* Body layout */
 .jp-afdag-body {
   flex: 1 1 auto;

@@ -1,6 +1,6 @@
 import { ServerConnection } from '@jupyterlab/services';
 
-import { generateDag, listDags } from '../handler';
+import { deployDag, generateDag, listDags } from '../handler';
 import { createEmptyIR } from '../ir';
 import {
   getOperator,
@@ -133,6 +133,41 @@ describe('generateDag handler', () => {
       const init = makeRequest.mock.calls[0][1] as RequestInit;
       expect(init.method).toBe('POST');
       expect(String(init.body)).toContain('"dag_id":"demo"');
+    } finally {
+      makeRequest.mockRestore();
+    }
+  });
+});
+
+// Deploy POSTs the IR to `deploy`; the server validates then writes the file.
+describe('deployDag handler', () => {
+  it('returns the deploy result payload', async () => {
+    const makeRequest = jest
+      .spyOn(ServerConnection, 'makeRequest')
+      .mockResolvedValue({
+        ok: true,
+        statusText: 'OK',
+        text: async () =>
+          JSON.stringify({
+            data: {
+              deployed: true,
+              filename: 'demo.py',
+              path: '/dags/demo.py',
+              dag_id: 'demo',
+              warnings: [],
+              errors: [],
+              dagbag: { status: 'skipped' }
+            }
+          })
+      } as unknown as Response);
+
+    try {
+      const res = await deployDag(createEmptyIR('demo'));
+      expect(res.status).toBe('OK');
+      expect(res.data?.deployed).toBe(true);
+      expect(res.data?.filename).toBe('demo.py');
+      const init = makeRequest.mock.calls[0][1] as RequestInit;
+      expect(init.method).toBe('POST');
     } finally {
       makeRequest.mockRestore();
     }

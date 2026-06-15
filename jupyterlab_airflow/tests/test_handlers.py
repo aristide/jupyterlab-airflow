@@ -72,6 +72,39 @@ async def test_generate_endpoint(jp_fetch):
     assert "@task.bash(task_id='t')" in data["code"]
 
 
+def _bash_ir(dag_id="ep_dag"):
+    return {
+        "dag": {"dag_id": dag_id, "schedule": "@daily", "start_date": "2026-01-01"},
+        "nodes": [
+            {"id": "n", "op": "bash", "task_id": "t",
+             "params": {"bash_command": "echo hi"}}
+        ],
+        "edges": [],
+    }
+
+
+async def test_validate_endpoint(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow", "validate", method="POST", body=json.dumps(_bash_ir())
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["valid"] is True
+    assert data["dagbag"]["status"] == "skipped"  # no Airflow in the test env
+
+
+async def test_deploy_endpoint(jp_fetch, tmp_path, monkeypatch):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    response = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_bash_ir())
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["deployed"] is True
+    assert data["filename"] == "ep_dag.py"
+    assert (tmp_path / "ep_dag.py").exists()
+
+
 async def test_trigger_endpoint(jp_fetch):
     response = await jp_fetch(
         "jupyterlab-airflow",

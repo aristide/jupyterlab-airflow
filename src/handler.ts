@@ -6,9 +6,11 @@ import {
   IDagListRes,
   IDagRunsRes,
   IDagRun,
+  IDeployRes,
   IGenerateRes,
   IHealth,
-  IOperatorDef
+  IOperatorDef,
+  IValidateRes
 } from './interfaces';
 import { IAfdagIR } from './ir';
 
@@ -81,6 +83,12 @@ export const listOperators = (): Promise<IApiRes<IOperatorDef[]>> =>
 
 export const generateDag = (ir: IAfdagIR): Promise<IApiRes<IGenerateRes>> =>
   POST<IGenerateRes>('generate', ir as unknown as Record<string, unknown>);
+
+export const validateDag = (ir: IAfdagIR): Promise<IApiRes<IValidateRes>> =>
+  POST<IValidateRes>('validate', ir as unknown as Record<string, unknown>);
+
+export const deployDag = (ir: IAfdagIR): Promise<IApiRes<IDeployRes>> =>
+  POST<IDeployRes>('deploy', ir as unknown as Record<string, unknown>);
 
 export const listDags = (limit = 100): Promise<IApiRes<IDagListRes>> =>
   GET<IDagListRes>('dags', { limit: String(limit) });

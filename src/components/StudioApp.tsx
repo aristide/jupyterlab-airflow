@@ -26,6 +26,7 @@ import {
   hasCycle,
   irToFlow
 } from '../graph';
+import { deployDag } from '../handler';
 import { IOperatorDef } from '../interfaces';
 import { IAfdagIR, createEmptyIR, dagIdFromPath, stringifyIR } from '../ir';
 import { AfdagModel } from '../model';
@@ -67,6 +68,10 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   );
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
+  const [deploy, setDeploy] = React.useState<{
+    status: 'idle' | 'busy' | 'ok' | 'error';
+    message: string;
+  }>({ status: 'idle', message: '' });
 
   const baseRef = React.useRef<IAfdagIR>(createEmptyIR(''));
   const lastWritten = React.useRef<string>('');
@@ -267,6 +272,24 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     return messages;
   }, [nodes, edges]);
 
+  // Deploy: server validates (full pipeline) then atomically writes the .py.
+  const onDeploy = React.useCallback(async (): Promise<void> => {
+    setDeploy({ status: 'busy', message: 'Deploying…' });
+    const res = await deployDag(currentIR);
+    if (res.status === 'OK' && res.data?.deployed) {
+      setDeploy({
+        status: 'ok',
+        message: `Deployed ${res.data.filename}${
+          res.data.warnings.length ? ' (Airflow will validate on import)' : ''
+        }`
+      });
+    } else {
+      const detail =
+        res.data?.errors?.join('; ') || res.error || 'Deploy failed';
+      setDeploy({ status: 'error', message: detail });
+    }
+  }, [currentIR]);
+
   if (opsError) {
     return (
       <div className="jp-afdag-loading jp-mod-error">
@@ -298,6 +321,20 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
             : '✓ no errors'}
         </span>
+        {deploy.status !== 'idle' && (
+          <span
+            className={
+              deploy.status === 'error'
+                ? 'jp-afdag-deploy-status jp-mod-error'
+                : deploy.status === 'ok'
+                  ? 'jp-afdag-deploy-status jp-mod-ok'
+                  : 'jp-afdag-deploy-status'
+            }
+            title={deploy.message}
+          >
+            {deploy.message}
+          </span>
+        )}
         <span className="jp-afdag-spacer" />
         <button
           className="jp-afdag-btn"
@@ -305,6 +342,20 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
           onClick={() => void context.save()}
         >
           Save
+        </button>
+        <button
+          className="jp-afdag-btn jp-afdag-btn-primary"
+          title={
+            errorCount
+              ? 'Fix validation errors before deploying'
+              : 'Validate and deploy the DAG to Airflow'
+          }
+          disabled={
+            deploy.status === 'busy' || errorCount > 0 || nodes.length === 0
+          }
+          onClick={() => void onDeploy()}
+        >
+          {deploy.status === 'busy' ? 'Deploying…' : 'Deploy'}
         </button>
       </div>
       <div className="jp-afdag-body">

@@ -8,7 +8,9 @@ from jupyter_server.utils import url_path_join
 
 from .client import AirflowError, get_client
 from .codegen import generate_dag
+from .deploy import deploy_dag
 from .registry import client_view
+from .validation import validate_dag
 
 NAMESPACE = "jupyterlab-airflow"
 
@@ -66,6 +68,30 @@ class GenerateHandler(_AirflowHandler):
     async def post(self):
         ir = self.get_json_body() or {}
         await self.respond(generate_dag, ir)
+
+
+class ValidateHandler(_AirflowHandler):
+    """Run the full Appendix E validation pipeline (incl. the isolated DagBag
+    subprocess) without writing anything. Returns ``{valid, code, errors, dagbag}``."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        ir = self.get_json_body() or {}
+        await self.respond(validate_dag, ir)
+
+
+class DeployHandler(_AirflowHandler):
+    """Validate then atomically write the generated DAG to the dags folder.
+
+    Privileged (PRD §9): writing into the dags folder == running code as the
+    Airflow worker. Validation failures come back in ``errors`` (200), the file
+    is not written. The post-deploy import poll lives in the manager.
+    """
+
+    @tornado.web.authenticated
+    async def post(self):
+        ir = self.get_json_body() or {}
+        await self.respond(deploy_dag, ir)
 
 
 class DagsHandler(_AirflowHandler):
@@ -133,6 +159,8 @@ def setup_handlers(web_app):
         (_url(base_url, "health"), HealthHandler),
         (_url(base_url, "operators"), OperatorsHandler),
         (_url(base_url, "generate"), GenerateHandler),
+        (_url(base_url, "validate"), ValidateHandler),
+        (_url(base_url, "deploy"), DeployHandler),
         (_url(base_url, "dags"), DagsHandler),
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),

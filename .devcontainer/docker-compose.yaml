@@ -49,6 +49,9 @@ services:
       AIRFLOW_API_URL: http://airflow:8080
       AIRFLOW_USERNAME: admin
       AIRFLOW_PASSWORD: admin
+      # Deploy target: the same host airflow-dags/ folder Airflow reads from
+      # /opt/airflow/dags, reachable here under the mounted workspace.
+      AIRFLOW_DAGS_DIR: /workspace/.devcontainer/airflow-dags
     depends_on:
       airflow:
         condition: service_started

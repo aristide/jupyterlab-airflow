@@ -231,6 +231,18 @@ def generate_dag(ir: Dict[str, Any]) -> Dict[str, Any]:
     return {"code": code, "valid": not errors, "errors": errors}
 
 
+def format_code(code: str) -> str:
+    """Best-effort deterministic formatting (PRD §8.4): run black if it is
+    importable, otherwise return the code unchanged. Idempotent identical IR ->
+    byte-identical output once a formatter is present."""
+    try:
+        import black
+
+        return black.format_str(code, mode=black.Mode())
+    except Exception:  # noqa: BLE001 - black is optional in the Jupyter env
+        return code
+
+
 def _render(ir: Dict[str, Any]) -> str:
     dag = ir.get("dag") or {}
     nodes = ir.get("nodes") or []

@@ -78,3 +78,30 @@ export interface IGenerateRes {
   valid: boolean;
   errors: string[];
 }
+
+// Stage 7 (DagBag import) outcome. `skipped` when Airflow isn't importable in
+// the Jupyter env (the authoritative check then comes from /importErrors).
+export interface IDagBagResult {
+  status: 'ok' | 'skipped' | 'error';
+  detail?: unknown;
+  dags?: string[];
+}
+
+// Result of `POST validate` — the full Appendix E pipeline, no write.
+export interface IValidateRes {
+  valid: boolean;
+  code: string;
+  errors: string[];
+  dagbag: IDagBagResult;
+}
+
+// Result of `POST deploy` — validate then atomic shared-volume write.
+export interface IDeployRes {
+  deployed: boolean;
+  path?: string;
+  filename?: string;
+  dag_id: string;
+  warnings: string[];
+  errors: string[];
+  dagbag: IDagBagResult;
+}
