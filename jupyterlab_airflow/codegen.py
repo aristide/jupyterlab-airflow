@@ -296,9 +296,13 @@ def _render(ir: Dict[str, Any]) -> str:
         )
     ]
 
+    # afdag_id (the stable `.afdag` identity) travels in the header so the
+    # manager can re-associate a deployed DAG with its source across a dag_id
+    # rename (PRD §6.1.8(B) / §8.9). Whitespace-stripped to stay one token.
+    afdag_id = "".join(str((ir.get("provenance") or {}).get("afdag_id", "")).split())
     header = (
         f"# airflow-studio: managed  studio={STUDIO_VERSION}  "
-        f"{_ir_hash(ir)}  dag_id={dag_id}  syntax=taskflow"
+        f"{_ir_hash(ir)}  dag_id={dag_id}  afdag_id={afdag_id}  syntax=taskflow"
     )
     imports = "\n".join(_collect_imports(used_ops))
     decorator = _dag_decorator(dag)

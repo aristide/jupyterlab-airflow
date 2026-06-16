@@ -14,6 +14,8 @@ import {
   IImportErrorsRes,
   IOperatorDef,
   IPurgeRes,
+  IRenamePreflightRes,
+  IRetireRes,
   ITaskInstancesRes,
   ITaskLogsRes,
   IValidateRes
@@ -127,6 +129,19 @@ export const triggerDag = (
 
 export const deleteDag = (dagId: string): Promise<IApiRes<IPurgeRes>> =>
   POST<IPurgeRes>('dags/delete', { dag_id: dagId });
+
+// Rename migration (PRD §6.1.8(B)): check the old dag_id's deploy state, then
+// (after the new DAG registers) retire the old one — pause+remove, or purge.
+export const renamePreflight = (
+  dagId: string
+): Promise<IApiRes<IRenamePreflightRes>> =>
+  GET<IRenamePreflightRes>('dags/rename/preflight', { dag_id: dagId });
+
+export const retireOldDag = (
+  dagId: string,
+  purge: boolean
+): Promise<IApiRes<IRetireRes>> =>
+  POST<IRetireRes>('dags/retire', { dag_id: dagId, purge });
 
 export const listDagRuns = (
   dagId: string,

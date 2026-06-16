@@ -1,11 +1,19 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { json } from '@codemirror/lang-json';
 import { python } from '@codemirror/lang-python';
+import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, placeholder } from '@codemirror/view';
+import { jupyterHighlightStyle } from '@jupyterlab/codemirror';
 import * as React from 'react';
 
 export type CodeMirrorLanguage = 'python' | 'json';
+
+// JupyterLab's highlight style maps CodeMirror highlight tags to the
+// `--jp-mirror-editor-*` CSS variables, so tokens are colorized to match the
+// active JupyterLab theme (light/dark) — applied to every field, including the
+// read-only CODE-tab preview. Built once: the style is theme-aware via CSS vars.
+const syntaxHighlight = syntaxHighlighting(jupyterHighlightStyle);
 
 export interface ICodeMirrorFieldProps {
   value: string;
@@ -43,6 +51,7 @@ export function CodeMirrorField(props: ICodeMirrorFieldProps): JSX.Element {
       doc: value,
       extensions: [
         lineNumbers(),
+        syntaxHighlight,
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         langRef.current.of(languageExtension(language)),
@@ -82,5 +91,10 @@ export function CodeMirrorField(props: ICodeMirrorFieldProps): JSX.Element {
     }
   }, [value]);
 
-  return <div className="jp-afdag-cm" ref={hostRef} />;
+  return (
+    <div
+      className={readOnly ? 'jp-afdag-cm jp-mod-readonly' : 'jp-afdag-cm'}
+      ref={hostRef}
+    />
+  );
 }

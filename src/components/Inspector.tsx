@@ -102,7 +102,7 @@ export function Inspector(props: IInspectorProps): JSX.Element {
       </div>
       {tab === 'dag' && (
         <DagTab
-          key={props.reloadKey}
+          key={`${props.reloadKey}:${props.dag.dag_id}`}
           dag={props.dag}
           onDagChange={props.onDagChange}
         />

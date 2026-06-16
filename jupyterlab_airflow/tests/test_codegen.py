@@ -52,6 +52,19 @@ def test_taskflow_dag_is_valid_python_and_airflow3():
     assert code.rstrip().endswith("my_dag()")
 
 
+def test_header_carries_afdag_id_for_reassociation():
+    ir = _ir(
+        nodes=[{"id": "n1", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo hi"}}],
+        edges=[],
+    )
+    ir["provenance"] = {"afdag_id": "abc-123-uuid"}
+    code = generate_dag(ir)["code"]
+    # afdag_id rides in the provenance header so a deployed DAG stays linked to
+    # its `.afdag` across a dag_id rename (PRD §6.1.8(B) / §8.9).
+    assert "afdag_id=abc-123-uuid" in code.splitlines()[0]
+
+
 def test_operators_render_as_assignments():
     ir = _ir(
         nodes=[

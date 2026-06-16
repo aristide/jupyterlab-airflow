@@ -239,3 +239,89 @@ def purge_dag(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[
         "removed_file": removed_file,
         "purged_history": purged_history,
     }
+
+
+def rename_preflight(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:
+    """Report the deploy state of ``dag_id`` so the editor can pick the rename
+    path (PRD §6.1.8(B)). Returns ``{dag_id, file_exists, registered, active_runs}``:
+
+    - ``file_exists`` False **and** ``registered`` False -> a **draft** (rename is
+      a plain `dag_id` set, nothing to migrate);
+    - ``active_runs`` > 0 -> **block** (renaming would strand the in-flight run);
+    - otherwise -> a **deployed-idle** migration.
+    """
+    from .client import AirflowError, get_client
+
+    target = target or SharedVolumeTarget()
+    try:
+        file_exists = target.exists(f"{dag_id}.py")
+    except DeployError:
+        file_exists = False
+
+    client = get_client()
+    registered = False
+    try:
+        client.get_dag(dag_id)
+        registered = True
+    except AirflowError as err:
+        if err.status != 404:
+            raise
+
+    active_runs = 0
+    if registered:
+        runs = (client.list_dag_runs(dag_id, limit=25) or {}).get("dag_runs", []) or []
+        active = {"running", "queued"}
+        active_runs = sum(
+            1 for run in runs if str(run.get("state", "")).lower() in active
+        )
+
+    return {
+        "dag_id": dag_id,
+        "file_exists": bool(file_exists),
+        "registered": registered,
+        "active_runs": active_runs,
+    }
+
+
+def retire_old_dag(
+    dag_id: str, *, purge: bool, target: Optional[SharedVolumeTarget] = None
+) -> Dict[str, Any]:
+    """Reconcile the OLD DAG after a `dag_id` rename migration (PRD §6.1.8(B)).
+
+    - ``purge=True``  -> remove the `.py` **and** delete history
+      (``DELETE /api/v2/dags/{id}``) — same as :func:`purge_dag`.
+    - ``purge=False`` -> remove the `.py` (so it isn't re-imported) and **pause**
+      the now-fileless/stale DAG, **keeping** its run history.
+
+    Tolerant of a missing file / a DAG Airflow never recorded (404).
+    """
+    if purge:
+        return purge_dag(dag_id, target)
+
+    from .client import AirflowError, get_client
+
+    target = target or SharedVolumeTarget()
+    filename = f"{dag_id}.py"
+    removed_file = False
+    try:
+        if target.exists(filename):
+            target.delete(filename)
+            removed_file = True
+    except DeployError:
+        # Not a safe/managed filename (e.g. a hand-written DAG) — leave it.
+        pass
+
+    paused = False
+    try:
+        get_client().set_paused(dag_id, True)
+        paused = True
+    except AirflowError as err:
+        if err.status != 404:
+            raise
+
+    return {
+        "dag_id": dag_id,
+        "removed_file": removed_file,
+        "paused": paused,
+        "purged_history": False,
+    }

@@ -1,3 +1,9 @@
+import {
+  Dialog,
+  InputDialog,
+  showDialog,
+  showErrorMessage
+} from '@jupyterlab/apputils';
 import { DocumentRegistry } from '@jupyterlab/docregistry';
 import { UUID } from '@lumino/coreutils';
 import { ISignal } from '@lumino/signaling';
@@ -35,9 +41,23 @@ import {
   irToFlow,
   isNoteNode
 } from '../graph';
-import { deployDag, deployStatus, setDagPaused, triggerDag } from '../handler';
+import {
+  deployDag,
+  deployStatus,
+  renamePreflight,
+  retireOldDag,
+  setDagPaused,
+  triggerDag
+} from '../handler';
 import { IOperatorDef } from '../interfaces';
-import { IAfdagIR, createEmptyIR, dagIdFromPath, stringifyIR } from '../ir';
+import {
+  IAfdagIR,
+  createEmptyIR,
+  dagIdFromPath,
+  normalizeAfdagFilename,
+  stringifyIR,
+  validateDagId
+} from '../ir';
 import { AfdagModel } from '../model';
 import {
   getOperator,
@@ -447,6 +467,13 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     return messages;
   }, [taskNodes, edges]);
 
+  // A queued "retire the old DAG" step for a dag_id rename migration (§6.1.8(B)):
+  // set just before deploying the renamed DAG; run once it reaches `registered`.
+  const pendingRetireRef = React.useRef<{
+    oldDagId: string;
+    purge: boolean;
+  } | null>(null);
+
   // Stop any in-flight poll loop (dismiss / unmount / re-deploy).
   const cancelPoll = React.useCallback((): void => {
     if (pollRef.current) {
@@ -482,9 +509,27 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
               isPaused: res.data.dag?.is_paused ?? true,
               message: `Registered ${dagId} (paused).`
             });
+            // Rename migration: the renamed DAG is live → retire the old one.
+            const pending = pendingRetireRef.current;
+            if (pending) {
+              pendingRetireRef.current = null;
+              const retired = await retireOldDag(
+                pending.oldDagId,
+                pending.purge
+              );
+              setDeploy(prev => ({
+                ...prev,
+                message:
+                  retired.status === 'OK'
+                    ? `Renamed to ${dagId} (paused). Old DAG “${pending.oldDagId}” ${pending.purge ? 'purged' : 'retired — history kept'}.`
+                    : `Renamed to ${dagId}, but retiring “${pending.oldDagId}” failed: ${retired.error ?? 'unknown error'}.`
+              }));
+            }
             return;
           }
           if (res.data.state === 'failed') {
+            // A migration's new DAG failed to import → leave the old one intact.
+            pendingRetireRef.current = null;
             setDeploy({
               phase: 'failed',
               dagId,
@@ -499,6 +544,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       }
 
       if (!token.cancelled) {
+        // Timed out before the renamed DAG registered → don't retire the old.
+        pendingRetireRef.current = null;
         setDeploy({
           phase: 'processing',
           dagId,
@@ -512,26 +559,155 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     []
   );
 
-  // Phase 1: validate + atomic write, then enter the polling lifecycle.
-  const onDeploy = React.useCallback(async (): Promise<void> => {
-    cancelPoll();
-    setDeploy({ phase: 'writing', message: 'Writing the DAG file…' });
-    const res = await deployDag(currentIR);
-    if (res.status !== 'OK' || !res.data?.deployed) {
-      const detail =
-        res.data?.errors?.join('; ') || res.error || 'Deploy failed';
-      setDeploy({ phase: 'error', message: detail });
+  // Phase 1: validate + atomic write, then enter the polling lifecycle. Takes an
+  // explicit IR so a rename migration can deploy the renamed DAG (§6.1.8(B)).
+  const runDeploy = React.useCallback(
+    async (ir: IAfdagIR): Promise<void> => {
+      cancelPoll();
+      setDeploy({ phase: 'writing', message: 'Writing the DAG file…' });
+      const res = await deployDag(ir);
+      if (res.status !== 'OK' || !res.data?.deployed) {
+        const detail =
+          res.data?.errors?.join('; ') || res.error || 'Deploy failed';
+        // A failed (re)deploy aborts any pending rename migration.
+        pendingRetireRef.current = null;
+        setDeploy({ phase: 'error', message: detail });
+        return;
+      }
+      const { dag_id: dagId, filename = '' } = res.data;
+      setDeploy({
+        phase: 'waiting',
+        dagId,
+        filename,
+        message: 'Waiting for Airflow to pick it up… (up to a few minutes)'
+      });
+      void pollLifecycle(dagId, filename);
+    },
+    [cancelPoll, pollLifecycle]
+  );
+
+  const onDeploy = React.useCallback((): void => {
+    pendingRetireRef.current = null; // a plain deploy never retires another DAG
+    void runDeploy(currentIR);
+  }, [runDeploy, currentIR]);
+
+  // Rename the .afdag DOCUMENT (file). Filesystem-only: it does NOT change the
+  // dag_id or affect any deployed/running pipeline (PRD §6.1.8(A)). Changing the
+  // dag_id is the separate, deploy-aware migration (§6.1.8(B), follow-up).
+  const onRename = React.useCallback(async (): Promise<void> => {
+    const base = context.path.split('/').pop() ?? context.path;
+    const result = await InputDialog.getText({
+      title: 'Rename DAG file',
+      text: base,
+      // Pre-select the stem so the user edits the name but keeps `.afdag`.
+      selectionRange: base.replace(/\.afdag$/i, '').length,
+      okLabel: 'Rename'
+    });
+    if (!result.button.accept) {
       return;
     }
-    const { dag_id: dagId, filename = '' } = res.data;
-    setDeploy({
-      phase: 'waiting',
-      dagId,
-      filename,
-      message: 'Waiting for Airflow to pick it up… (up to a few minutes)'
+    const normalized = normalizeAfdagFilename(result.value ?? '');
+    if ('error' in normalized) {
+      void showErrorMessage('Rename failed', normalized.error);
+      return;
+    }
+    if (normalized.name === base) {
+      return;
+    }
+    try {
+      await context.rename(normalized.name);
+    } catch (err) {
+      void showErrorMessage('Rename failed', String(err));
+    }
+  }, [context]);
+
+  // Change the dag_id (PRD §6.1.8(B)): a deploy-aware migration. Airflow has no
+  // rename — a new id is a NEW DAG with no history — so for a deployed DAG we
+  // deploy the renamed DAG, then retire the old one (keep history or purge), and
+  // we block while a run is in flight. A draft just sets the id.
+  const onRenameDagId = React.useCallback(async (): Promise<void> => {
+    const current = dag.dag_id;
+    const entry = await InputDialog.getText({
+      title: 'Rename DAG id',
+      text: current,
+      okLabel: 'Continue'
     });
-    void pollLifecycle(dagId, filename);
-  }, [currentIR, cancelPoll, pollLifecycle]);
+    if (!entry.button.accept) {
+      return;
+    }
+    const checked = validateDagId(entry.value ?? '');
+    if ('error' in checked) {
+      void showErrorMessage('Rename failed', checked.error);
+      return;
+    }
+    const next = checked.id;
+    if (next === current) {
+      return;
+    }
+
+    const pf = await renamePreflight(current);
+    if (pf.status !== 'OK' || !pf.data) {
+      void showErrorMessage(
+        'Rename failed',
+        pf.error ?? 'Could not check the current DAG state.'
+      );
+      return;
+    }
+    const { file_exists, registered, active_runs } = pf.data;
+
+    // Draft (nothing deployed): just set the id — no migration.
+    if (!file_exists && !registered) {
+      setDag(d => ({ ...d, dag_id: next }));
+      return;
+    }
+
+    // A run is in progress → block, with an explicit override.
+    if (active_runs > 0) {
+      const override = await showDialog({
+        title: 'A run is in progress',
+        body:
+          `“${current}” has ${active_runs} run(s) in progress. Renaming creates ` +
+          'a new DAG and removes the old file, which would strand the in-flight ' +
+          'run (Airflow runs the latest file on disk). Wait for it to finish, or ' +
+          'override and lose it.',
+        buttons: [
+          Dialog.cancelButton({ label: 'Cancel' }),
+          Dialog.warnButton({ label: 'Override (lose run)' })
+        ]
+      });
+      if (!override.button.accept) {
+        return;
+      }
+    }
+
+    // Deployed (idle, or overridden): choose what happens to the old DAG.
+    const choice = await showDialog({
+      title: 'Rename & redeploy',
+      body:
+        `Airflow has no rename — this creates a NEW DAG “${next}” (paused, empty ` +
+        `history). The old “${current}” history does NOT carry over. Keep the ` +
+        'old DAG’s history (paused) or purge it?',
+      buttons: [
+        Dialog.cancelButton({ label: 'Cancel' }),
+        Dialog.okButton({ label: 'Keep history' }),
+        Dialog.warnButton({ label: 'Purge old DAG' })
+      ]
+    });
+    if (!choice.button.accept) {
+      return;
+    }
+    const purge = choice.button.label === 'Purge old DAG';
+
+    // Migrate: set the new id in the editor (persisted by the commit effect),
+    // then deploy it; pollLifecycle retires the old DAG once the new registers.
+    const newIR: IAfdagIR = {
+      ...currentIR,
+      dag: { ...currentIR.dag, dag_id: next }
+    };
+    setDag(d => ({ ...d, dag_id: next }));
+    pendingRetireRef.current = { oldDagId: current, purge };
+    void runDeploy(newIR);
+  }, [dag.dag_id, currentIR, runDeploy]);
 
   const onDismissDeploy = React.useCallback((): void => {
     cancelPoll();
@@ -604,6 +780,20 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
               : '✓ no errors'}
           </span>
           <span className="jp-afdag-spacer" />
+          <button
+            className="jp-afdag-btn"
+            title="Rename the .afdag file (does not change the dag_id or affect a deployed DAG)"
+            onClick={() => void onRename()}
+          >
+            Rename file…
+          </button>
+          <button
+            className="jp-afdag-btn"
+            title="Change the dag_id — a guided migration for a deployed DAG (Airflow has no rename)"
+            onClick={() => void onRenameDagId()}
+          >
+            Rename DAG id…
+          </button>
           <button
             className="jp-afdag-btn"
             title="Save (.afdag)"

@@ -4,11 +4,14 @@ import os
 
 import pytest
 
+from jupyterlab_airflow.client import AirflowError
 from jupyterlab_airflow.deploy import (
     MANAGED_PREFIX,
     DeployError,
     SharedVolumeTarget,
     deploy_dag,
+    rename_preflight,
+    retire_old_dag,
 )
 
 
@@ -88,3 +91,85 @@ def test_list_and_verify(tmp_path):
     (tmp_path / "plain.py").write_text("x = 1\n")
     assert all(item["filename"] != "plain.py" for item in target.list())
     assert target.verify("plain.py") is False
+
+
+# -- rename migration (PRD §6.1.8(B)) ---------------------------------------
+
+
+class _FakeClient:
+    """Minimal Airflow client stub for rename_preflight / retire_old_dag."""
+
+    def __init__(self, *, registered=True, runs=None):
+        self._registered = registered
+        self._runs = runs or []
+        self.paused = []
+        self.deleted = []
+
+    def get_dag(self, dag_id):
+        if not self._registered:
+            raise AirflowError("not found", status=404)
+        return {"dag_id": dag_id}
+
+    def list_dag_runs(self, dag_id, limit=10):
+        return {"dag_runs": self._runs}
+
+    def set_paused(self, dag_id, is_paused):
+        self.paused.append((dag_id, is_paused))
+        return {}
+
+    def delete_dag(self, dag_id):
+        self.deleted.append(dag_id)
+        return {}
+
+
+def test_rename_preflight_draft(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "jupyterlab_airflow.client.get_client", lambda: _FakeClient(registered=False)
+    )
+    out = rename_preflight("draft_dag", SharedVolumeTarget(str(tmp_path)))
+    assert out == {
+        "dag_id": "draft_dag",
+        "file_exists": False,
+        "registered": False,
+        "active_runs": 0,
+    }
+
+
+def test_rename_preflight_counts_active_runs(monkeypatch, tmp_path):
+    fake = _FakeClient(
+        registered=True,
+        runs=[{"state": "running"}, {"state": "success"}, {"state": "queued"}],
+    )
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("live_dag.py", f"{MANAGED_PREFIX}  dag_id=live_dag\nx = 1\n")
+    out = rename_preflight("live_dag", target)
+    assert out["file_exists"] is True
+    assert out["registered"] is True
+    assert out["active_runs"] == 2
+
+
+def test_retire_old_dag_keep_history(monkeypatch, tmp_path):
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("old_dag.py", f"{MANAGED_PREFIX}  dag_id=old_dag\nx = 1\n")
+    out = retire_old_dag("old_dag", purge=False, target=target)
+    assert out["removed_file"] is True
+    assert out["paused"] is True
+    assert out["purged_history"] is False
+    assert not (tmp_path / "old_dag.py").exists()
+    assert fake.paused == [("old_dag", True)]
+    assert fake.deleted == []  # history kept
+
+
+def test_retire_old_dag_purge(monkeypatch, tmp_path):
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("gone_dag.py", f"{MANAGED_PREFIX}  dag_id=gone_dag\nx = 1\n")
+    out = retire_old_dag("gone_dag", purge=True, target=target)
+    assert out["removed_file"] is True
+    assert out["purged_history"] is True
+    assert fake.deleted == ["gone_dag"]
+    assert not (tmp_path / "gone_dag.py").exists()

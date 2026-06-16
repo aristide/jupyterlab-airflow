@@ -8,7 +8,7 @@ from jupyter_server.utils import url_path_join
 
 from .client import AirflowError, get_client
 from .codegen import generate_dag
-from .deploy import deploy_dag, purge_dag
+from .deploy import deploy_dag, purge_dag, rename_preflight, retire_old_dag
 from .registry import client_view
 from .validation import validate_dag
 
@@ -232,6 +232,31 @@ class DagDeleteHandler(_AirflowHandler):
         await self.respond(purge_dag, dag_id)
 
 
+class RenamePreflightHandler(_AirflowHandler):
+    """Report a dag_id's deploy state so the editor can pick the rename path —
+    draft / deployed-idle / blocked-on-active-run (PRD §6.1.8(B))."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        dag_id = self.get_argument("dag_id")
+        await self.respond(rename_preflight, dag_id)
+
+
+class DagRetireHandler(_AirflowHandler):
+    """Reconcile the OLD dag_id after a rename migration: remove its file and
+    either pause it (keep history) or purge it (PRD §6.1.8(B))."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self.get_json_body() or {}
+        dag_id = body.get("dag_id")
+        if not dag_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id required"}))
+            return
+        await self.respond(retire_old_dag, dag_id, purge=bool(body.get("purge")))
+
+
 def _url(base_url, act):
     return url_path_join(base_url, NAMESPACE, act)
 
@@ -251,6 +276,8 @@ def setup_handlers(web_app):
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),
         (_url(base_url, "dags/delete"), DagDeleteHandler),
+        (_url(base_url, "dags/rename/preflight"), RenamePreflightHandler),
+        (_url(base_url, "dags/retire"), DagRetireHandler),
         (_url(base_url, "dagruns"), DagRunsHandler),
         (_url(base_url, "taskinstances"), TaskInstancesHandler),
         (_url(base_url, "taskinstances/logs"), TaskLogsHandler),

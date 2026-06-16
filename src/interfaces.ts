@@ -168,3 +168,19 @@ export interface IDeployStatusRes {
   import_error?: IImportError;
   dag?: { dag_id: string; is_paused: boolean };
 }
+
+// Deploy state of a dag_id, for choosing the rename path (PRD §6.1.8(B)).
+export interface IRenamePreflightRes {
+  dag_id: string;
+  file_exists: boolean;
+  registered: boolean;
+  active_runs: number;
+}
+
+// Result of retiring the OLD dag_id after a rename migration (PRD §6.1.8(B)).
+export interface IRetireRes {
+  dag_id: string;
+  removed_file: boolean;
+  paused?: boolean;
+  purged_history: boolean;
+}

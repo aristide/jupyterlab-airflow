@@ -168,7 +168,12 @@ export function dagForm(): IFormSpec {
     type: 'object',
     required: ['dag_id'],
     properties: {
-      dag_id: { type: 'string', title: 'dag_id' },
+      dag_id: {
+        type: 'string',
+        title: 'dag_id',
+        description:
+          'Renaming the DAG id is a guided migration — use “Rename DAG id…” in the toolbar.'
+      },
       description: { type: 'string', title: 'description' },
       schedule: { type: 'string', title: 'schedule' },
       start_date: { type: 'string', title: 'start_date', format: 'date' },
@@ -203,6 +208,7 @@ export function dagForm(): IFormSpec {
       'params',
       'default_args'
     ],
+    dag_id: { 'ui:readonly': true },
     description: { 'ui:widget': 'textarea' },
     schedule: { 'ui:widget': 'schedule' },
     tags: { 'ui:placeholder': 'studio, etl' },

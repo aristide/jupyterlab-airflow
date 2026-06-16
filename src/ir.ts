@@ -114,3 +114,88 @@ export function dagIdFromPath(path: string): string {
   const safe = stem.replace(/[^A-Za-z0-9_]/g, '_').replace(/^([0-9])/, '_$1');
   return safe || 'untitled_dag';
 }
+
+/**
+ * Validate/normalize a user-entered rename into an `.afdag` basename. Renaming
+ * the *document* is filesystem-only and has no effect on the `dag_id` or any
+ * deployed/running pipeline (see docs/PRD.md §6.1.8(A)) — changing the `dag_id`
+ * is the separate, deploy-aware migration in §6.1.8(B). Returns the normalized
+ * basename (with the `.afdag` extension ensured), or an error string to show.
+ */
+export function normalizeAfdagFilename(
+  input: string
+): { name: string } | { error: string } {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return { error: 'Enter a file name.' };
+  }
+  if (/[\\/]/.test(trimmed)) {
+    return { error: 'The name cannot contain a path separator.' };
+  }
+  const name = /\.afdag$/i.test(trimmed) ? trimmed : `${trimmed}.afdag`;
+  return { name };
+}
+
+const PY_KEYWORDS = new Set([
+  'False',
+  'None',
+  'True',
+  'and',
+  'as',
+  'assert',
+  'async',
+  'await',
+  'break',
+  'class',
+  'continue',
+  'def',
+  'del',
+  'elif',
+  'else',
+  'except',
+  'finally',
+  'for',
+  'from',
+  'global',
+  'if',
+  'import',
+  'in',
+  'is',
+  'lambda',
+  'nonlocal',
+  'not',
+  'or',
+  'pass',
+  'raise',
+  'return',
+  'try',
+  'while',
+  'with',
+  'yield'
+]);
+
+/**
+ * Validate a candidate `dag_id` client-side for instant feedback before the
+ * deploy-aware rename migration (docs/PRD.md §6.1.8(B)). It must be a valid
+ * Python identifier and not a keyword; the server re-validates authoritatively
+ * (§8.4 ③). Returns the id, or an error message to show.
+ */
+export function validateDagId(
+  input: string
+): { id: string } | { error: string } {
+  const id = input.trim();
+  if (!id) {
+    return { error: 'Enter a DAG id.' };
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) {
+    return {
+      error:
+        'The DAG id must be a valid Python identifier — letters, digits, and ' +
+        'underscores only, not starting with a digit.'
+    };
+  }
+  if (PY_KEYWORDS.has(id)) {
+    return { error: `"${id}" is a Python keyword and cannot be a DAG id.` };
+  }
+  return { id };
+}

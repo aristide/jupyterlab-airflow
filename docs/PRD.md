@@ -154,11 +154,23 @@ Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (N
 
 **6.1.4 Top bar.** Logo · live `dag_id` · node count · **live error badge** (`✕ N errors`, with text not just color) · Traditional↔TaskFlow toggle (v1.1; disabled/ taskflow‑locked in MVP) · Undo · **Reset** (revert to last saved IR) · **Save** (writes the `.afdag` via the document context) · **Generate DAG** (server codegen preview) · **Deploy**.
 
-**6.1.5 Save / reopen.** The editor is a JupyterLab **document** bound to the `.afdag` file; Save/dirty/restore come from the Contents API. Reopening loads the IR (never the generated `.py`). See §8.2–8.3.
+**6.1.5 Save / reopen.** The editor is a JupyterLab **document** bound to the `.afdag` file; Save/dirty/restore come from the Contents API. Reopening loads the IR (never the generated `.py`). See §8.2–8.3. **Renaming** the document vs changing the `dag_id` (and what each does to a deployed/running pipeline) is **§6.1.8**.
 
 **6.1.6 Collapsible side panels.** Both the **left** operator palette and the **right** inspector can be **collapsed to a thin rail and re‑expanded** so the canvas can use the full window width when the user is arranging a large graph (and re‑expanded when they need the palette or a form). Each panel has a **chevron toggle in its header** (`«`/`»`, with an `aria-label` + `aria-expanded`); collapsed, it shows a ~30px rail with an **expand chevron** and a rotated panel label — the expand control is keyboard‑reachable, so the palette's add‑node path is always one click away (drag‑drop is never the only way in). The body is a flexbox (`palette · canvas · inspector`); collapsing sets the side panel's `flex-basis` to the rail width and the `flex:1` canvas reclaims the space (animated with a ≤150 ms `flex-basis` transition). **ReactFlow must remeasure** after the width change — but the change is *internal* (the Lumino widget itself doesn't resize, so the panel's `resized` signal never fires); nudge `rfRef.fitView()` on a short `setTimeout` keyed to the collapse state once the transition has settled, so the graph never renders against a stale viewport. Collapse state is **ephemeral UI state** in MVP (plain `useState`, not persisted in the `.afdag` — writing it into the IR would dirty the document on every toggle); persisting it later belongs in an IR `ui`/`layout` block or JupyterLab `IStateDB`, not the task graph.
 
 **6.1.7 Annotation / note nodes (post‑MVP — see §5).** A **note card** is a draggable, **resizable** sticky‑note on the canvas holding free‑form text (Markdown later) so a workflow designer can leave explanations for teammates ("this branch only runs on month‑end", "owner: data‑eng"). It is **annotation only**: it has **no source/target handles**, takes part in **no dependency edge**, and is **excluded from codegen, cycle detection, and required‑field validation** — it never becomes an Airflow task. Modeling (decided in §8.3): notes live in a **separate `notes[]` array in the IR**, *not* in `nodes[]`, so the task graph that codegen/validation iterate (`ir["nodes"]`/`ir["edges"]`) is untouched and zero codegen changes are needed. On the canvas, task nodes and note cards are merged into one ReactFlow `nodes` array with distinct `type`s (`afdagNode` / `noteNode`, the latter a `NodeResizer` text card) and split back apart on persist. Notes round‑trip through save/reopen like any IR content.
+
+**6.1.8 Rename a Studio DAG — document vs `dag_id` (deploy‑aware).** Renaming splits into **two** operations with very different blast radius; the UI keeps them distinct because one is free and the other is a migration.
+
+- **(A) Rename the *document* (the `.afdag` file)** — *safe, local, no Airflow impact.* `dag_id` is a free IR field **decoupled** from the filename (only `createEmptyIR`/new seeds it from the path via `dagIdFromPath`), and the deploy artifact is keyed on `dag_id`/`afdag_id`, **never** the `.afdag` name — so renaming the file changes nothing Airflow sees. Reuse JupyterLab's **`docmanager:rename`**: the open `DocumentWidget` context and the `WidgetTracker` restore key follow the rename automatically, and the SAVED tab re‑lists by the new path. The stable **`afdag_id`** preserves identity, so an already‑deployed `.py` stays associated. Surface it as a top‑bar / File‑menu **"Rename…"**; when the DAG isn't deployed this is the whole story. *(This is the "rename the notebook" ask — made explicit and impact‑free.)*
+- **(B) Change the `dag_id` (the Airflow identity)** — a **guided, deploy‑state‑aware migration, not a rename.** Airflow 3 has **no `dag_id` rename** (`PATCH /dags/{id}` only toggles `is_paused`): a new `dag_id` is a **brand‑new DAG with no run history**, and because the deployed file is `{dag_id}.py` the old file is **orphaned**. Today `dag_id` is freely editable in the DAG form with **zero guard** — this feature **intercepts** that edit and routes it by the state of the *current* `dag_id`:
+  - **Draft (never deployed):** trivial — validate the new id (`str.isidentifier()` & not a keyword, §8.4 ③) + collision check (no existing managed/hand‑written `{new_id}.py`, no duplicate `dag_id`, §6.5.3), set `ir.dag.dag_id`, keep `afdag_id`. Nothing to migrate.
+  - **Deployed, idle (no active run):** a **"Rename & redeploy"** dialog that states the consequences up front — a new DAG `{new_id}` is created **paused** with **fresh history**, and the old `{old_id}` history **does not carry over**. Order: validate + collision → regenerate → **deploy `{new_id}.py` and verify it registers** (tri‑state §6.5.4) → **then** reconcile the old DAG (**write‑new‑then‑remove‑old**, so there is never a zero‑file gap; the new DAG is paused so the brief two‑DAG window is harmless). Old‑DAG handling is the user's choice, defaulting to the **non‑destructive** option:
+    - **Keep history (default):** pause `{old_id}` and **remove `{old_id}.py`** so it isn't re‑parsed; Airflow retains the old run history (the dag becomes fileless/`stale`, still viewable via `exclude_stale=false`).
+    - **Purge old:** `purge_dag(old_id)` — remove the file **and** `DELETE /dags/{old_id}` (destroys history; irreversible; explicit opt‑in, with the standard destructive‑action confirm).
+  - **Deployed, run ACTIVE (running/queued):** **blocked by default.** Cutting `{old_id}.py` mid‑run **strands the in‑flight run** — `LocalDagBundle` has no versioning and §8.8 forbids editing a deployed file during an active run. Offer **"wait for the current run to finish"** (watch the run; auto‑continue when it leaves running/queued) or an explicit, heavily‑warned **override** that proceeds and **accepts that in‑flight runs on the old id are lost** (defer the old‑file removal until the run is no longer active where possible).
+- **Identity & re‑association.** Keep `afdag_id` **constant** across either rename. The provenance header **must also carry `afdag_id`** (it currently emits only `dag_id` + `ir_hash` + `syntax`, §8.9) so the manager can recognize a deployed DAG as "the renamed‑from version of this `.afdag`" — detect the rename, re‑link, and warn on drift — instead of treating old and new as unrelated.
+- **Validation, collision, state.** Reuse identifier safety (§8.4 ③) and the pre‑write ownership/duplicate checks (§6.5.3); active‑run detection uses `GET /dags/{id}/dagRuns` filtered to running/queued (the `list_dag_runs` client method). The migration is a **thin server orchestration over existing primitives** — `deploy_dag` (write new) + pause / `delete`‑file / `purge_dag` (reconcile old) — not new deploy machinery.
 
 ### 6.2 Operator registry
 
@@ -342,6 +354,7 @@ Interface in §6.5.1. `SharedVolumeTarget` reads its dags path from an env var (
 - **One DAG per file.** Deterministic, sanitized filename. **Namespace per user** in shared deployments: `users/{username}/{slug}.py`, `dag_id = f"{username}__{slug}"`, DAG `owner = username`. Path‑traversal safe (reject `..`, absolute paths, symlinks).
 - `.afdag` source of truth lives in the **Jupyter workspace** (Contents‑API reachable for SAVED/reopen); the `.py` is deployed to the shared volume. Re‑associate via the embedded `afdag_id`/`ir-hash`.
 - Provenance header in the `.py` (managed flag, `studio_version`, `ir-hash`, `dag_id`, syntax mode, correlation id) → distinguishes editable vs read‑only and detects out‑of‑band edits.
+- **Rename / identity (§6.1.8).** The deploy artifact's filename is `{dag_id}.py` (`deploy.py`), so changing `dag_id` **relocates** it — a `dag_id` rename is *write‑new + remove‑old + reconcile*, never an in‑place edit, and (Airflow having no rename) it starts fresh history under the new id. The durable, **rename‑surviving** identity is **`afdag_id`**, which therefore **must be added to the `.py` provenance header** (today `codegen.py` emits `dag_id`/`ir_hash`/`syntax` only) so both document‑ and `dag_id`‑renames stay re‑associable to their `.afdag`. The `.afdag` filename is itself decoupled from `dag_id` (seeded by `dagIdFromPath` only at creation), so a *document* rename has **no** Airflow effect. When per‑user namespacing (`{username}__{slug}`) lands, the `dag_id`↔filename coupling — and this migration logic — are unchanged.
 
 ---
 
@@ -386,6 +399,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | R8 | **Code node = RCE** on shared workers | Isolated‑subprocess validation; deploy is privileged; document; (later) sandbox/queue |
 | R9 | **Scope creep** (sensors, Git/S3, dual backend) | Phased plan §5; keep only the `DeployTarget` interface in v1 |
 | R10 | **Prod may not have a writable shared volume** | `DeployTarget` is load‑bearing from day one, not "later" |
+| R11 | **Rename mid‑run / orphaned `dag_id` history** — Airflow has no rename; `{dag_id}.py` relocates and the old DAG is orphaned; removing the old file during an active run strands it | Deploy‑aware rename migration (§6.1.8): block while a run is active; write‑new‑then‑remove‑old; keep‑history default (purge is opt‑in); `afdag_id` in the provenance header for cross‑rename re‑association |
 
 ## 13. Open questions / decisions needed
 
@@ -397,6 +411,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 6. **Branch/ShortCircuit multi‑output modeling** in the IR/edges (labeled edges vs multiple source handles) and its render to `BranchPythonOperator` follow‑paths.
 7. **Code node in Traditional mode** — wrap as `PythonOperator(python_callable=...)` vs force TaskFlow.
 8. **Validation subprocess sandbox policy** (CPU/mem/wall‑time, network egress) — concrete since code nodes are arbitrary by design.
+9. **Rename of a deployed `dag_id` — old‑history default** (§6.1.8): default to *keep* the old history (pause + remove file → dag goes `stale`) vs *purge* (`DELETE /dags/{old}`)? And should a rename also be triggerable from the **manager**, not only the editor?
 
 ## 14. Milestones & acceptance criteria
 
@@ -617,6 +632,38 @@ The **only** missing piece of “triggers”: a conf form derived from the DAG�
 ```
 
 > **Triggers — already covered (do not re‑add):** the **TriggerDagRunOperator** ships as a palette operator (`operators/trigger_dagrun.yaml`) for composing multi‑DAG pipelines, and the Manager's **manual one‑click DAG‑run trigger** works end‑to‑end (`ManagerApp` → `triggerDag` → `POST /dags/trigger`). The single gap is the conf form above (15.10).
+
+### 15.11 Rename a Studio DAG — document vs `dag_id` 📝
+
+Rename splits by *what* is renamed and the deploy/run state (§6.1.8). The safe path (A) reuses JupyterLab's file rename; (B)/(B′) are a guided migration.
+
+```
+ (A) Rename the document (.afdag), not deployed → just a file rename, no Airflow impact
+ ┌ Rename ──────────────────────────────────┐
+ │ Name  [ my_dag.afdag              ]       │   reuses docmanager:rename;
+ │              [ Cancel ]   [ Rename ]      │   dag_id + any deployed DAG unaffected
+ └───────────────────────────────────────────┘
+
+ (B) Change dag_id, DEPLOYED + idle → migration (new DAG, fresh history)
+ ┌ Rename & redeploy ────────────────────────────────────────┐
+ │ New dag_id   [ sales_etl_v2               ]   ✓ valid       │
+ │ ⚠ Airflow has no rename — this creates a NEW DAG           │
+ │   “sales_etl_v2” (paused, empty history). The old          │
+ │   “sales_etl” history does NOT carry over.                 │
+ │ Old DAG:   ◉ Keep history  (pause + remove file)           │
+ │            ○ Purge old DAG (deletes its run history)        │
+ │               [ Cancel ]        [ Rename & redeploy ]      │
+ └────────────────────────────────────────────────────────────┘
+
+ (B′) Change dag_id, DEPLOYED + run ACTIVE → blocked
+ ┌ Rename & redeploy ────────────────────────────────────────┐
+ │ ⛔ “sales_etl” has a run in progress. Renaming now would    │
+ │    strand it (Airflow runs the latest file on disk).       │
+ │    [ Watch run & continue when done ]                      │
+ │    [ Override (lose the in-flight run) ]      [ Cancel ]    │
+ └────────────────────────────────────────────────────────────┘
+```
+📝 planned. (A) reuses JupyterLab rename; (B)/(B′) orchestrate the existing `deploy_dag` + pause/`purge_dag`/delete‑file primitives; `afdag_id` (added to the provenance header, §8.9) keeps the `.afdag` ↔ deployed‑DAG link across the rename. Triggered by an intercepted DAG‑form `dag_id` edit or a top‑bar **Rename…** action.
 
 ---
 

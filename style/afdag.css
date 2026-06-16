@@ -491,6 +491,16 @@
   outline: none;
 }
 
+/* Read-only preview (the CODE tab): no caret, taller scroll box */
+.jp-afdag-cm.jp-mod-readonly {
+  max-height: 60vh;
+}
+
+.jp-afdag-cm.jp-mod-readonly .cm-cursor,
+.jp-afdag-cm.jp-mod-readonly .cm-cursorLayer {
+  display: none;
+}
+
 /* RJSF form, themed with jp variables */
 .jp-afdag-rjsf .form-group {
   margin-bottom: 10px;
@@ -586,15 +596,6 @@
 .jp-afdag-saved-tag {
   color: var(--jp-ui-font-color3);
   font-style: italic;
-}
-
-.jp-afdag-code-pre {
-  margin: 0;
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
-  line-height: 1.4;
-  white-space: pre;
-  color: var(--jp-content-font-color1);
 }
 
 .jp-afdag-code-errors {

@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { generateDag } from '../handler';
 import { IAfdagIR } from '../ir';
+import { CodeMirrorField } from './CodeMirrorField';
 
 export interface ICodePanelProps {
   ir: IAfdagIR;
@@ -73,11 +74,7 @@ export function CodePanel(props: ICodePanelProps): JSX.Element {
       {status === 'loading' && !code && (
         <div className="jp-afdag-hint">Generating…</div>
       )}
-      {code && (
-        <pre className="jp-afdag-code-pre">
-          <code>{code}</code>
-        </pre>
-      )}
+      {code && <CodeMirrorField language="python" value={code} readOnly />}
       {!code && status !== 'loading' && messages.length === 0 && (
         <div className="jp-afdag-hint">Add tasks to generate a DAG.</div>
       )}
