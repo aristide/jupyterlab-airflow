@@ -238,6 +238,8 @@ Two layers (client = instant UX, server = authority):
 3. Resolve to **Registered** (dag appears, no import error) · **Failed to import** (import error → friendly message + traceback expander + map to node/field) · **Still processing** (timeout → keep polling / let the user dismiss).
 - On success, the DAG is created **paused**; offer "unpause & trigger".
 
+**6.5.5 Updating a deployed DAG (re‑deploy).** Editing a Studio DAG and deploying again **overwrites the same `{dag_id}.py`** in place (atomic `os.replace`; Studio‑managed files overwrite freely, hand‑written are refused, §6.5.3) and re‑runs the deploy lifecycle (§6.5.4). **Active‑run guard (required):** because `LocalDagBundle` has no versioning and always runs the *latest file on disk* (§8.8), overwriting a DAG with a run **in flight** can corrupt it (removed/renamed tasks orphan; structure shifts under the running scheduler). Before a re‑deploy the editor runs the **shared dag‑state preflight** — the `active_runs` of the current `dag_id` from `list_dag_runs` (running/queued), the *same* check the rename migration uses — and, if the DAG is registered with an active run, **blocks** with *Cancel* / *Deploy anyway* (an explicit override). A preflight failure falls through to deploy (the user clicked Deploy; if Airflow is unreachable nothing is running). This is **distinct from a rename**: an update keeps the `dag_id` (same file, same history); only a `dag_id` *change* is the migration in §6.1.8(B). Still‑unbuilt and tracked here: **out‑of‑band drift** detection (overwrite prompt when the deployed body's hash ≠ the recorded `ir‑hash`, §6.5.3) and **undeploy / rollback** to the last working version (§7). Caveat: for an update the tri‑state's `registered` verdict can't yet distinguish *new version parsed* from *old version still live* (Airflow's REST API doesn't expose the on‑disk `ir‑hash`).
+
 ### 6.6 Resource Manager (sidebar, extended)
 
 Extends the existing `AirflowPanel`. Requirements (endpoints in Appendix D):
@@ -400,6 +402,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | R9 | **Scope creep** (sensors, Git/S3, dual backend) | Phased plan §5; keep only the `DeployTarget` interface in v1 |
 | R10 | **Prod may not have a writable shared volume** | `DeployTarget` is load‑bearing from day one, not "later" |
 | R11 | **Rename mid‑run / orphaned `dag_id` history** — Airflow has no rename; `{dag_id}.py` relocates and the old DAG is orphaned; removing the old file during an active run strands it | Deploy‑aware rename migration (§6.1.8): block while a run is active; write‑new‑then‑remove‑old; keep‑history default (purge is opt‑in); `afdag_id` in the provenance header for cross‑rename re‑association |
+| R12 | **Re‑deploy overwrites a *running* DAG's file** — `LocalDagBundle` runs latest‑on‑disk, so an in‑place update mid‑run can corrupt the active run | Active‑run guard before re‑deploy (§6.5.5): the shared dag‑state preflight blocks with *Cancel* / explicit *Deploy anyway* — the same check as the rename migration |
 
 ## 13. Open questions / decisions needed
 
@@ -664,6 +667,23 @@ Rename splits by *what* is renamed and the deploy/run state (§6.1.8). The safe 
  └────────────────────────────────────────────────────────────┘
 ```
 📝 planned. (A) reuses JupyterLab rename; (B)/(B′) orchestrate the existing `deploy_dag` + pause/`purge_dag`/delete‑file primitives; `afdag_id` (added to the provenance header, §8.9) keeps the `.afdag` ↔ deployed‑DAG link across the rename. Triggered by an intercepted DAG‑form `dag_id` edit or a top‑bar **Rename…** action.
+
+### 15.12 Re‑deploy an updated DAG — active‑run guard ✅
+
+Editing + Deploy overwrites the same `{dag_id}.py` and re‑runs the lifecycle (§15.6); if a run is in flight, **block first** (§6.5.5 / §8.8). Distinct from a `dag_id` rename (§15.11) — same file, same history.
+
+```
+ (deployed + idle)  Deploy → overwrites {dag_id}.py → tri-state (§15.6). No prompt.
+
+ (deployed + run in progress)  Deploy →
+ ┌ A run is in progress ──────────────────────────────────────┐
+ │ ⛔ “sales_etl” has 1 run(s) in progress. Re-deploying       │
+ │    overwrites the DAG file while it runs — Airflow runs     │
+ │    the latest file on disk, so the in-flight run can break. │
+ │        [ Cancel ]              [ Deploy anyway ]            │
+ └────────────────────────────────────────────────────────────┘
+```
+✅ the shared dag‑state preflight (`active_runs`) gates the Deploy button; *Deploy anyway* overrides. 🔭 still to come: out‑of‑band drift prompt (§6.5.3) and undeploy/rollback (§7).
 
 ---
 

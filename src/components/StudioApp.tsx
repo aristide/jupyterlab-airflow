@@ -586,10 +586,34 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     [cancelPoll, pollLifecycle]
   );
 
-  const onDeploy = React.useCallback((): void => {
+  // The Deploy button. A plain re-deploy overwrites the same {dag_id}.py, so if
+  // the DAG is already registered with a run in flight we guard first: Airflow's
+  // LocalDagBundle has no versioning and runs the latest file on disk (§8.8), so
+  // overwriting mid-run can corrupt the in-flight run. Same active-run check the
+  // rename migration uses (§6.1.8(B)); preflight failure falls through to deploy.
+  const onDeploy = React.useCallback(async (): Promise<void> => {
     pendingRetireRef.current = null; // a plain deploy never retires another DAG
+    const dagId = currentIR.dag.dag_id;
+    const pf = await renamePreflight(dagId); // shared dag-state preflight
+    if (pf.status === 'OK' && pf.data?.registered && pf.data.active_runs > 0) {
+      const override = await showDialog({
+        title: 'A run is in progress',
+        body:
+          `“${dagId}” has ${pf.data.active_runs} run(s) in progress. Re-deploying ` +
+          'overwrites the DAG file while it runs — Airflow runs the latest file ' +
+          'on disk, so the in-flight run can break. Wait for it to finish, or ' +
+          'deploy anyway.',
+        buttons: [
+          Dialog.cancelButton({ label: 'Cancel' }),
+          Dialog.warnButton({ label: 'Deploy anyway' })
+        ]
+      });
+      if (!override.button.accept) {
+        return;
+      }
+    }
     void runDeploy(currentIR);
-  }, [runDeploy, currentIR]);
+  }, [currentIR, runDeploy]);
 
   // Rename the .afdag DOCUMENT (file). Filesystem-only: it does NOT change the
   // dag_id or affect any deployed/running pipeline (PRD §6.1.8(A)). Changing the
