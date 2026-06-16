@@ -11,9 +11,11 @@ services:
       # host. Inside the compose network Airflow is still reached at airflow:8080.
       - 0.0.0.0:8081:8080
     environment:
-      # Dev-only: SQLite metadata DB + bundled example DAGs so the extension has
-      # something to show on first start.
-      AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
+      # Dev-only: SQLite metadata DB. Example DAGs are OFF: several of Airflow
+      # 3.0.2's bundled examples import a test-only `tests_common` module that is
+      # not in the published wheel, which surfaces as a spurious import error.
+      # The mounted demo DAG (airflow-dags/) is the "something to show" instead.
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       # Deterministic credentials for the SimpleAuthManager (admin / admin).
       # The password file is pre-seeded and mounted below; without this Airflow

@@ -51,9 +51,12 @@ pre-minted JWT).
 
 ## DAGs
 
-Example DAGs are enabled (`AIRFLOW__CORE__LOAD_EXAMPLES=true`) and a demo DAG
-lives in `.devcontainer/airflow-dags/`. Add more `.py` files there; the
-dag-processor will pick them up within a minute.
+Airflow's bundled example DAGs are **off** (`AIRFLOW__CORE__LOAD_EXAMPLES=false`):
+several of them in 3.0.2 import a test-only `tests_common` module that isn't in the
+published wheel, so they show up as a spurious import error. A demo DAG lives in
+`.devcontainer/airflow-dags/`; add more `.py` files there and the dag-processor
+picks them up within a minute. (Re-enable examples by flipping the flag in
+`docker-compose.yaml` if you want them as reference content.)
 
 ## Quick Start
 
