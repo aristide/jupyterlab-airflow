@@ -173,6 +173,8 @@ export interface IDeployStatusRes {
 export interface IRenamePreflightRes {
   dag_id: string;
   file_exists: boolean;
+  /** The deployed file was edited out of band since Studio wrote it (§6.5.3). */
+  drifted: boolean;
   registered: boolean;
   active_runs: number;
 }

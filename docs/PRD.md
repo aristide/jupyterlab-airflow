@@ -230,7 +230,7 @@ Two layers (client = instant UX, server = authority):
 
 **6.5.2 Shared‑volume deploy (atomic).** Write a temp file **in the same directory** as the target, `fsync`, then `os.replace(tmp, final)` (atomic + overwrite on POSIX/Windows; cross‑filesystem rename is **not** atomic, so temp must be co‑located). Filename is deterministic and **namespaced** (see §8.9). Drop an `.airflowignore` (glob syntax in Airflow 3) covering the temp/staging pattern and `.afdag` sidecars.
 
-**6.5.3 Collision & overwrite safety.** Before writing: read back the target dir; **refuse to overwrite any file lacking the Studio provenance header** (it's a hand‑written, read‑only DAG); detect `dag_id` duplication; on a managed file that was hand‑edited (body hash ≠ recorded `ir-hash`), prompt *"modified outside Studio — reopen read‑only or overwrite?"* See §9.
+**6.5.3 Collision & overwrite safety.** Before writing: read back the target dir; **refuse to overwrite any file lacking the Studio provenance header** (it's a hand‑written, read‑only DAG); detect `dag_id` duplication; on a managed file that was hand‑edited (its `code=sha256` body hash, recorded in the provenance header, no longer matches the file body) the deploy preflight flags **drift** and the editor prompts *"modified outside Studio — overwrite or cancel?"* before re‑deploying (**implemented**, §6.5.5; the manager‑side "reopen read‑only" is a later surface). See §9.
 
 **6.5.4 Deploy lifecycle (the central success path).** Because Airflow 3 has **no on‑demand bundle‑refresh REST API** and the dag‑processor scans on `refresh_interval` / re‑parses on `min_file_process_interval` (and standalone has a known refresh‑timing bug), Deploy is an **observable tri‑state**:
 1. *Writing…* → atomic write succeeds.
@@ -238,7 +238,7 @@ Two layers (client = instant UX, server = authority):
 3. Resolve to **Registered** (dag appears, no import error) · **Failed to import** (import error → friendly message + traceback expander + map to node/field) · **Still processing** (timeout → keep polling / let the user dismiss).
 - On success, the DAG is created **paused**; offer "unpause & trigger".
 
-**6.5.5 Updating a deployed DAG (re‑deploy).** Editing a Studio DAG and deploying again **overwrites the same `{dag_id}.py`** in place (atomic `os.replace`; Studio‑managed files overwrite freely, hand‑written are refused, §6.5.3) and re‑runs the deploy lifecycle (§6.5.4). **Active‑run guard (required):** because `LocalDagBundle` has no versioning and always runs the *latest file on disk* (§8.8), overwriting a DAG with a run **in flight** can corrupt it (removed/renamed tasks orphan; structure shifts under the running scheduler). Before a re‑deploy the editor runs the **shared dag‑state preflight** — the `active_runs` of the current `dag_id` from `list_dag_runs` (running/queued), the *same* check the rename migration uses — and, if the DAG is registered with an active run, **blocks** with *Cancel* / *Deploy anyway* (an explicit override). A preflight failure falls through to deploy (the user clicked Deploy; if Airflow is unreachable nothing is running). This is **distinct from a rename**: an update keeps the `dag_id` (same file, same history); only a `dag_id` *change* is the migration in §6.1.8(B). Still‑unbuilt and tracked here: **out‑of‑band drift** detection (overwrite prompt when the deployed body's hash ≠ the recorded `ir‑hash`, §6.5.3) and **undeploy / rollback** to the last working version (§7). Caveat: for an update the tri‑state's `registered` verdict can't yet distinguish *new version parsed* from *old version still live* (Airflow's REST API doesn't expose the on‑disk `ir‑hash`).
+**6.5.5 Updating a deployed DAG (re‑deploy).** Editing a Studio DAG and deploying again **overwrites the same `{dag_id}.py`** in place (atomic `os.replace`; Studio‑managed files overwrite freely, hand‑written are refused, §6.5.3) and re‑runs the deploy lifecycle (§6.5.4). **Active‑run guard (required):** because `LocalDagBundle` has no versioning and always runs the *latest file on disk* (§8.8), overwriting a DAG with a run **in flight** can corrupt it (removed/renamed tasks orphan; structure shifts under the running scheduler). Before a re‑deploy the editor runs the **shared dag‑state preflight** — the `active_runs` of the current `dag_id` from `list_dag_runs` (running/queued), the *same* check the rename migration uses — and, if the DAG is registered with an active run, **blocks** with *Cancel* / *Deploy anyway* (an explicit override). A preflight failure falls through to deploy (the user clicked Deploy; if Airflow is unreachable nothing is running). This is **distinct from a rename**: an update keeps the `dag_id` (same file, same history); only a `dag_id` *change* is the migration in §6.1.8(B). **Out‑of‑band drift** detection is **implemented**: the deploy preflight compares the file body to a `code=sha256` hash stamped in its provenance header, and a drifted file prompts *overwrite or cancel* before re‑deploy (§6.5.3). Still‑unbuilt: **undeploy / rollback** to the last working version (§7). Caveat: for an update the tri‑state's `registered` verdict can't yet distinguish *new version parsed* from *old version still live* (Airflow's REST API doesn't expose the on‑disk `ir‑hash`).
 
 ### 6.6 Resource Manager (sidebar, extended)
 
@@ -355,7 +355,7 @@ Interface in §6.5.1. `SharedVolumeTarget` reads its dags path from an env var (
 
 - **One DAG per file.** Deterministic, sanitized filename. **Namespace per user** in shared deployments: `users/{username}/{slug}.py`, `dag_id = f"{username}__{slug}"`, DAG `owner = username`. Path‑traversal safe (reject `..`, absolute paths, symlinks).
 - `.afdag` source of truth lives in the **Jupyter workspace** (Contents‑API reachable for SAVED/reopen); the `.py` is deployed to the shared volume. Re‑associate via the embedded `afdag_id`/`ir-hash`.
-- Provenance header in the `.py` (managed flag, `studio_version`, `ir-hash`, `dag_id`, syntax mode, correlation id) → distinguishes editable vs read‑only and detects out‑of‑band edits.
+- Provenance header in the `.py` (managed flag, `studio_version`, `ir-hash`, **`code` body hash**, `dag_id`, `afdag_id`, syntax mode, correlation id) → distinguishes editable vs read‑only and **detects out‑of‑band edits**: the `code=sha256` body hash is stamped at write time and compared to the on‑disk body at the deploy preflight (§6.5.3 / §6.5.5).
 - **Rename / identity (§6.1.8).** The deploy artifact's filename is `{dag_id}.py` (`deploy.py`), so changing `dag_id` **relocates** it — a `dag_id` rename is *write‑new + remove‑old + reconcile*, never an in‑place edit, and (Airflow having no rename) it starts fresh history under the new id. The durable, **rename‑surviving** identity is **`afdag_id`**, which therefore **must be added to the `.py` provenance header** (today `codegen.py` emits `dag_id`/`ir_hash`/`syntax` only) so both document‑ and `dag_id`‑renames stay re‑associable to their `.afdag`. The `.afdag` filename is itself decoupled from `dag_id` (seeded by `dagIdFromPath` only at creation), so a *document* rename has **no** Airflow effect. When per‑user namespacing (`{username}__{slug}`) lands, the `dag_id`↔filename coupling — and this migration logic — are unchanged.
 
 ---
@@ -668,12 +668,12 @@ Rename splits by *what* is renamed and the deploy/run state (§6.1.8). The safe 
 ```
 📝 planned. (A) reuses JupyterLab rename; (B)/(B′) orchestrate the existing `deploy_dag` + pause/`purge_dag`/delete‑file primitives; `afdag_id` (added to the provenance header, §8.9) keeps the `.afdag` ↔ deployed‑DAG link across the rename. Triggered by an intercepted DAG‑form `dag_id` edit or a top‑bar **Rename…** action.
 
-### 15.12 Re‑deploy an updated DAG — active‑run guard ✅
+### 15.12 Re‑deploy an updated DAG — active‑run + drift guards ✅
 
-Editing + Deploy overwrites the same `{dag_id}.py` and re‑runs the lifecycle (§15.6); if a run is in flight, **block first** (§6.5.5 / §8.8). Distinct from a `dag_id` rename (§15.11) — same file, same history.
+Editing + Deploy overwrites the same `{dag_id}.py` and re‑runs the lifecycle (§15.6). One shared dag‑state preflight gates the Deploy button on two conditions: a **run in flight** (§6.5.5 / §8.8) and **out‑of‑band drift** (the deployed file was hand‑edited, §6.5.3). Distinct from a `dag_id` rename (§15.11) — same file, same history.
 
 ```
- (deployed + idle)  Deploy → overwrites {dag_id}.py → tri-state (§15.6). No prompt.
+ (deployed + idle, unchanged)  Deploy → overwrites {dag_id}.py → tri-state. No prompt.
 
  (deployed + run in progress)  Deploy →
  ┌ A run is in progress ──────────────────────────────────────┐
@@ -682,8 +682,16 @@ Editing + Deploy overwrites the same `{dag_id}.py` and re‑runs the lifecycle (
  │    the latest file on disk, so the in-flight run can break. │
  │        [ Cancel ]              [ Deploy anyway ]            │
  └────────────────────────────────────────────────────────────┘
+
+ (deployed file hand-edited outside Studio)  Deploy →
+ ┌ Modified outside Studio ───────────────────────────────────┐
+ │ ⚠ “sales_etl” was edited directly in the dags folder since │
+ │   Studio last deployed it. Deploying overwrites those      │
+ │   manual edits with the current graph.                     │
+ │        [ Cancel ]              [ Overwrite ]               │
+ └────────────────────────────────────────────────────────────┘
 ```
-✅ the shared dag‑state preflight (`active_runs`) gates the Deploy button; *Deploy anyway* overrides. 🔭 still to come: out‑of‑band drift prompt (§6.5.3) and undeploy/rollback (§7).
+✅ the preflight gates Deploy on **both** an active run (*Deploy anyway*) and **drift** (a hand‑edited deployed file → *Overwrite* / *Cancel*); drift uses a `code=sha256` body hash stamped in the provenance header vs. the on‑disk body. 🔭 still to come: undeploy/rollback (§7).
 
 ---
 

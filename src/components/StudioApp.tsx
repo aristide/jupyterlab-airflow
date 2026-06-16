@@ -612,6 +612,24 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         return;
       }
     }
+    // Out-of-band drift (§6.5.3): the deployed file was hand-edited since Studio
+    // wrote it — re-deploying discards those manual edits.
+    if (pf.status === 'OK' && pf.data?.drifted) {
+      const overwrite = await showDialog({
+        title: 'Modified outside Studio',
+        body:
+          `“${dagId}” was edited directly in the dags folder since Studio last ` +
+          'deployed it. Deploying overwrites those manual edits with the current ' +
+          'graph. Overwrite, or cancel and reconcile by hand?',
+        buttons: [
+          Dialog.cancelButton({ label: 'Cancel' }),
+          Dialog.warnButton({ label: 'Overwrite' })
+        ]
+      });
+      if (!overwrite.button.accept) {
+        return;
+      }
+    }
     void runDeploy(currentIR);
   }, [currentIR, runDeploy]);
 

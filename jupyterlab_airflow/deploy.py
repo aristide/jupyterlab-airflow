@@ -11,6 +11,7 @@ running code as the Airflow worker. Treat ``deploy`` as privileged.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tempfile
@@ -164,6 +165,46 @@ class SharedVolumeTarget:
                 fh.write("\n".join(missing) + "\n")
 
 
+def _body_hash(content: str) -> Optional[str]:
+    """sha256 of the file body (everything after the header line)."""
+    _, sep, body = content.partition("\n")
+    if not sep:
+        return None
+    return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _stamp_code_hash(content: str) -> str:
+    """Append ``code=sha256:<body-hash>`` to the provenance header so an
+    out-of-band hand-edit of the deployed body is detectable on re-deploy
+    (PRD §6.5.3). Only the header line changes, so the body hash stays stable."""
+    head, sep, body = content.partition("\n")
+    if not sep:
+        return content
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return f"{head}  code=sha256:{digest}\n{body}"
+
+
+def is_drifted(filename: str, target: Optional[SharedVolumeTarget] = None) -> bool:
+    """True if a deployed managed file was edited out of band: its body no longer
+    matches the ``code=`` hash recorded in its provenance header (PRD §6.5.3).
+    False when the file is absent, not Studio-managed, or pre-dates the code hash
+    (an older deploy → can't tell, so don't false-alarm)."""
+    target = target or SharedVolumeTarget()
+    try:
+        if not target.exists(filename):
+            return False
+        content = target.read(filename)
+    except DeployError:
+        return False
+    header = _parse_header(content)
+    if header is None:
+        return False
+    recorded = header.get("code")
+    if not recorded:
+        return False
+    return _body_hash(content) != recorded
+
+
 def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:
     """Validate, then atomically write the generated DAG to the dags folder.
 
@@ -196,7 +237,9 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) 
 
     filename = _safe_filename(dag_id)
     target.ensure_airflowignore()
-    path = target.write(filename, result["code"])
+    # Stamp a body hash into the header so a later out-of-band hand-edit of the
+    # deployed file is detectable on re-deploy (§6.5.3).
+    path = target.write(filename, _stamp_code_hash(result["code"]))
 
     return {
         "deployed": True,
@@ -257,6 +300,7 @@ def rename_preflight(dag_id: str, target: Optional[SharedVolumeTarget] = None) -
         file_exists = target.exists(f"{dag_id}.py")
     except DeployError:
         file_exists = False
+    drifted = is_drifted(f"{dag_id}.py", target) if file_exists else False
 
     client = get_client()
     registered = False
@@ -278,6 +322,7 @@ def rename_preflight(dag_id: str, target: Optional[SharedVolumeTarget] = None) -
     return {
         "dag_id": dag_id,
         "file_exists": bool(file_exists),
+        "drifted": drifted,
         "registered": registered,
         "active_runs": active_runs,
     }

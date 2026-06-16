@@ -10,6 +10,7 @@ from jupyterlab_airflow.deploy import (
     DeployError,
     SharedVolumeTarget,
     deploy_dag,
+    is_drifted,
     rename_preflight,
     retire_old_dag,
 )
@@ -130,6 +131,7 @@ def test_rename_preflight_draft(monkeypatch, tmp_path):
     assert out == {
         "dag_id": "draft_dag",
         "file_exists": False,
+        "drifted": False,
         "registered": False,
         "active_runs": 0,
     }
@@ -173,3 +175,41 @@ def test_retire_old_dag_purge(monkeypatch, tmp_path):
     assert out["purged_history"] is True
     assert fake.deleted == ["gone_dag"]
     assert not (tmp_path / "gone_dag.py").exists()
+
+
+# -- out-of-band drift detection (PRD §6.5.3) -------------------------------
+
+
+def test_deploy_stamps_code_hash_in_header(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    deploy_dag(_ir(), target=target)
+    first_line = (tmp_path / "dep_dag.py").read_text().splitlines()[0]
+    assert "code=sha256:" in first_line
+
+
+def test_is_drifted_false_for_fresh_deploy(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    deploy_dag(_ir(), target=target)
+    assert is_drifted("dep_dag.py", target) is False
+
+
+def test_is_drifted_true_after_hand_edit(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    deploy_dag(_ir(), target=target)
+    path = tmp_path / "dep_dag.py"
+    path.write_text(path.read_text() + "\n# hand-edited out of band\n")
+    assert is_drifted("dep_dag.py", target) is True
+
+
+def test_is_drifted_false_without_code_hash(tmp_path):
+    # A managed file from before the code-hash feature -> can't tell, no alarm.
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("old.py", f"{MANAGED_PREFIX}  dag_id=old\nx = 1\n")
+    assert is_drifted("old.py", target) is False
+
+
+def test_is_drifted_false_for_absent_or_unmanaged(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    assert is_drifted("missing.py", target) is False
+    (tmp_path / "hand.py").write_text("print('no header')\n")
+    assert is_drifted("hand.py", target) is False
