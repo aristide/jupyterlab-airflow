@@ -148,7 +148,7 @@ Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (N
 - **DAG** — `dag_id`, description, **schedule** (dropdown of presets `@once/@hourly/@daily/@weekly/@monthly/None` + custom cron + `timedelta`), `start_date` (date picker), `catchup` (**default false** — Airflow 3 default), `retries`, `retry_delay`, `tags`, `owner`, `params`, `default_args`.
 - **NODE** — operator‑specific form **generated from the registry** (see §6.2), with required‑field validation feeding the error badge; common fields (`retries`, `retry_delay`, `depends_on_past`); JSON/dict fields (env vars, params) via a JSON editor widget; code fields via an embedded CodeMirror editor. **Each field carries inline contextual help** — a one‑line description rendered under the label (RJSF `description` / `ui:help`, already styled as `.field-description`) sourced from the registry param's `help`, so a non‑technical user understands *what a field is for and what a valid value looks like* without leaving the form. Longer or example‑bearing help can surface as an `(i)` tooltip.
 - **INFO** *(learn‑Airflow surface)* — a **read‑only educational tab** about the **currently selected node/operator**: a plain‑language description of what the operator does, when to use it, its required vs optional inputs (rendered from the registry param metadata), a worked example, the provider/`airflow_min_version` it needs, and a **"docs ↗" deep link** to the official Airflow/provider page. With no node selected it shows DAG‑level concepts (schedule/`start_date`/`catchup`/retries explained). Content is **data‑only**, sourced from new registry fields (`description`, `docs_url`, per‑param `help`; see §6.2) so adding an operator also teaches it — no code change (G6). This tab is the concrete expression of a secondary product goal: Studio should help users *learn* Airflow components, not just wire them.
-- **CODE** — live generated‑Python preview (read‑only), a **Generate DAG** button, and a validation panel that shows **both** client‑side messages (e.g. *"DAG contains a cycle — Airflow does not support cyclic dependencies"*) **and**, after deploy, the **authoritative Airflow import status**.
+- **CODE** — live generated‑Python preview (read‑only), a **Generate DAG** button, and a validation panel that shows **both** client‑side messages (e.g. *"DAG contains a cycle — Airflow does not support cyclic dependencies"*) **and**, after deploy, the **authoritative Airflow import status**. The preview is rendered in a **read‑only CodeMirror 6 editor with Python syntax highlighting and a left line‑number gutter** (not a plain `<pre>`), reusing the same `CodeMirrorField` that backs the `code`/`json` node fields (`language="python"`, `readOnly`) so the generated DAG is **colorized, gutter‑numbered, selectable, and scrollable**, and is **theme‑aware via `--jp‑*`** (light/dark). Implementation + the one missing piece (a CodeMirror *highlight style*) are in §8.2.
 - **SAVED** — lists `.afdag` documents in the workspace (via Contents API) to reopen; marks which are deployed.
 - **Tab order** is DAG · NODE · INFO · CODE · SAVED; selecting a node focuses NODE, and INFO sits beside it so "configure" and "understand" are one click apart.
 
@@ -294,6 +294,7 @@ Register a custom file type + document widget so JupyterLab owns open/save/dirty
 - **New‑file / open / commands:** a "New Airflow DAG" command runs `docmanager:new-untitled` (`ext:'afdag'`) then `docmanager:open` (`factory:FACTORY`); surface in `ILauncher` (category "Airflow"), `ICommandPalette`, and `app.contextMenu` (selector `.jp-DirListing-item`). Resolve the target folder via `IFileBrowserFactory.tracker.currentWidget.model.path`.
 - **Restore:** `WidgetTracker({namespace:'airflow-studio'})` + `restorer.restore(tracker, { command:'docmanager:open', args: w=>({path:w.context.path, factory:FACTORY}), name: w=>w.context.path })`. Leave the sidebar's existing `restorer.add` untouched (distinct trackers; no conflict).
 - **Forms:** RJSF (`@rjsf/core` + `@rjsf/validator-ajv8`) rendered from registry‑derived JSON Schema + uiSchema; custom widgets: `json` (JSON/dict editor), `code` (CodeMirror 6 from `@jupyterlab/codemirror`), schedule/date pickers. `onChange` writes back into the IR (single source of truth).
+- **CODE‑tab editor & Python syntax highlighting + line numbers (§6.1.3 CODE / §15.4).** Render the generated Python in the shared **`CodeMirrorField`** (`language="python"`, `readOnly`) instead of `<pre><code>` — the field already wires the Python grammar (`@codemirror/lang-python`) and a **line‑number gutter** (`lineNumbers()`), so the gutter is free; the editor is also selectable and scrollable. **Gap to close:** `CodeMirrorField` configures the *language* + gutter but **no CodeMirror highlight *style***, so tokens currently render uncolored — add `syntaxHighlighting(...)` **once, in `CodeMirrorField`**, which colorizes **both** the CODE preview **and** the `code`/`json` node fields in one change. Prefer a **`--jp‑*`‑aware** style so colors track light/dark and match JupyterLab: either `@jupyterlab/codemirror`'s theme/highlight registry (already a dep), or a small `HighlightStyle.define([...])` mapping CodeMirror highlight tags (`tags.keyword/string/comment/number/definition/operator/typeName…`) to `var(--jp-mirror-editor-*-color)`; **fall back** to `@codemirror/language`'s `defaultHighlightStyle` via `syntaxHighlighting(defaultHighlightStyle, { fallback: true })` if the JL registry is too heavy. Keep it strictly read‑only (`EditorState.readOnly` + `EditorView.editable.of(false)`, already supported via the `readOnly` prop), hide the caret, and let the editor scroll inside the tab (CSS on `.jp-afdag-cm`; the old `.jp-afdag-code-pre` rule is then dead). **All deps are already in `package.json`** (`@codemirror/lang-python`, `@codemirror/view`, `@codemirror/state`, `@jupyterlab/codemirror`) — no new install. Test: the CODE tab mounts a `.cm-editor` with a `.cm-gutters` line‑number gutter (not a `<pre>`), and the editor is non‑editable.
 - **Layout:** `@dagrejs/dagre` (maintained fork) for one‑click "Tidy layout" (v1.1); elkjs behind a flag for dense graphs.
 - **New deps:** `@xyflow/react`, `@rjsf/core`, `@rjsf/validator-ajv8`, `@dagrejs/dagre`, plus `@jupyterlab/docregistry`, `@jupyterlab/docmanager`, `@jupyterlab/launcher`, `@jupyterlab/filebrowser`, `@jupyterlab/codemirror`.
 
@@ -489,27 +490,27 @@ top bar:  … my_dag · 2 nodes · ✕ 2 errors      ← red while required fiel
 ```
 Built: registry‑generated form, `validateNodeParams` required‑field check (red outline), top‑bar `✕ N errors` decrementing live, per‑node dots, in‑card ✕ + “Delete task”. New operators just add param YAML — no form code.
 
-### 15.4 Studio editor — CODE tab (+ cycle‑error variant) ✅
+### 15.4 Studio editor — CODE tab (+ cycle‑error variant) ✅ · syntax highlight + line numbers 📝
 
-Live generated‑Python preview + Copy; the cycle path replaces the code until the graph is acyclic. *(src: 03-demo-b f0500)*
+Live generated‑Python preview + Copy; the cycle path replaces the code until the graph is acyclic. The preview is a **read‑only CodeMirror editor with Python syntax highlighting + a left line‑number gutter** (📝 planned — §6.1.3 / §8.2). *(src: 03-demo-b f0500)*
 
 ```
- INSPECTOR — CODE tab (valid)                 cycle‑detection variant
- ┌ DAG NODE INFO [CODE] SAVED ───────────┐    ┌ … [CODE] … ──────────────────────┐
- │ GENERATED CODE            [ ⧉ Copy ]  │    │ ✕ Validation                     │
- │ # airflow-studio: managed … taskflow  │    │ DAG contains a cycle — Airflow   │
- │ from airflow.sdk import dag, task     │    │ does not support cyclic deps.    │
- │ @dag(schedule="@daily", …)            │    │ Remove an edge on the path:      │
- │ def my_dag():                         │    │     print3 → print1              │
- │   @task.bash(task_id="print1")        │    │ (code preview hidden until the   │
- │   def print1(): return "echo Hello"   │    │  graph is acyclic)               │
- │   …                                   │    │                                  │
- │   # --- Dependencies ---              │    │ [ ⚙ Generate DAG ]               │
- │   print1 >> print2 >> print3 >> print4│    └──────────────────────────────────┘
- │ [ ⚙ Generate DAG ]        ✓ Valid     │
- └───────────────────────────────────────┘
+ INSPECTOR — CODE tab (valid)                  cycle‑detection variant
+ ┌ DAG NODE INFO [CODE] SAVED ─────────────┐   ┌ … [CODE] … ──────────────────────┐
+ │ GENERATED CODE              [ ⧉ Copy ]  │   │ ✕ Validation                     │
+ │ 1│ # airflow-studio: managed … taskflow │   │ DAG contains a cycle — Airflow   │
+ │ 2│ from airflow.sdk import dag, task    │   │ does not support cyclic deps.    │
+ │ 3│ @dag(schedule="@daily", …)           │   │ Remove an edge on the path:      │
+ │ 4│ def my_dag():                        │   │     print3 → print1              │
+ │ 5│     @task.bash(task_id="print1")     │   │ (code preview hidden until the   │
+ │ 6│     def print1(): return "echo Hi"   │   │  graph is acyclic)               │
+ │ 7│     # --- Dependencies ---           │   │                                  │
+ │ 8│     print1 >> print2 >> print3       │   │ [ ⚙ Generate DAG ]               │
+ │ [ ⚙ Generate DAG ]          ✓ Valid     │   └──────────────────────────────────┘
+ └─────────────────────────────────────────┘    ↑ keyword/str/comment colored;
+   └─ line-number gutter; tokens syntax-colored    gutter on the left
 ```
-Built: server codegen (TaskFlow), Copy, validation panel showing client errors **and** post‑deploy Airflow import status. **Traditional output is v1.1** (templates exist; backend + toggle unlock pending).
+Built ✅: server codegen (TaskFlow), Copy, validation panel showing client errors **and** post‑deploy Airflow import status. **Traditional output is v1.1** (templates exist; backend + toggle unlock pending). **Planned 📝:** replace the plain `<pre>` with the read‑only `CodeMirrorField` (`language="python"`) so the preview gains **Python syntax highlighting + a line‑number gutter** — `--jp‑*`‑themed (light/dark), selectable, scrollable (§6.1.3 / §8.2).
 
 ### 15.5 Studio editor — INFO tab (learn‑Airflow) ✅
 
