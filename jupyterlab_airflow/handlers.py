@@ -8,7 +8,13 @@ from jupyter_server.utils import url_path_join
 
 from .client import AirflowError, get_client
 from .codegen import generate_dag
-from .deploy import deploy_dag, purge_dag, rename_preflight, retire_old_dag
+from .deploy import (
+    deploy_dag,
+    find_orphans,
+    purge_dag,
+    rename_preflight,
+    retire_old_dag,
+)
 from .registry import client_view
 from .validation import validate_dag
 
@@ -175,6 +181,50 @@ class DagRunsHandler(_AirflowHandler):
         await self.respond(get_client().list_dag_runs, dag_id, limit=limit)
 
 
+class DagRunGetHandler(_AirflowHandler):
+    """One DagRun's current state — polled by the editor's run-on-deploy banner."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        dag_id = self.get_argument("dag_id")
+        run_id = self.get_argument("run_id")
+        await self.respond(get_client().get_dag_run, dag_id, run_id)
+
+
+class DagRunStateHandler(_AirflowHandler):
+    """Set a DagRun's state. Used to **stop** an in-flight run (PRD §6.6): Airflow
+    3 has no cancel endpoint, so stopping = PATCH the run to ``failed`` and the
+    scheduler terminates its running tasks."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self.get_json_body() or {}
+        dag_id = body.get("dag_id")
+        run_id = body.get("run_id")
+        if not dag_id or not run_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id and run_id required"}))
+            return
+        await self.respond(
+            get_client().set_dag_run_state,
+            dag_id,
+            run_id,
+            body.get("state") or "failed",
+        )
+
+
+class OrphansHandler(_AirflowHandler):
+    """Deployed Studio DAGs whose source `.afdag` was deleted (PRD §6.5.6). The
+    reconciliation sweep diffs deployed-`.py` provenance against the `.afdag`
+    files under the Jupyter Contents root; the manager surfaces the result so the
+    user can undeploy them."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        contents_root = getattr(self.contents_manager, "root_dir", None)
+        await self.respond(find_orphans, contents_root)
+
+
 class TaskInstancesHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def get(self):
@@ -276,9 +326,12 @@ def setup_handlers(web_app):
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),
         (_url(base_url, "dags/delete"), DagDeleteHandler),
+        (_url(base_url, "dags/orphans"), OrphansHandler),
         (_url(base_url, "dags/rename/preflight"), RenamePreflightHandler),
         (_url(base_url, "dags/retire"), DagRetireHandler),
         (_url(base_url, "dagruns"), DagRunsHandler),
+        (_url(base_url, "dagruns/get"), DagRunGetHandler),
+        (_url(base_url, "dagruns/state"), DagRunStateHandler),
         (_url(base_url, "taskinstances"), TaskInstancesHandler),
         (_url(base_url, "taskinstances/logs"), TaskLogsHandler),
         (_url(base_url, "taskinstances/clear"), TaskClearHandler),

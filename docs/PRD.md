@@ -236,9 +236,15 @@ Two layers (client = instant UX, server = authority):
 1. *Writing…* → atomic write succeeds.
 2. *Waiting for Airflow to pick it up…* → poll `GET /api/v2/dags` for the `dag_id` **and** `GET /api/v2/importErrors` filtered to the filename, with bounded backoff and an explicit timeout (communicate "up to a few minutes").
 3. Resolve to **Registered** (dag appears, no import error) · **Failed to import** (import error → friendly message + traceback expander + map to node/field) · **Still processing** (timeout → keep polling / let the user dismiss).
-- On success, the DAG is created **paused**; offer "unpause & trigger".
+- **Run on deploy (required; decision 2026‑06‑17 — every deploy runs).** Deploy does **not** stop at *Registered*: once the dag registers, the server **unpauses then triggers one run** over the Airflow API — `PATCH /dags/{id}?update_mask=is_paused` (`is_paused=false`), **then** `POST /dags/{id}/dagRuns` with a null `logical_date`. **Order matters:** a run triggered while the dag is still **paused** is created but sits `queued` and never executes until it is unpaused (§8.8), so unpause must come first. This is a **direct API round‑trip** (not pickup‑dependent), so the banner advances *Registered → Running* and exposes **Stop run** (§6.6). The §6.5.5 active‑run guard still gates the *write* (a re‑deploy over an in‑flight run is blocked); a first deploy has no prior run to strand. A "deploy paused / don't run" escape hatch is an open follow‑up (§13).
 
 **6.5.5 Updating a deployed DAG (re‑deploy).** Editing a Studio DAG and deploying again **overwrites the same `{dag_id}.py`** in place (atomic `os.replace`; Studio‑managed files overwrite freely, hand‑written are refused, §6.5.3) and re‑runs the deploy lifecycle (§6.5.4). **Active‑run guard (required):** because `LocalDagBundle` has no versioning and always runs the *latest file on disk* (§8.8), overwriting a DAG with a run **in flight** can corrupt it (removed/renamed tasks orphan; structure shifts under the running scheduler). Before a re‑deploy the editor runs the **shared dag‑state preflight** — the `active_runs` of the current `dag_id` from `list_dag_runs` (running/queued), the *same* check the rename migration uses — and, if the DAG is registered with an active run, **blocks** with *Cancel* / *Deploy anyway* (an explicit override). A preflight failure falls through to deploy (the user clicked Deploy; if Airflow is unreachable nothing is running). This is **distinct from a rename**: an update keeps the `dag_id` (same file, same history); only a `dag_id` *change* is the migration in §6.1.8(B). **Out‑of‑band drift** detection is **implemented**: the deploy preflight compares the file body to a `code=sha256` hash stamped in its provenance header, and a drifted file prompts *overwrite or cancel* before re‑deploy (§6.5.3). Still‑unbuilt: **undeploy / rollback** to the last working version (§7). Caveat: for an update the tri‑state's `registered` verdict can't yet distinguish *new version parsed* from *old version still live* (Airflow's REST API doesn't expose the on‑disk `ir‑hash`).
+
+**6.5.6 Undeploy & orphan reconciliation (delete the DAG when its `.afdag` is deleted).** A deployed DAG's source of truth is its `.afdag`; deleting that design file should **delete the deployed DAG** (decision 2026‑06‑17: **full delete** — remove the namespaced `.py` **and** `DELETE /api/v2/dags/{id}` to purge run history, the same teardown as the manager's Delete in §6.6). Because the `.afdag` lives in the Jupyter workspace and the `.py` in the (out‑of‑root) dags folder, the deployed→source link is the **`afdag_id` provenance join** (§8.9): every managed `.py` carries `afdag_id=<uuid>`, and an **orphan** is a deployed managed `.py` whose `afdag_id` no longer matches any `.afdag` under the Contents root. Detection is **two‑layered** (decision 2026‑06‑17 — **both**):
+1. *In‑session signal* — subscribe to JupyterLab's `serviceManager.contents.fileChanged` (filter `type==='delete'` and `oldValue.path` ending `.afdag`). A `.afdag` deleted **inside** the running JupyterLab re‑runs the orphan sweep **immediately** (`panel.refresh()`) so the manager surfaces the now‑orphaned DAG at once instead of waiting for the next manual refresh (§15.13).
+2. *Server reconciliation sweep* — a server endpoint (`dags/orphans` → `find_orphans`) walks the Contents root for live `afdag_id`s and diffs them against `SharedVolumeTarget.list()` (deployed managed files) to return the orphan set. The manager runs it on every refresh and surfaces orphans as a banner (§15.13). This is the **only** layer that catches deletes done outside the session (terminal, `rm`, `git checkout`), which fire no `fileChanged`.
+
+Both paths are **destructive and confirmed, never silent** (§9): a `.afdag` can vanish from a `git` operation or an accidental `rm`, so a purge requires explicit per‑DAG confirmation — the sweep *flags*, the user *confirms*. Reconcile is the mirror of §6.6 Delete (file‑first, then history) and a sibling of the existing **drift** detection (which reconciles *edited‑but‑present* files; this reconciles *deleted‑source* ones). Airflow refuses `DELETE /dags/{id}` while a task instance is running (§8.8), so an orphan with an active run is surfaced but blocked until the run ends or is stopped. Wireframe §15.13.
 
 ### 6.6 Resource Manager (sidebar, extended)
 
@@ -250,7 +256,8 @@ Extends the existing `AirflowPanel`. Requirements (endpoints in Appendix D):
 - **Runs** → **task instances + states** → **task logs** (paged by continuation token, tail while running).
 - **Import errors** view (`/api/v2/importErrors`) — *the recovery surface*; translate `stack_trace` to plain language.
 - **Clear/retry** (`clearTaskInstances`, `dry_run` preview first) and **mark success/failed/skipped** (with dry‑run preview).
-- **Delete** = remove the namespaced `.py` + `.afdag` via `DeployTarget` **first** (so it isn't re‑imported), **then** `DELETE /api/v2/dags/{id}` to purge history; irreversible‑action confirmation.
+- **Stop / terminate a run** (manager **and** editor; decision 2026‑06‑17). Airflow 3 has **no cancel endpoint** for a normal run — stopping an in‑flight run = `PATCH /api/v2/dags/{id}/dagRuns/{run_id}` with `state:"failed"` (the scheduler then terminates its running task instances; only *Backfills* expose a true `cancel`). Surface a **⏹ Stop** on a `running`/`queued` run in the manager's run list (§15.9) and in the editor/deploy banner while a run is in flight (§15.6); confirm (it fails the run). Distinct from **Clear/Retry** (re‑runs tasks) and **Delete** (removes the DAG).
+- **Delete** = remove the namespaced `.py` + `.afdag` via `DeployTarget` **first** (so it isn't re‑imported), **then** `DELETE /api/v2/dags/{id}` to purge history; irreversible‑action confirmation. (Airflow refuses the delete while a task instance is running, §8.8 — stop the run first.)
 - **Refresh:** tiered visibility‑gated polling keyed off `autoRefreshSeconds` (collapsed list ~15–30s; active run 3–5s; open running‑log tail 2–3s); pause when hidden/offscreen; back off on 429/5xx. (No websockets in Airflow `/api/v2`; the experimental single‑run `wait` ndjson stream may be proxied later.)
 
 ### 6.7 Advanced code‑editor task nodes (decision #3)
@@ -338,7 +345,7 @@ Server‑side, in this fixed order, **short‑circuit on first failure**, each e
 
 ### 8.6 Server extension endpoints
 
-Reuse the existing `_AirflowHandler.respond` + `run_in_executor` pattern and `url_path_join(base_url, 'jupyterlab-airflow', act)`. **Existing:** `health`, `dags`, `dags/pause`, `dags/trigger`, `dagruns`. **Add:** `operators` (registry), `generate` (IR→validated code preview), `validate`, `deploy` (validate→format→atomic write→verify), `dags/details`, `dags/source`, `dags/delete`, `dagruns/state`, `dagruns/clear`, `taskinstances`, `taskinstances/logs`, `taskinstances/state`, `taskinstances/clear`, `importerrors`, `assets/events`. Extend `AirflowClient` with one method per endpoint group (Appendix D). **Fix** `list_dags` v2 param drift.
+Reuse the existing `_AirflowHandler.respond` + `run_in_executor` pattern and `url_path_join(base_url, 'jupyterlab-airflow', act)`. **Existing:** `health`, `dags`, `dags/pause`, `dags/trigger`, `dagruns`. **Add:** `operators` (registry), `generate` (IR→validated code preview), `validate`, `deploy` (validate→format→atomic write→verify→**unpause+trigger**, §6.5.4), `dags/details`, `dags/source`, `dags/delete`, `dags/orphans` (orphan‑reconciliation sweep, §6.5.6), `dagruns/state` (**stop a run** → `PATCH …/dagRuns/{run_id} state:"failed"`, §6.6), `dagruns/clear`, `taskinstances`, `taskinstances/logs`, `taskinstances/state`, `taskinstances/clear`, `importerrors`, `assets/events`. New `AirflowClient` methods needed: `set_dag_run_state` (stop) and `get_dag_run` (single‑run state for the run‑on‑deploy/stop banners); `trigger_dag`/`set_paused`/`delete_dag` already exist. Extend `AirflowClient` with one method per endpoint group (Appendix D). **Fix** `list_dags` v2 param drift.
 
 ### 8.7 `DeployTarget` abstraction
 
@@ -347,6 +354,9 @@ Interface in §6.5.1. `SharedVolumeTarget` reads its dags path from an env var (
 ### 8.8 Airflow 3.x integration specifics
 
 - REST `/api/v2` (FastAPI), JWT via `POST /auth/token` → Bearer (already implemented). `execution_date` is gone → `logical_date` (nullable for now‑runs). Pause = `PATCH /dags/{id}?update_mask=is_paused`. Trigger = `POST /dags/{id}/dagRuns {logical_date?, conf}`.
+- **Run‑on‑deploy ordering (§6.5.4).** Triggering a run on a **paused** dag returns 200/201 and the run appears, but the scheduler holds it in `queued` (it filters `~DagModel.is_paused`) and **no task starts until the dag is unpaused**. So the deploy auto‑run must **unpause first, then trigger** — there is no single "trigger + unpause" call (the native UI does the two steps too).
+- **Stop a run (§6.6).** No `cancel`/`terminate` endpoint exists for a normal DagRun — set the run's state: `PATCH /dags/{id}/dagRuns/{run_id} {state:"failed"}` (allowed states: `queued|success|failed`); running task instances are then terminated by the scheduler. (`POST …/dagRuns/{run_id}/clear` re‑runs tasks; it is **not** a stop.) Only `/api/v2/backfills/{id}/cancel` is a real cancel, and only for backfills.
+- **Delete preconditions (§6.5.6 / §6.6).** `DELETE /dags/{id}` **refuses when any task instance is RUNNING** (`delete_dag()` raises `AirflowException("TaskInstances still running")`) and removes **metadata/history only** — if the `.py` is still on disk the dag re‑parses and reappears, so the DeployTarget must remove the file **first** (the existing `purge_dag` order is correct). The dag does **not** need to be paused to delete.
 - Default DAG bundle `dags-folder` = `LocalDagBundle` over `[core] dags_folder` — the shared‑volume model needs **no bundle reconfiguration**. `LocalDagBundle` has **no versioning** (always runs latest on disk) → don't edit a deployed file during an active run.
 - `.airflowignore` default syntax is **glob** in Airflow 3 (was regexp).
 - **Discovery latency is real:** `dag_dir_list_interval` (~300s) for new files, `min_file_process_interval` (~30s) for changed ones; no on‑demand refresh API → §6.5.4 polling is mandatory.
@@ -367,6 +377,7 @@ Interface in §6.5.1. `SharedVolumeTarget` reads its dags path from an env var (
 - **Code nodes** = arbitrary code; lint + isolated‑subprocess validation; document the blast radius; (later) optional review/approval gate or separate worker queue.
 - **Multi‑user reality.** Today the server uses **one shared service account** (process‑wide env creds, one module‑global cached JWT). On JupyterHub each user gets their own server process, so for real per‑user attribution/authorization, inject **per‑user Airflow creds/OIDC** at spawn (`c.Spawner.environment`/`auth_state`); keep env‑var creds as a single‑user/dev fallback. **Document prominently** that, until then, any Jupyter user acts as one Airflow admin and the shared dags folder is a shared trust boundary (Airflow's multi‑team isolation is experimental and does not isolate task execution/secrets).
 - **Collision protection** (§6.5.3): pre‑write uniqueness/ownership check; refuse to overwrite non‑Studio files; duplicate‑`dag_id` handling; "modified outside Studio" flow.
+- **Destructive lifecycle is confirmed, never automatic‑silent.** Run‑on‑deploy goes live (every deploy unpauses + triggers, §6.5.4) and design‑file‑delete purges the DAG **and its run history** (§6.5.6) — both are irreversible against shared Airflow state. A vanished `.afdag` is a *weak* intent signal (it can disappear via `git`/`rm`), so the reconciliation sweep **flags** orphans and **requires explicit per‑DAG confirmation** before `DELETE /dags/{id}`; it never purges on detection alone. Only the **`afdag_id`‑provenance‑matched, Studio‑managed** `.py` files are eligible — hand‑written DAGs (no provenance header) are never auto‑touched, per §6.5.3.
 - **Secrets guidance.** Steer users to **Airflow Connections/Variables** instead of pasting API keys/passwords into env‑var/HTTP/code fields (which would be written in plaintext into the dags folder and `.afdag`). Warn on `AIRFLOW_VERIFY_SSL=false` for any non‑local target (MITM of JWT).
 - **Token lifecycle.** The single cached JWT refreshed once on 401 is fragile under rotation/clock skew; make it per‑process and, with Hub‑injected tokens, refresh from the Hub/auth_state rather than re‑POSTing static creds.
 - **Audit.** Log every deploy/trigger/delete/clear with `{user, action, dag_id, correlation_id}` even before full per‑user identity lands.
@@ -403,6 +414,8 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | R10 | **Prod may not have a writable shared volume** | `DeployTarget` is load‑bearing from day one, not "later" |
 | R11 | **Rename mid‑run / orphaned `dag_id` history** — Airflow has no rename; `{dag_id}.py` relocates and the old DAG is orphaned; removing the old file during an active run strands it | Deploy‑aware rename migration (§6.1.8): block while a run is active; write‑new‑then‑remove‑old; keep‑history default (purge is opt‑in); `afdag_id` in the provenance header for cross‑rename re‑association |
 | R12 | **Re‑deploy overwrites a *running* DAG's file** — `LocalDagBundle` runs latest‑on‑disk, so an in‑place update mid‑run can corrupt the active run | Active‑run guard before re‑deploy (§6.5.5): the shared dag‑state preflight blocks with *Cancel* / explicit *Deploy anyway* — the same check as the rename migration |
+| R13 | **Auto‑undeploy purges history on a `.afdag` that vanished unintentionally** (git checkout, `rm`, branch switch) | Reconciliation **flags** orphans; purge is **confirmed per‑DAG**, never silent (§6.5.6/§9); only provenance‑matched managed files are eligible; the in‑session signal prompts and the sweep surfaces a banner — both gated |
+| R14 | **Run‑on‑deploy goes live every time** — an unfinished/just‑edited DAG could run unintentionally, or backfill on a past `start_date`+`catchup` | The §6.5.5 active‑run guard still blocks a re‑deploy over an in‑flight run; the banner shows *Running* with **Stop run**; a "deploy paused" kill‑switch + catchup‑aware skip are open follow‑ups (§13) |
 
 ## 13. Open questions / decisions needed
 
@@ -415,6 +428,9 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 7. **Code node in Traditional mode** — wrap as `PythonOperator(python_callable=...)` vs force TaskFlow.
 8. **Validation subprocess sandbox policy** (CPU/mem/wall‑time, network egress) — concrete since code nodes are arbitrary by design.
 9. **Rename of a deployed `dag_id` — old‑history default** (§6.1.8): default to *keep* the old history (pause + remove file → dag goes `stale`) vs *purge* (`DELETE /dags/{old}`)? And should a rename also be triggerable from the **manager**, not only the editor?
+10. **Run‑on‑deploy escape hatch (§6.5.4).** Every deploy now unpauses + triggers (decision 2026‑06‑17). Do we also need a "deploy paused / don't run" affordance for a DAG the user wants live but not yet run — and should run‑on‑deploy be **skipped** when the freshly registered DAG would **backfill** (past `start_date` + `catchup=true`) rather than fire a single now‑run?
+11. **Orphan‑sweep cadence & scope (§6.5.6).** Run the reconciliation sweep only on manager refresh, or also on a timer / on editor close? Bound the Contents‑root walk (skip huge/irrelevant trees), and in multi‑user act only on **namespaced/owned** DAGs.
+12. **Stop‑run semantics (§6.6).** `PATCH state:"failed"` marks the run failed (not a graceful cancel); confirm this is the desired "stop", and whether to also offer `state:"success"` (force‑complete) — Airflow allows both. Should stopping a run be available for `queued` runs too (not just `running`)?
 
 ## 14. Milestones & acceptance criteria
 
@@ -428,6 +444,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | **M4 — Deploy + lifecycle** | Atomic namespaced write; tri‑state polling; integration test deploys to `apache/airflow:3.0.2`, asserts **zero import errors + a green run** |
 | **M5 — Manager ops** | Import‑errors view, task instances, logs, clear/retry, delete (file+history); list param drift fixed |
 | **M6 — Recovery UX + a11y** | Friendly import‑error → node/field mapping + "Open in Studio to fix" + undeploy; keyboard path + non‑color‑only indicators |
+| **M7 — Lifecycle automation** | **Run on deploy:** after register, the server unpauses + triggers a run and the banner reaches *Running* (integration test on `3.0.2` asserts a green run, no manual step); **Stop run** (manager + editor) `PATCH`es a run to `failed` and its tasks terminate; **orphan reconciliation:** deleting a `.afdag` — via the in‑session `fileChanged` signal **and** the server sweep (terminal/`git`/`rm` deletes) — flags, confirms, then removes the `.py` and `DELETE`s the DAG; delete is blocked while a task runs; all three are audited (`{user, action, dag_id, correlation_id}`) |
 | **v1.1** | Traditional backend + working toggle (equivalence tests); Tidy layout; more operators |
 | **v1.2** | Git + S3 `DeployTarget`; per‑user identity + audit; asset scheduling |
 
@@ -549,9 +566,9 @@ Read‑only teaching surface for the selected operator (DAG concepts when nothin
 ```
 Built: registry‑driven (`description`/`docs_url`/`example`/per‑param `help`/`provider`/`airflow_min_version`), all rendered as escaped plain text (registry is user‑extensible → no raw HTML). For **gated** ops (§6.2.1) this tab also states the missing provider + any non‑checkable prerequisite (e.g. a K8s cluster) 🔭.
 
-### 15.6 Deploy — top‑bar action + tri‑state banner ✅
+### 15.6 Deploy — top‑bar action + tri‑state banner ✅ (incl. run‑on‑deploy + stop ✅)
 
-Deploy is an *observable* lifecycle (§6.5.4), not a silent success. *(src: 04-main-demo build→deploy→native‑Airflow run)*
+Deploy is an *observable* lifecycle (§6.5.4), not a silent success — and (📝) **runs on deploy**: after the dag registers, the server unpauses + triggers a run, so the banner continues *Registered → Running → finished*. *(src: 04-main-demo build→deploy→native‑Airflow run)*
 
 ```
  top-bar:   ▶ Deploy  ─►  ⏳ Deploying…  ─►  ✓ Deployed     /     ✕ Failed
@@ -560,12 +577,14 @@ Deploy is an *observable* lifecycle (§6.5.4), not a silent success. *(src: 04-m
  ① ┌ ⏳ Writing my_dag.py to the dags folder…                          ┐
  ② ┌ ⏳ Waiting for Airflow to pick it up (up to a few minutes)…       ┐
    │                                       [ Keep waiting ]    [ × ]   │
- ③a┌ ✓ Registered — my_dag is live (paused).  [ Unpause & trigger ][×]┐
+ ③a┌ ✓ Registered — unpausing + triggering my_dag…                    ┐   📝 run-on-deploy
+   │   ▶ Running (run_id 2026-06-17T…)            [ ⏹ Stop run ] [ × ] │   ← unpause→trigger
+ ③a'┌ ✓ Run finished — my_dag · ✓ success         [ ▶ Run again ] [ × ]┐
  ③b┌ ✕ Couldn’t load — “Bash Command” on node fetch_data is empty.    ┐
    │   [ Show technical details ▾ ]                                    │
    │   [ Open in Studio to fix ]   [ Undeploy ]                  [ × ] │
 ```
-Built: atomic `SharedVolumeTarget` write + post‑deploy polling of `/dags` + `/importErrors`; banner renders writing/waiting/registered/failed/processing with the recovery actions.
+Built ✅: atomic `SharedVolumeTarget` write + post‑deploy polling of `/dags` + `/importErrors`; banner renders writing/waiting/registered/running/finished/failed/processing. **Run on deploy ✅ (§6.5.4):** on `registered`, `StudioApp` unpauses (`setDagPaused false`) **then** triggers (`triggerDag`), captures the `dag_run_id`, and polls `getDagRun` so the banner advances ③a→③a' (`running`→`finished`); **⏹ Stop run** PATCHes the run to `failed` via `setDagRunState` (§6.6) and the same poll moves it to *finished*. *Run again* re‑invokes the unpause→trigger→poll flow. The §6.5.5 active‑run guard still gates the write; if the auto‑trigger fails the banner falls back to the manual *Unpause & trigger* button.
 
 ### 15.7 Palette — provider‑availability states 🔭
 
@@ -582,7 +601,7 @@ How gated (Tier‑2/3) operators appear once gating lands (§6.2.1). Unavailable
 ```
 Server reads the **target** Airflow’s `/api/v2/providers`; palette payload annotates `available | missing-provider | version-too-old`; deploy hard‑fails on a missing provider before writing the file.
 
-### 15.8 Manager — DAG list (left sidebar) ✅
+### 15.8 Manager — DAG list (left sidebar) ✅ (incl. stop‑run + orphan banner ✅)
 
 The operations surface. *(Mirrors what the demo shows running in the **native** Airflow UI — src: 04-main-demo f0400 — but rendered inside JupyterLab.)*
 
@@ -590,32 +609,33 @@ The operations surface. *(Mirrors what the demo shows running in the **native** 
  ┌ Airflow — DAGs ──────────────────────────────── ⟳ ┐
  │ 🔍 Search dag_id…                      [ Tags ▾ ]  │
  │ ⚠ 1 import error  ▾ (expand → plain-language fix)  │
+ │ ⚠ 2 orphaned DAGs — .afdag source deleted ▾        │   📝 reconciliation sweep → §15.13(B)
  │ ──────────────────────────────────────────────────│
- │ ◐ my_dag         @daily   etl,prod      ⏸  ▶  🗑   │   ◐ run-status donut
- │ ● ingestion_dag  15m  ⏵running          ⏸  ▶  🗑   │   ⏸ pause/unpause
- │ ⚠ load_dag       (import error)         ⏸  ▶  🗑   │   ▶ trigger · 🗑 delete(purge)
- │ ──────────────────────────────────────────────────│
+ │ ◐ my_dag         @daily   etl,prod      ⏸  ▶     🗑 │   ◐ run-status donut
+ │ ● ingestion_dag  15m  ⏵running          ⏸  ▶  ⏹  🗑 │   ⏸ pause/unpause · ▶ trigger
+ │ ⚠ load_dag       (import error)         ⏸  ▶     🗑 │   ⏹ stop run (running only, 📝)
+ │ ──────────────────────────────────────────────────│   🗑 delete (purge file+history)
  └────────────────────────────────────────────────────┘
 ```
-Built: list (search/tag filter, `exclude_stale`), pause, trigger, run‑status, `has_import_errors` badge + import‑errors panel, delete (file‑then‑history). *Trigger is bare* today — see 15.10.
+Built ✅: list (search/tag filter, `exclude_stale`), pause, trigger, run‑status, `has_import_errors` badge + import‑errors panel, delete (file‑then‑history). *Trigger is bare* today — see 15.10. **Stop‑run ✅:** a **stop** link on a `running`/`queued` run in the drill‑down (§15.9) `PATCH`es it to `failed` (§6.6). **Orphan banner ✅:** the manager calls `dags/orphans` on every refresh and renders a warn‑coloured banner of deployed DAGs whose source `.afdag` was deleted (§6.5.6 / §15.13), each with *Undeploy & purge* / *Keep*.
 
-### 15.9 Manager — run / task drill‑down + logs ✅
+### 15.9 Manager — run / task drill‑down + logs ✅ (incl. stop‑run ✅)
 
 Expand a DAG → runs → task instances → logs. *(Mirrors native grid/logs — src: 04-main-demo f0600/f0850.)*
 
 ```
  ┌ my_dag ─────────────────────────────────┐   Log modal
  │ RUNS                                     │   ┌ print2 · attempt 2 ▾ ───────────┐
- │ ▾ 2026-03-14 17:25  ✓ success            │   │ [INFO] Running BashOperator…     │
+ │ ▾ 2026-03-14 17:25  ⏵ running [ ⏹ Stop ]─┼─  │ [INFO] Running BashOperator…     │   📝 stop a live run
  │    • print1  ✓ success  try 1            │   │ [INFO] echo Hello                │
  │    • print2  ✕ failed   try 2  [ logs ]──┼──▶│ [INFO] Command exited 0          │
  │    • print3  ◷ queued                    │   │ …                                │
  │ ▸ 2026-03-13 …      ✓                     │   │ [ Wrap ] [ Download ]      [ × ] │
  │ ──────────────────────────────────────── │   └──────────────────────────────────┘
- │ [ Clear/Retry ▸ dry-run preview ]  [ Mark state… ]                              │
+ │ [ Clear/Retry ▸ dry-run preview ]  [ Mark state… ]   [ ⏹ Stop run ] ← running only │
  └──────────────────────────────────────────┘
 ```
-Built: task instances + states, paged logs with attempt selector, clear/retry (dry‑run preview → confirm), mark success/failed/skipped. *(Native grid/Gantt/XCom stay in Airflow’s own UI — NG3; optional deep‑link.)*
+Built ✅: task instances + states, paged logs with attempt selector, clear/retry (dry‑run preview → confirm), mark success/failed/skipped, and (✅) a **stop** link on a `running`/`queued` run that `PATCH`es it to `failed` (→ scheduler terminates its tasks, §6.6 / §8.8) behind a confirm — distinct from Clear/Retry (re‑run) and Mark‑state. *(Native grid/Gantt/XCom stay in Airflow’s own UI — NG3; optional deep‑link.)*
 
 ### 15.10 Manager — trigger‑with‑conf dialog 📝
 
@@ -691,7 +711,28 @@ Editing + Deploy overwrites the same `{dag_id}.py` and re‑runs the lifecycle (
  │        [ Cancel ]              [ Overwrite ]               │
  └────────────────────────────────────────────────────────────┘
 ```
-✅ the preflight gates Deploy on **both** an active run (*Deploy anyway*) and **drift** (a hand‑edited deployed file → *Overwrite* / *Cancel*); drift uses a `code=sha256` body hash stamped in the provenance header vs. the on‑disk body. 🔭 still to come: undeploy/rollback (§7).
+✅ the preflight gates Deploy on **both** an active run (*Deploy anyway*) and **drift** (a hand‑edited deployed file → *Overwrite* / *Cancel*); drift uses a `code=sha256` body hash stamped in the provenance header vs. the on‑disk body. 🔭 still to come: undeploy/rollback (§7) and **delete‑on‑source‑delete** (§15.13).
+
+### 15.13 Delete a Studio DAG document — undeploy reconciliation ✅
+
+Deleting a `.afdag` should delete its deployed DAG (full purge, §6.5.6). Both detection layers feed **one** surface — the manager's orphan banner — so the per‑DAG *Undeploy & purge* confirm is the single consent point (§9). The in‑session `fileChanged` delete signal just makes the banner appear **instantly** (it re‑runs the sweep) rather than waiting for the next manual refresh; the sweep is also what catches terminal/`git`/`rm` deletes. *(✅ built — banner + signal; no reference frame, new surface.)*
+
+```
+ (A) In-session: deleting my_dag.afdag in the file browser fires
+     contents.fileChanged(delete) → index.ts calls panel.refresh()
+     → the orphan sweep re-runs → the banner (B) appears at once.
+
+ (B) Orphan banner (manager sidebar, §15.8) — from `GET dags/orphans`:
+ ┌ Airflow — DAGs ─────────────────────────────────── ⟳ ┐
+ │ ⚠ 2 orphaned DAGs — their .afdag source was deleted ▾ │   warn-coloured banner
+ │   • my_dag      [ Undeploy & purge ]   [ Keep ]       │   Undeploy → confirm modal:
+ │   • sales_etl   [ Undeploy & purge ]   [ Keep ]       │   "removes .py + purges history"
+ └────────────────────────────────────────────────────────┘
+   Undeploy & purge → confirm → deleteDag (purge_dag: file-first, then DELETE /dags/{id}).
+   Keep → hidden for the session (remembered, so refresh/in-session re-sweeps don't re-nag).
+   (Airflow refuses delete while a task runs, §8.8 → stop the run first via §15.9.)
+```
+✅ built. Server: `find_orphans` diffs `afdag_id` provenance on deployed managed `.py` files (`SharedVolumeTarget.list()`) against the `afdag_id`s of live `.afdag` files walked from the Contents root (`dags/orphans` handler passes `contents_manager.root_dir`); remediation reuses **`purge_dag`** (file‑first, then `DELETE /dags/{id}`). Only provenance‑matched, Studio‑managed files with an `afdag_id` are eligible (hand‑written / pre‑provenance DAGs untouched, §9). The mirror of §15.12 drift (edited‑but‑present) for the **deleted‑source** case.
 
 ---
 

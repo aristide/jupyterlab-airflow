@@ -270,6 +270,37 @@
   text-decoration: underline;
 }
 
+.jp-airflow-linkbtn.jp-mod-danger {
+  color: var(--jp-error-color1);
+}
+
+/* Orphan-reconciliation banner (deployed DAG whose .afdag was deleted, §6.5.6).
+   A warning (not error) variant of the import-errors banner. */
+.jp-airflow-importerrors.jp-mod-warn {
+  border-color: var(--jp-warn-color1, #e8a33d);
+  background: var(--jp-warn-color3, rgb(232 163 61 / 10%));
+}
+
+.jp-airflow-importerrors.jp-mod-warn .jp-airflow-importerrors-head {
+  color: var(--jp-warn-color1, #e8a33d);
+}
+
+.jp-airflow-orphan {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 4px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-orphan-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-family: var(--jp-code-font-family);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Modals (logs viewer + confirmations) */
 .jp-airflow-overlay {
   position: fixed;

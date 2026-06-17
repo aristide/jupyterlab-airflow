@@ -61,6 +61,22 @@ export interface IDagListRes {
   total_entries: number;
 }
 
+// A deployed Studio DAG whose source `.afdag` was deleted (PRD §6.5.6). The
+// reconciliation sweep matches it by the `afdag_id` provenance join.
+export interface IOrphan {
+  dag_id: string;
+  filename: string;
+  afdag_id?: string;
+}
+
+export interface IOrphansRes {
+  orphans: IOrphan[];
+  // True when a `.afdag` could not be read/parsed during the sweep — its
+  // identity is unknown, so the manager suppresses the destructive prompt that
+  // sweep rather than risk falsely flagging a present-but-unreadable source.
+  degraded?: boolean;
+}
+
 export interface IDagRun {
   dag_run_id: string;
   dag_id: string;

@@ -7,6 +7,7 @@ the Airflow client is monkeypatched with a fake.
 import json
 
 import pytest
+from tornado.httpclient import HTTPClientError
 
 from jupyterlab_airflow import client as client_module
 
@@ -44,6 +45,12 @@ class FakeClient:
 
     def delete_dag(self, dag_id):
         return {}
+
+    def get_dag_run(self, dag_id, dag_run_id):
+        return {"dag_run_id": dag_run_id, "dag_id": dag_id, "state": "running"}
+
+    def set_dag_run_state(self, dag_id, dag_run_id, state="failed"):
+        return {"dag_run_id": dag_run_id, "dag_id": dag_id, "state": state}
 
 
 @pytest.fixture(autouse=True)
@@ -208,3 +215,52 @@ async def test_trigger_endpoint(jp_fetch):
     assert response.code == 200
     payload = json.loads(response.body)
     assert payload["data"]["state"] == "queued"
+
+
+async def test_dagrun_get_endpoint(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "dagruns",
+        "get",
+        params={"dag_id": "demo", "run_id": "r1"},
+    )
+    assert response.code == 200
+    assert json.loads(response.body)["data"]["state"] == "running"
+
+
+async def test_dagrun_state_endpoint_stops_a_run(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "dagruns",
+        "state",
+        method="POST",
+        body=json.dumps({"dag_id": "demo", "run_id": "r1", "state": "failed"}),
+    )
+    assert response.code == 200
+    assert json.loads(response.body)["data"]["state"] == "failed"
+
+
+async def test_dagrun_state_requires_dag_and_run_id(jp_fetch):
+    with pytest.raises(HTTPClientError) as exc:
+        await jp_fetch(
+            "jupyterlab-airflow",
+            "dagruns",
+            "state",
+            method="POST",
+            body=json.dumps({"dag_id": "demo"}),
+        )
+    assert exc.value.code == 400
+
+
+async def test_orphans_endpoint_flags_deleted_source(jp_fetch, tmp_path, monkeypatch):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    from jupyterlab_airflow.deploy import MANAGED_PREFIX, SharedVolumeTarget
+
+    SharedVolumeTarget(str(tmp_path)).write(
+        "ghost.py", f"{MANAGED_PREFIX}  dag_id=ghost  afdag_id=ZZZ\nx=1\n"
+    )
+    # The test server's Contents root has no .afdag with afdag_id=ZZZ -> orphan.
+    response = await jp_fetch("jupyterlab-airflow", "dags", "orphans")
+    assert response.code == 200
+    orphans = json.loads(response.body)["data"]["orphans"]
+    assert any(o["dag_id"] == "ghost" for o in orphans)

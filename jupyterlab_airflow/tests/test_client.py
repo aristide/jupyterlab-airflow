@@ -158,3 +158,27 @@ def test_delete_dag_issues_delete(requests_mock):
 
     make_client().delete_dag("d")
     assert m.called
+
+
+def test_get_dag_run_fetches_single_run(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    m = requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/d/dagRuns/r1",
+        json={"dag_run_id": "r1", "state": "running"},
+    )
+
+    out = make_client().get_dag_run("d", "r1")
+    assert m.called
+    assert out["state"] == "running"
+
+
+def test_set_dag_run_state_patches_state(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    m = requests_mock.patch(
+        f"{BASE}{API_PREFIX}/dags/d/dagRuns/r1",
+        json={"dag_run_id": "r1", "state": "failed"},
+    )
+
+    # Default state is "failed" — the stop-a-run path (PRD §6.6).
+    make_client().set_dag_run_state("d", "r1")
+    assert m.last_request.json() == {"state": "failed"}

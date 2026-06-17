@@ -58,6 +58,19 @@ const managerPlugin: JupyterFrontEndPlugin<void> = {
 
     app.shell.add(panel, 'left', { rank: 300 });
 
+    // In-session orphan detection (PRD §6.5.6): deleting a `.afdag` design file
+    // in the running JupyterLab re-runs the orphan sweep immediately, so the
+    // manager surfaces the now-orphaned deployed DAG to undeploy. (Terminal/git
+    // deletes are caught by the same sweep on the next manual refresh.)
+    app.serviceManager.contents.fileChanged.connect((_, change) => {
+      if (
+        change.type === 'delete' &&
+        change.oldValue?.path?.endsWith('.afdag')
+      ) {
+        void panel.refresh();
+      }
+    });
+
     app.commands.addCommand(CommandIDs.refresh, {
       label: trans.__('Airflow: Refresh DAGs'),
       execute: () => panel.refresh()

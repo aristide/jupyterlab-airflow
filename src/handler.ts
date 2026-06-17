@@ -13,6 +13,7 @@ import {
   IHealth,
   IImportErrorsRes,
   IOperatorDef,
+  IOrphansRes,
   IPurgeRes,
   IRenamePreflightRes,
   IRetireRes,
@@ -129,6 +130,31 @@ export const triggerDag = (
 
 export const deleteDag = (dagId: string): Promise<IApiRes<IPurgeRes>> =>
   POST<IPurgeRes>('dags/delete', { dag_id: dagId });
+
+// Deployed Studio DAGs whose source `.afdag` was deleted (PRD §6.5.6).
+export const findOrphans = (): Promise<IApiRes<IOrphansRes>> =>
+  GET<IOrphansRes>('dags/orphans');
+
+// One DagRun's current state — polled by the editor's run-on-deploy banner.
+export const getDagRun = (
+  dagId: string,
+  runId: string
+): Promise<IApiRes<IDagRun>> =>
+  GET<IDagRun>('dagruns/get', { dag_id: dagId, run_id: runId });
+
+// Stop an in-flight run (PRD §6.6): Airflow has no cancel endpoint, so this
+// PATCHes the run to a terminal state (`failed`) and the scheduler kills its
+// running tasks.
+export const setDagRunState = (
+  dagId: string,
+  runId: string,
+  state = 'failed'
+): Promise<IApiRes<IDagRun>> =>
+  POST<IDagRun>('dagruns/state', {
+    dag_id: dagId,
+    run_id: runId,
+    state
+  });
 
 // Rename migration (PRD §6.1.8(B)): check the old dag_id's deploy state, then
 // (after the new DAG registers) retire the old one — pause+remove, or purge.

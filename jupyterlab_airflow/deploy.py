@@ -12,10 +12,11 @@ running code as the Airflow worker. Treat ``deploy`` as privileged.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .validation import validate_dag
 
@@ -26,6 +27,11 @@ MANAGED_PREFIX = "# airflow-studio: managed"
 # Glob patterns (Airflow 3 `.airflowignore` is glob) for files the dag-processor
 # must skip in the dags folder.
 _AIRFLOWIGNORE_PATTERNS = [".afdag-tmp-*", "*.afdag"]
+
+# Deployed `.py` files must be readable by the Airflow dag-processor, which on a
+# shared dags volume typically runs as a *different* uid than the JupyterLab
+# server. 0644 (world-readable) is the conventional dags-folder file mode.
+_DEPLOY_FILE_MODE = 0o644
 
 _FILENAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.py$")
 
@@ -132,6 +138,15 @@ class SharedVolumeTarget:
                 fh.write(content)
                 fh.flush()
                 os.fsync(fh.fileno())
+            # mkstemp() forces mode 0600; on a *shared* dags volume the Airflow
+            # dag-processor runs as a different uid (the official image's
+            # ``airflow``, uid 50000) than the JupyterLab server, so an
+            # owner-only file is unreadable and the DAG never registers — the
+            # deploy hangs on "waiting for Airflow to pick it up". Make the file
+            # world-readable (the conventional mode for a dags-folder `.py`) so
+            # discovery works across the uid boundary. os.replace preserves this
+            # mode, so set it on the temp file before the atomic rename.
+            os.chmod(tmp, _DEPLOY_FILE_MODE)
             os.replace(tmp, target)
         except BaseException:
             if os.path.exists(tmp):
@@ -224,6 +239,73 @@ def is_drifted(filename: str, target: Optional[SharedVolumeTarget] = None) -> bo
     if not recorded:
         return False
     return _body_hash(content) != recorded
+
+
+def _live_afdag_ids(contents_root: Optional[str]) -> Tuple[Set[str], bool]:
+    """The ``afdag_id`` of every `.afdag` design file under the Jupyter Contents
+    root — the *source* side of the orphan join (PRD §6.5.6). Hidden/checkpoint
+    dirs are skipped.
+
+    Returns ``(ids, degraded)`` where ``degraded`` is True if any `.afdag` could
+    not be read or parsed: such a file's ``afdag_id`` is then unknown, so the
+    caller must NOT classify the deploy it backs as deleted (a corrupt/unreadable
+    source is *present*, not gone) — see :func:`find_orphans`.
+    """
+    ids: Set[str] = set()
+    degraded = False
+    if not contents_root or not os.path.isdir(contents_root):
+        return ids, degraded
+    for dirpath, dirnames, filenames in os.walk(contents_root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for name in filenames:
+            if not name.endswith(".afdag"):
+                continue
+            try:
+                with open(os.path.join(dirpath, name), encoding="utf-8") as fh:
+                    ir = json.load(fh)
+            except (OSError, ValueError):
+                degraded = True
+                continue
+            afdag_id = ((ir or {}).get("provenance") or {}).get("afdag_id")
+            if afdag_id:
+                ids.add(str(afdag_id).strip())
+    return ids, degraded
+
+
+def find_orphans(
+    contents_root: Optional[str] = None,
+    target: Optional[SharedVolumeTarget] = None,
+) -> Dict[str, Any]:
+    """Deployed Studio DAGs whose source `.afdag` no longer exists (PRD §6.5.6).
+
+    An *orphan* is a deployed, Studio-managed `.py` whose ``afdag_id`` provenance
+    matches no `.afdag` under the Jupyter Contents root — i.e. the design file
+    was deleted (in-session, or out of band via terminal/`git`/`rm`). Remediation
+    is the manager-side :func:`purge_dag` (file-first, then ``DELETE /dags/{id}``).
+
+    Returns ``{orphans: [{dag_id, filename, afdag_id}], degraded}``. Files without
+    an ``afdag_id`` (pre-provenance deploys) are skipped — they can't be
+    re-associated, so we never auto-delete them. ``degraded`` is True when a
+    `.afdag` could not be read/parsed (its identity is unknown), so the caller
+    should suppress the destructive "source deleted" prompt for that sweep rather
+    than risk a false positive.
+    """
+    target = target or SharedVolumeTarget()
+    live_ids, degraded = _live_afdag_ids(contents_root)
+    orphans: List[Dict[str, str]] = []
+    for entry in target.list():
+        afdag_id = entry.get("afdag_id")
+        if not afdag_id:
+            continue
+        if afdag_id not in live_ids:
+            orphans.append(
+                {
+                    "dag_id": entry.get("dag_id", ""),
+                    "filename": entry.get("filename", ""),
+                    "afdag_id": afdag_id,
+                }
+            )
+    return {"orphans": orphans, "degraded": degraded}
 
 
 def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:

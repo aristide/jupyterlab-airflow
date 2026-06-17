@@ -44,9 +44,11 @@ import {
 import {
   deployDag,
   deployStatus,
+  getDagRun,
   renamePreflight,
   retireOldDag,
   setDagPaused,
+  setDagRunState,
   triggerDag
 } from '../handler';
 import { IOperatorDef } from '../interfaces';
@@ -79,6 +81,20 @@ import { Palette } from './Palette';
 const POLL_TIMEOUT_MS = 180000;
 const POLL_START_MS = 2000;
 const POLL_MAX_MS = 8000;
+// Run-on-deploy (§6.5.4): a deployed run is polled to completion, with a longer
+// ceiling than registration since a DAG run can legitimately take a while.
+const RUN_POLL_TIMEOUT_MS = 600000;
+// Give up the run poll after this many consecutive errors (e.g. the run/DAG was
+// removed out of band → 404, or Airflow is unreachable) instead of spinning a
+// stale "Running…" banner until the deadline.
+const MAX_RUN_POLL_ERRORS = 5;
+const RUN_TERMINAL_STATES = new Set([
+  'success',
+  'failed',
+  'skipped',
+  'upstream_failed',
+  'removed'
+]);
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => window.setTimeout(resolve, ms));
@@ -482,6 +498,134 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     }
   }, []);
 
+  // Run-on-deploy (§6.5.4): poll the triggered run until it reaches a terminal
+  // state, driving the banner running → finished. Shares the poll cancel token.
+  const pollRunState = React.useCallback(
+    async (
+      dagId: string,
+      filename: string,
+      runId: string,
+      token: { cancelled: boolean }
+    ): Promise<void> => {
+      const deadline = Date.now() + RUN_POLL_TIMEOUT_MS;
+      let delay = POLL_START_MS;
+      let errors = 0;
+      while (!token.cancelled && Date.now() < deadline) {
+        await sleep(delay);
+        if (token.cancelled) {
+          return;
+        }
+        const res = await getDagRun(dagId, runId);
+        if (token.cancelled) {
+          return;
+        }
+        if (res.status === 'OK' && res.data) {
+          errors = 0;
+          const runState = res.data.state;
+          if (RUN_TERMINAL_STATES.has(runState)) {
+            setDeploy(prev => ({
+              ...prev,
+              phase: 'finished',
+              dagId,
+              filename,
+              runId,
+              runState,
+              message:
+                runState === 'success'
+                  ? `Run finished — ${dagId} · ✓ success`
+                  : `Run finished — ${dagId} · ${runState}`
+            }));
+            return;
+          }
+          setDeploy(prev => ({
+            ...prev,
+            phase: 'running',
+            runState,
+            message: `Running ${dagId} — ${runState}…`
+          }));
+        } else if (++errors >= MAX_RUN_POLL_ERRORS) {
+          // The run/DAG likely vanished (404) or Airflow is unreachable — stop
+          // polling and steer the user to the Manager instead of a stale spinner.
+          setDeploy(prev => ({
+            ...prev,
+            phase: 'finished',
+            dagId,
+            filename,
+            runId,
+            runState: 'unknown',
+            message: `Lost track of ${dagId}'s run (${res.error ?? 'poll failed'}). Check the Manager.`
+          }));
+          return;
+        }
+        delay = Math.min(delay + 1000, POLL_MAX_MS);
+      }
+      if (!token.cancelled) {
+        setDeploy(prev => ({
+          ...prev,
+          message: `${dagId} is still running — check the Manager for progress.`
+        }));
+      }
+    },
+    []
+  );
+
+  // Run-on-deploy core: unpause THEN trigger (a run on a paused DAG just sits
+  // queued, §8.8), then poll the run to completion. Reused by the banner's
+  // "Run again" / "Unpause & trigger" fallback. Guarded by the poll token so a
+  // dismiss / re-deploy / unmount cancels it.
+  const runAfterDeploy = React.useCallback(
+    async (
+      dagId: string,
+      filename: string,
+      token: { cancelled: boolean },
+      // Optional secondary line kept visible across the run (e.g. a rename
+      // migration's "Old DAG retired/purged" confirmation, §6.1.8(B)).
+      note?: string
+    ): Promise<void> => {
+      setDeploy({
+        phase: 'registered',
+        dagId,
+        filename,
+        note,
+        triggered: false,
+        message: `Registered ${dagId} — unpausing & triggering…`
+      });
+      await setDagPaused(dagId, false);
+      if (token.cancelled) {
+        return;
+      }
+      const run = await triggerDag(dagId);
+      if (token.cancelled) {
+        return;
+      }
+      if (run.status !== 'OK' || !run.data?.dag_run_id) {
+        setDeploy({
+          phase: 'registered',
+          dagId,
+          filename,
+          note,
+          isPaused: false,
+          triggered: false,
+          message: `Unpaused ${dagId}, but the run trigger failed: ${run.error ?? 'unknown error'}. Use “Unpause & trigger” to retry.`
+        });
+        return;
+      }
+      const runId = run.data.dag_run_id;
+      setDeploy({
+        phase: 'running',
+        dagId,
+        filename,
+        note,
+        runId,
+        runState: run.data.state,
+        triggered: true,
+        message: `Running ${dagId}…`
+      });
+      await pollRunState(dagId, filename, runId, token);
+    },
+    [pollRunState]
+  );
+
   // Phase 2-3: poll deploy/status with bounded backoff until the DAG registers,
   // fails to import, or we time out (→ "still processing").
   const pollLifecycle = React.useCallback(
@@ -502,14 +646,9 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         }
         if (res.status === 'OK' && res.data) {
           if (res.data.state === 'registered') {
-            setDeploy({
-              phase: 'registered',
-              dagId,
-              filename,
-              isPaused: res.data.dag?.is_paused ?? true,
-              message: `Registered ${dagId} (paused).`
-            });
-            // Rename migration: the renamed DAG is live → retire the old one.
+            // Rename migration: the renamed DAG is live → retire the old one
+            // before running the new one.
+            let retireNote: string | undefined;
             const pending = pendingRetireRef.current;
             if (pending) {
               pendingRetireRef.current = null;
@@ -517,14 +656,23 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
                 pending.oldDagId,
                 pending.purge
               );
-              setDeploy(prev => ({
-                ...prev,
-                message:
-                  retired.status === 'OK'
-                    ? `Renamed to ${dagId} (paused). Old DAG “${pending.oldDagId}” ${pending.purge ? 'purged' : 'retired — history kept'}.`
-                    : `Renamed to ${dagId}, but retiring “${pending.oldDagId}” failed: ${retired.error ?? 'unknown error'}.`
-              }));
+              if (token.cancelled) {
+                return;
+              }
+              if (retired.status !== 'OK') {
+                setDeploy({
+                  phase: 'registered',
+                  dagId,
+                  filename,
+                  triggered: false,
+                  message: `Renamed to ${dagId}, but retiring “${pending.oldDagId}” failed: ${retired.error ?? 'unknown error'}.`
+                });
+                return;
+              }
+              retireNote = `Renamed to ${dagId}. Old DAG “${pending.oldDagId}” ${pending.purge ? 'purged' : 'retired — history kept'}.`;
             }
+            // Run on deploy (§6.5.4): every deploy unpauses + triggers a run.
+            await runAfterDeploy(dagId, filename, token, retireNote);
             return;
           }
           if (res.data.state === 'failed') {
@@ -556,7 +704,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         });
       }
     },
-    []
+    [runAfterDeploy]
   );
 
   // Phase 1: validate + atomic write, then enter the polling lifecycle. Takes an
@@ -768,23 +916,48 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     }
   }, [deploy.dagId, deploy.filename, pollLifecycle]);
 
-  const onUnpauseTrigger = React.useCallback(async (): Promise<void> => {
-    const dagId = deploy.dagId;
-    if (!dagId) {
+  // Banner "Unpause & trigger" (fallback) / "Run again" (after a finished run):
+  // re-run the same unpause→trigger→poll flow under a fresh cancel token.
+  const onUnpauseTrigger = React.useCallback((): void => {
+    const { dagId, filename } = deploy;
+    if (!dagId || !filename) {
       return;
     }
-    await setDagPaused(dagId, false);
-    const run = await triggerDag(dagId);
+    cancelPoll();
+    const token = { cancelled: false };
+    pollRef.current = token;
+    void runAfterDeploy(dagId, filename, token);
+  }, [deploy.dagId, deploy.filename, cancelPoll, runAfterDeploy]);
+
+  // Stop the in-flight run (§6.6): Airflow has no cancel, so PATCH the run to
+  // `failed`. Then (re)start the run poll under a fresh token so the banner
+  // converges to "finished" — the prior poll may have ended (e.g. the run-poll
+  // timeout fired), in which case nothing would otherwise re-observe the run.
+  const onStopRun = React.useCallback(async (): Promise<void> => {
+    const { dagId, filename, runId } = deploy;
+    if (!dagId || !runId) {
+      return;
+    }
+    const res = await setDagRunState(dagId, runId, 'failed');
+    if (res.status !== 'OK') {
+      setDeploy(prev => ({
+        ...prev,
+        message: `Stop failed: ${res.error ?? 'unknown error'}`
+      }));
+      return;
+    }
+    cancelPoll();
+    const token = { cancelled: false };
+    pollRef.current = token;
     setDeploy(prev => ({
       ...prev,
-      isPaused: false,
-      triggered: true,
-      message:
-        run.status === 'OK'
-          ? `Unpaused and triggered ${dagId}.`
-          : `Unpaused ${dagId}, but the trigger failed: ${run.error ?? ''}`
+      phase: 'running',
+      message: `Stopping ${dagId}…`
     }));
-  }, [deploy.dagId]);
+    if (filename) {
+      void pollRunState(dagId, filename, runId, token);
+    }
+  }, [deploy.dagId, deploy.filename, deploy.runId, cancelPoll, pollRunState]);
 
   // Cancel any poll loop if the editor unmounts.
   React.useEffect(() => cancelPoll, [cancelPoll]);
@@ -866,7 +1039,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         <DeployBanner
           state={deploy}
           onDismiss={onDismissDeploy}
-          onUnpauseTrigger={() => void onUnpauseTrigger()}
+          onUnpauseTrigger={onUnpauseTrigger}
+          onStopRun={() => void onStopRun()}
           onKeepWaiting={onKeepWaiting}
         />
         <div className="jp-afdag-body">

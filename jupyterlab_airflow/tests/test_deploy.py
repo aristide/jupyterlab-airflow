@@ -1,6 +1,7 @@
 """Tests for SharedVolumeTarget + deploy_dag (atomic write, provenance safety)."""
 
 import os
+import stat
 
 import pytest
 
@@ -10,6 +11,7 @@ from jupyterlab_airflow.deploy import (
     DeployError,
     SharedVolumeTarget,
     deploy_dag,
+    find_orphans,
     is_drifted,
     rename_preflight,
     retire_old_dag,
@@ -54,6 +56,17 @@ def test_write_is_atomic_no_temp_left_behind(tmp_path):
     target.write("ok_dag.py", f"{MANAGED_PREFIX}\nx = 1\n")
     leftovers = [p.name for p in tmp_path.iterdir() if p.name.startswith(".afdag-tmp-")]
     assert leftovers == []
+
+
+def test_written_file_is_world_readable(tmp_path):
+    # mkstemp() forces 0600; the Airflow dag-processor runs as a different uid on
+    # a shared volume and must be able to read the file, else the DAG never
+    # registers and the deploy hangs on "waiting for Airflow to pick it up".
+    target = SharedVolumeTarget(str(tmp_path))
+    path = target.write("perm_dag.py", f"{MANAGED_PREFIX}\nx = 1\n")
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    assert mode & stat.S_IROTH, f"deployed DAG not other-readable: {oct(mode)}"
+    assert mode & stat.S_IRGRP, f"deployed DAG not group-readable: {oct(mode)}"
 
 
 def test_refuses_to_overwrite_handwritten_file(tmp_path):
@@ -224,3 +237,77 @@ def test_is_drifted_false_for_absent_or_unmanaged(tmp_path):
     assert is_drifted("missing.py", target) is False
     (tmp_path / "hand.py").write_text("print('no header')\n")
     assert is_drifted("hand.py", target) is False
+
+
+def _write_afdag(root, name, afdag_id):
+    import json
+
+    (root / name).write_text(json.dumps({"provenance": {"afdag_id": afdag_id}}))
+
+
+def test_find_orphans_flags_deployed_with_deleted_source(tmp_path):
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("keep.py", f"{MANAGED_PREFIX}  dag_id=keep  afdag_id=AAA\nx=1\n")
+    target.write("gone.py", f"{MANAGED_PREFIX}  dag_id=gone  afdag_id=BBB\nx=1\n")
+    # Only keep's source .afdag still exists -> gone is an orphan.
+    _write_afdag(root, "keep.afdag", "AAA")
+
+    orphans = find_orphans(str(root), target)["orphans"]
+    assert [o["dag_id"] for o in orphans] == ["gone"]
+    assert orphans[0]["afdag_id"] == "BBB"
+    assert orphans[0]["filename"] == "gone.py"
+
+
+def test_find_orphans_ignores_files_without_afdag_id(tmp_path):
+    # A pre-provenance managed file (no afdag_id) can't be re-associated -> never
+    # an orphan (we won't auto-delete what we can't match).
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("old.py", f"{MANAGED_PREFIX}  dag_id=old\nx=1\n")
+    assert find_orphans(str(root), target)["orphans"] == []
+
+
+def test_find_orphans_matches_nested_afdag(tmp_path):
+    # The source .afdag can live in any subfolder of the Contents root.
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    (root / "sub").mkdir(parents=True)
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d  afdag_id=CCC\nx=1\n")
+    _write_afdag(root / "sub", "anything.afdag", "CCC")
+    assert find_orphans(str(root), target)["orphans"] == []
+
+
+def test_find_orphans_degraded_on_unreadable_afdag(tmp_path):
+    # A corrupt/unreadable .afdag has an unknown afdag_id, so the sweep is
+    # "degraded" — the caller must not flag a present-but-unreadable source as
+    # deleted (§6.5.6). The manager suppresses the prompt when degraded.
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d  afdag_id=DDD\nx=1\n")
+    (root / "d.afdag").write_text("{ this is not valid json")
+    assert find_orphans(str(root), target)["degraded"] is True
+
+
+def test_find_orphans_not_degraded_when_all_readable(tmp_path):
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d  afdag_id=EEE\nx=1\n")
+    _write_afdag(root, "d.afdag", "EEE")
+    res = find_orphans(str(root), target)
+    assert res["degraded"] is False
+    assert res["orphans"] == []

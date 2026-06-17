@@ -168,6 +168,23 @@ class AirflowClient:
             params={"limit": limit, "order_by": "-logical_date"},
         )
 
+    def get_dag_run(self, dag_id: str, dag_run_id: str) -> dict:
+        """One DagRun's current state (drives the run-on-deploy / stop banners)."""
+        return self._request("GET", f"/dags/{dag_id}/dagRuns/{dag_run_id}")
+
+    def set_dag_run_state(
+        self, dag_id: str, dag_run_id: str, state: str = "failed"
+    ) -> dict:
+        """Set a DagRun's state (PRD §6.6/§8.8). Airflow 3 has **no** run cancel
+        endpoint — stopping an in-flight run is ``PATCH …/dagRuns/{id}`` to a
+        terminal state (``failed``); the scheduler then terminates its running
+        task instances. Allowed states: ``queued|success|failed``."""
+        return self._request(
+            "PATCH",
+            f"/dags/{dag_id}/dagRuns/{dag_run_id}",
+            json={"state": state},
+        )
+
     def list_import_errors(self, limit: int = 100) -> dict:
         """All current DAG-file import errors (the deploy recovery surface)."""
         return self._request("GET", "/importErrors", params={"limit": limit})

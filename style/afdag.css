@@ -140,6 +140,12 @@
   font-weight: 500;
 }
 
+.jp-afdag-deploybanner-note {
+  font-weight: 400;
+  font-size: var(--jp-ui-font-size0);
+  opacity: 0.85;
+}
+
 .jp-afdag-deploybanner-actions {
   display: flex;
   gap: 6px;

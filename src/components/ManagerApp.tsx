@@ -6,15 +6,23 @@ import * as React from 'react';
 import {
   clearTasks,
   deleteDag,
+  findOrphans,
   getTaskLogs,
   listDagRuns,
   listDags,
   listImportErrors,
   listTaskInstances,
   setDagPaused,
+  setDagRunState,
   triggerDag
 } from '../handler';
-import { IDag, IDagRun, IImportError, ITaskInstance } from '../interfaces';
+import {
+  IDag,
+  IDagRun,
+  IImportError,
+  IOrphan,
+  ITaskInstance
+} from '../interfaces';
 
 type Trans = ReturnType<ITranslator['load']>;
 
@@ -49,6 +57,11 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState('');
   const [showErrors, setShowErrors] = React.useState(true);
+  // Deployed DAGs whose source .afdag was deleted (PRD §6.5.6).
+  const [orphans, setOrphans] = React.useState<IOrphan[]>([]);
+  const [showOrphans, setShowOrphans] = React.useState(true);
+  // dag_ids the user chose to "Keep" this session — don't re-nag on refresh.
+  const keptOrphans = React.useRef<Set<string>>(new Set());
 
   const [runs, setRuns] = React.useState<RunMap>({});
   const [tasks, setTasks] = React.useState<TaskMap>({});
@@ -61,12 +74,15 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   queryRef.current = query;
 
   const refresh = React.useCallback(
-    async (pattern: string = queryRef.current): Promise<void> => {
+    async (pattern: string = queryRef.current, sweep = true): Promise<void> => {
       setLoading(true);
       setError(null);
-      const [dagRes, errRes] = await Promise.all([
+      const [dagRes, errRes, orphanRes] = await Promise.all([
         listDags(100, pattern),
-        listImportErrors()
+        listImportErrors(),
+        // The orphan sweep walks the whole Contents tree (§6.5.6), so skip it on
+        // the per-keystroke search refresh — only run it on real refreshes.
+        sweep ? findOrphans() : Promise.resolve(null)
       ]);
       setLoading(false);
       if (dagRes.status === 'ERR') {
@@ -77,6 +93,15 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
       setImportErrors(
         errRes.status === 'OK' ? (errRes.data?.import_errors ?? []) : []
       );
+      // Suppress orphans on a degraded sweep (a .afdag couldn't be read) — never
+      // surface a destructive "source deleted" prompt on incomplete data.
+      if (orphanRes && orphanRes.status === 'OK' && !orphanRes.data?.degraded) {
+        setOrphans(
+          (orphanRes.data?.orphans ?? []).filter(
+            o => !keptOrphans.current.has(o.dag_id)
+          )
+        );
+      }
       setRuns({});
       setTasks({});
     },
@@ -93,9 +118,9 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     };
   }, [props.refreshSignal, refresh]);
 
-  // Debounced search.
+  // Debounced search — skip the orphan sweep (it walks the Contents tree).
   React.useEffect(() => {
-    const id = window.setTimeout(() => void refresh(query), 300);
+    const id = window.setTimeout(() => void refresh(query, false), 300);
     return () => window.clearTimeout(id);
   }, [query, refresh]);
 
@@ -229,6 +254,59 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     });
   };
 
+  // Stop an in-flight run (§6.6): Airflow has no cancel, so this marks the run
+  // failed (the scheduler then terminates its running tasks).
+  const stopRun = (dagId: string, run: IDagRun): void => {
+    setConfirm({
+      title: trans.__('Stop run'),
+      message: trans.__(
+        'Stop run "%1" of "%2"? Airflow has no cancel — this marks the run failed and terminates its running tasks.',
+        run.dag_run_id,
+        dagId
+      ),
+      confirmLabel: trans.__('Stop run'),
+      danger: true,
+      onConfirm: async () => {
+        setConfirm(null);
+        const res = await setDagRunState(dagId, run.dag_run_id, 'failed');
+        if (res.status === 'ERR') {
+          setError(res.error ?? 'Failed to stop run');
+          return;
+        }
+        await loadRuns(dagId);
+      }
+    });
+  };
+
+  // Orphan reconciliation (§6.5.6): the deployed DAG whose source .afdag was
+  // deleted. "Undeploy & purge" reuses the same teardown as Delete.
+  const undeployOrphan = (orphan: IOrphan): void => {
+    setConfirm({
+      title: trans.__('Undeploy orphaned DAG'),
+      message: trans.__(
+        'The source .afdag for "%1" was deleted. Undeploy it? This removes the deployed .py and purges its run history. This cannot be undone.',
+        orphan.dag_id
+      ),
+      confirmLabel: trans.__('Undeploy & purge'),
+      danger: true,
+      onConfirm: async () => {
+        setConfirm(null);
+        const res = await deleteDag(orphan.dag_id);
+        if (res.status === 'ERR') {
+          setError(res.error ?? 'Failed to undeploy DAG');
+          return;
+        }
+        keptOrphans.current.delete(orphan.dag_id);
+        await refresh();
+      }
+    });
+  };
+
+  const keepOrphan = (orphan: IOrphan): void => {
+    keptOrphans.current.add(orphan.dag_id);
+    setOrphans(os => os.filter(o => o.dag_id !== orphan.dag_id));
+  };
+
   return (
     <div className="jp-airflow-root">
       <div className="jp-airflow-header">
@@ -270,6 +348,39 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         </div>
       )}
 
+      {orphans.length > 0 && (
+        <div className="jp-airflow-importerrors jp-mod-warn">
+          <button
+            className="jp-airflow-importerrors-head"
+            onClick={() => setShowOrphans(s => !s)}
+          >
+            {showOrphans ? '▾' : '▸'}{' '}
+            {trans.__('Orphaned DAGs — source .afdag deleted')} (
+            {orphans.length})
+          </button>
+          {showOrphans &&
+            orphans.map(o => (
+              <div key={o.dag_id} className="jp-airflow-orphan">
+                <span className="jp-airflow-orphan-name" title={o.filename}>
+                  {o.dag_id}
+                </span>
+                <button
+                  className="jp-airflow-linkbtn jp-mod-danger"
+                  onClick={() => undeployOrphan(o)}
+                >
+                  {trans.__('Undeploy & purge')}
+                </button>
+                <button
+                  className="jp-airflow-linkbtn"
+                  onClick={() => keepOrphan(o)}
+                >
+                  {trans.__('Keep')}
+                </button>
+              </div>
+            ))}
+        </div>
+      )}
+
       {loading && (
         <div className="jp-airflow-status">{trans.__('Loading…')}</div>
       )}
@@ -300,6 +411,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
             onPause={togglePause}
             onTrigger={trigger}
             onDelete={removeDag}
+            onStopRun={stopRun}
             onViewLogs={viewLogs}
             onClear={clearTask}
           />
@@ -363,6 +475,7 @@ interface IDagRowProps {
   onPause: (dag: IDag) => void;
   onTrigger: (dag: IDag) => void;
   onDelete: (dag: IDag) => void;
+  onStopRun: (dagId: string, run: IDagRun) => void;
   onViewLogs: (dagId: string, runId: string, ti: ITaskInstance) => void;
   onClear: (dagId: string, runId: string, ti: ITaskInstance) => void;
 }
@@ -453,6 +566,15 @@ function DagRow(props: IDagRowProps): JSX.Element {
                       {run.state}
                     </span>
                     <span className="jp-airflow-runid">{run.dag_run_id}</span>
+                    {(run.state === 'running' || run.state === 'queued') && (
+                      <button
+                        className="jp-airflow-linkbtn jp-mod-danger"
+                        title={trans.__('Stop this run')}
+                        onClick={() => props.onStopRun(dag.dag_id, run)}
+                      >
+                        {trans.__('stop')}
+                      </button>
+                    )}
                   </div>
                   {key in tasks && (
                     <ul className="jp-airflow-tasks">
