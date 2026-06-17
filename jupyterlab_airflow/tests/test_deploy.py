@@ -72,6 +72,17 @@ def test_overwrites_managed_file(tmp_path):
     assert "x = 2" in (tmp_path / "m.py").read_text()
 
 
+def test_uncreatable_dags_dir_raises_actionable_error(tmp_path):
+    # Parent is a regular file, so the dags dir cannot be created — the deploy
+    # must surface an actionable AIRFLOW_DAGS_DIR hint, not a raw [Errno 13].
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")
+    target = SharedVolumeTarget(str(blocker / "dags"))
+    with pytest.raises(DeployError) as exc:
+        target.write("my_dag.py", f"{MANAGED_PREFIX}\nx = 1\n")
+    assert "AIRFLOW_DAGS_DIR" in str(exc.value)
+
+
 @pytest.mark.parametrize("bad", ["../evil.py", "/etc/evil.py", "a/b.py", "evil"])
 def test_rejects_unsafe_paths(tmp_path, bad):
     target = SharedVolumeTarget(str(tmp_path))

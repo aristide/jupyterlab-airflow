@@ -89,12 +89,33 @@ class SharedVolumeTarget:
         with open(self.path_for(filename), encoding="utf-8") as fh:
             return fh.read()
 
+    def _ensure_root(self) -> None:
+        """Create the dags dir; raise an *actionable* error if it cannot be
+        written. The usual cause is an unset/misconfigured ``AIRFLOW_DAGS_DIR``,
+        so the deploy falls back to the default ``/opt/airflow/dags`` (Airflow's
+        own path) that the JupyterLab server cannot write to — which otherwise
+        surfaces as a cryptic ``[Errno 13] Permission denied``.
+        """
+        hint = (
+            f"Cannot write the DAG to the dags folder {self.root!r}. Set the "
+            "AIRFLOW_DAGS_DIR environment variable on the JupyterLab server to a "
+            "shared dags folder it can write to (in the devcontainer: "
+            "/workspace/.devcontainer/airflow-dags), then restart the server."
+        )
+        try:
+            os.makedirs(self.root, exist_ok=True)
+        except OSError as err:
+            detail = err.strerror or str(err)
+            raise DeployError(f"{hint} ({detail})") from err
+        if not os.access(self.root, os.W_OK):
+            raise DeployError(hint)
+
     def write(self, filename: str, content: str) -> str:
         """Atomically write ``content`` to ``filename``. Refuses to clobber a
         file that lacks the Studio provenance header (collision safety, §6.5.3).
         """
         target = self.path_for(filename)
-        os.makedirs(self.root, exist_ok=True)
+        self._ensure_root()
 
         if os.path.isfile(target):
             existing = self.read(filename)
@@ -151,7 +172,7 @@ class SharedVolumeTarget:
 
     def ensure_airflowignore(self) -> None:
         path = os.path.join(self.root, ".airflowignore")
-        os.makedirs(self.root, exist_ok=True)
+        self._ensure_root()
         existing = ""
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as fh:
