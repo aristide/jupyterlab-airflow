@@ -2,6 +2,7 @@ import { ITranslator } from '@jupyterlab/translation';
 import { refreshIcon, runIcon } from '@jupyterlab/ui-components';
 import { ISignal } from '@lumino/signaling';
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   clearTasks,
@@ -632,10 +633,20 @@ function Overlay(props: {
   children: React.ReactNode;
   onClose: () => void;
 }): JSX.Element {
-  return (
+  // Portal to <body> so the fixed-position backdrop covers the whole window.
+  // Rendered inside the left sidebar it gets trapped by the panel's containing
+  // block (lumino widgets establish one via transform/contain), which clips the
+  // modal to the narrow rail instead of centring it over the app.
+  return createPortal(
     <div className="jp-airflow-overlay" onClick={props.onClose}>
-      <div onClick={e => e.stopPropagation()}>{props.children}</div>
-    </div>
+      <div
+        className="jp-airflow-overlay-inner"
+        onClick={e => e.stopPropagation()}
+      >
+        {props.children}
+      </div>
+    </div>,
+    document.body
   );
 }
 
