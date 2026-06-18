@@ -52,7 +52,7 @@ jupyter labextension develop . --overwrite
 jupyter server extension enable jupyterlab_airflow
 
 # Rebuild the TypeScript on change (one terminal)
-jlpm watch
+jlpm build
 # Run JupyterLab (another terminal)
 jupyter lab
 ```
