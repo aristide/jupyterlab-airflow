@@ -4,6 +4,7 @@ import { ServerConnection } from '@jupyterlab/services';
 import {
   IApiRes,
   IClearRes,
+  IDagDetails,
   IDagListRes,
   IDagRunsRes,
   IDagRun,
@@ -123,10 +124,19 @@ export const setDagPaused = (
 ): Promise<IApiRes<unknown>> =>
   POST('dags/pause', { dag_id: dagId, is_paused: isPaused });
 
+// Full DAG detail incl. the serialized `params` — drives the manager's
+// trigger-with-conf form (PRD §6.6/§15.10).
+export const getDagDetails = (dagId: string): Promise<IApiRes<IDagDetails>> =>
+  GET<IDagDetails>('dags/details', { dag_id: dagId });
+
+// Trigger a DAG run. `conf` populates the run's params; a null `logical_date`
+// (the default) means "run now" (Airflow 3), or pass an ISO datetime to pin it.
 export const triggerDag = (
   dagId: string,
-  conf: Record<string, unknown> = {}
-): Promise<IApiRes<IDagRun>> => POST('dags/trigger', { dag_id: dagId, conf });
+  conf: Record<string, unknown> = {},
+  logicalDate: string | null = null
+): Promise<IApiRes<IDagRun>> =>
+  POST('dags/trigger', { dag_id: dagId, conf, logical_date: logicalDate });
 
 export const deleteDag = (dagId: string): Promise<IApiRes<IPurgeRes>> =>
   POST<IPurgeRes>('dags/delete', { dag_id: dagId });

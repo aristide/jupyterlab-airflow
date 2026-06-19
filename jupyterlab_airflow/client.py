@@ -149,6 +149,12 @@ class AirflowClient:
     def get_dag(self, dag_id: str) -> dict:
         return self._request("GET", f"/dags/{dag_id}")
 
+    def get_dag_details(self, dag_id: str) -> dict:
+        """Full DAG detail incl. the serialized ``params`` dict — drives the
+        manager's trigger-with-conf form (PRD §6.6/§15.10). Airflow serializes
+        each param as ``{value, description, schema}`` (a JSON-Schema fragment)."""
+        return self._request("GET", f"/dags/{dag_id}/details")
+
     def set_paused(self, dag_id: str, is_paused: bool) -> dict:
         return self._request(
             "PATCH",

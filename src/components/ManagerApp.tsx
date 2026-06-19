@@ -8,6 +8,7 @@ import {
   clearTasks,
   deleteDag,
   findOrphans,
+  getDagDetails,
   getTaskLogs,
   listDagRuns,
   listDags,
@@ -19,11 +20,13 @@ import {
 } from '../handler';
 import {
   IDag,
+  IDagParam,
   IDagRun,
   IImportError,
   IOrphan,
   ITaskInstance
 } from '../interfaces';
+import { TriggerDialog } from './TriggerDialog';
 
 type Trans = ReturnType<ITranslator['load']>;
 
@@ -69,6 +72,11 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   const [logs, setLogs] = React.useState<ILogsModal | null>(null);
   const [confirm, setConfirm] = React.useState<IConfirm | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  // Open trigger-with-conf dialog for a DAG that declares params (PRD §15.10).
+  const [triggerTarget, setTriggerTarget] = React.useState<{
+    dagId: string;
+    params: Record<string, IDagParam>;
+  } | null>(null);
 
   // Latest query, read by the stable `refresh` so effects don't churn.
   const queryRef = React.useRef(query);
@@ -146,17 +154,40 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     }));
   };
 
-  const trigger = async (dag: IDag): Promise<void> => {
-    const res = await triggerDag(dag.dag_id);
+  // Fire a run. On success: toast + refresh the run list. Returns an error
+  // string (or null) so callers decide where to show it — the no-params path
+  // uses the top-level banner; the conf dialog keeps it inline so the user's
+  // conf isn't lost (PRD §15.10).
+  const runTrigger = async (
+    dagId: string,
+    conf: Record<string, unknown> = {},
+    logicalDate: string | null = null
+  ): Promise<string | null> => {
+    const res = await triggerDag(dagId, conf, logicalDate);
     if (res.status === 'ERR') {
-      setError(res.error ?? 'Failed to trigger DAG');
+      return res.error ?? trans.__('Failed to trigger DAG');
+    }
+    setBusy(trans.__('Triggered %1', dagId));
+    window.setTimeout(() => setBusy(null), 2500);
+    if (dagId in runs) {
+      await loadRuns(dagId);
+    }
+    return null;
+  };
+
+  const trigger = async (dag: IDag): Promise<void> => {
+    // Read the DAG's params: a params DAG opens the conf dialog; a no-params DAG
+    // — or an unreadable details response — keeps the instant bare trigger.
+    const res = await getDagDetails(dag.dag_id);
+    const params = res.status === 'OK' ? (res.data?.params ?? {}) : {};
+    if (Object.keys(params).length === 0) {
+      const err = await runTrigger(dag.dag_id);
+      if (err) {
+        setError(err);
+      }
       return;
     }
-    setBusy(trans.__('Triggered %1', dag.dag_id));
-    window.setTimeout(() => setBusy(null), 2500);
-    if (dag.dag_id in runs) {
-      await loadRuns(dag.dag_id);
-    }
+    setTriggerTarget({ dagId: dag.dag_id, params });
   };
 
   const toggleDag = async (dagId: string): Promise<void> => {
@@ -433,6 +464,20 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
             </div>
             <pre className="jp-airflow-logtext">{logs.text}</pre>
           </div>
+        </Overlay>
+      )}
+
+      {triggerTarget && (
+        <Overlay onClose={() => setTriggerTarget(null)}>
+          <TriggerDialog
+            dagId={triggerTarget.dagId}
+            params={triggerTarget.params}
+            trans={trans}
+            onClose={() => setTriggerTarget(null)}
+            onSubmit={(conf, logicalDate) =>
+              runTrigger(triggerTarget.dagId, conf, logicalDate)
+            }
+          />
         </Overlay>
       )}
 

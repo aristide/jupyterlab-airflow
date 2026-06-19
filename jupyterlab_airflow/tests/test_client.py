@@ -160,6 +160,27 @@ def test_delete_dag_issues_delete(requests_mock):
     assert m.called
 
 
+def test_get_dag_details_fetches_params(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    m = requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/d/details",
+        json={
+            "dag_id": "d",
+            "params": {
+                "region": {
+                    "value": "eu-west-1",
+                    "description": "Target region",
+                    "schema": {"type": "string", "enum": ["eu-west-1", "us-east-1"]},
+                }
+            },
+        },
+    )
+
+    out = make_client().get_dag_details("d")
+    assert m.called
+    assert out["params"]["region"]["value"] == "eu-west-1"
+
+
 def test_get_dag_run_fetches_single_run(requests_mock):
     requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
     m = requests_mock.get(

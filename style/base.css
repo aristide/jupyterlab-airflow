@@ -305,6 +305,7 @@
 .jp-airflow-overlay {
   position: fixed;
   inset: 0;
+
   /* Above the app shell chrome (sidebar tab bar / top bar); ~JupyterLab dialog
      level. The overlay is portaled to <body> so it covers the whole window. */
   z-index: 10000;
@@ -374,6 +375,108 @@
   border-color: var(--jp-error-color1);
   background: var(--jp-error-color1);
   color: #fff;
+}
+
+.jp-airflow-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Trigger-with-conf dialog (PRD §15.10) */
+.jp-airflow-trigger {
+  width: 420px;
+}
+
+.jp-airflow-conf-body {
+  overflow-y: auto;
+}
+
+.jp-airflow-conf-intro {
+  margin-bottom: 8px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-conf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.jp-airflow-conf-label {
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+}
+
+.jp-airflow-conf-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background: var(--jp-input-active-background, var(--jp-layout-color0));
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-airflow-conf-json {
+  font-family: var(--jp-code-font-family);
+  resize: vertical;
+}
+
+.jp-airflow-conf-field input[type='checkbox'] {
+  align-self: flex-start;
+}
+
+.jp-airflow-field-help {
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-field-err {
+  color: var(--jp-error-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+/* In-dialog server-side rejection (keeps the form open so conf isn't lost). */
+.jp-airflow-conf-servererror {
+  margin: 0 12px 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--jp-error-color1);
+  border-radius: 3px;
+  background: var(--jp-error-color3, rgb(230 53 88 / 8%));
+  color: var(--jp-error-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-conf-sep {
+  margin: 4px 0 10px;
+  border-top: 1px solid var(--jp-border-color2);
+}
+
+.jp-airflow-logicaldate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.jp-airflow-logicaldate .jp-airflow-conf-label {
+  width: 100%;
+}
+
+.jp-airflow-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-airflow-logicaldate .jp-airflow-conf-input {
+  flex: 1;
+  min-width: 140px;
 }
 
 .jp-airflow-logs {

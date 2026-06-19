@@ -31,6 +31,18 @@ class FakeClient:
     def list_dags(self, limit=100, offset=0, dag_id_pattern=None, **kwargs):
         return {"dags": [{"dag_id": "demo", "is_paused": False}], "total_entries": 1}
 
+    def get_dag_details(self, dag_id):
+        return {
+            "dag_id": dag_id,
+            "params": {
+                "region": {
+                    "value": "eu-west-1",
+                    "description": None,
+                    "schema": {"type": "string"},
+                }
+            },
+        }
+
     def list_task_instances(self, dag_id, dag_run_id):
         return {
             "task_instances": [{"task_id": "t", "state": "success", "try_number": 1}],
@@ -202,6 +214,18 @@ async def test_dag_delete_endpoint(jp_fetch, tmp_path, monkeypatch):
     data = json.loads(response.body)["data"]
     assert data["dag_id"] == "demo"
     assert data["purged_history"] is True
+
+
+async def test_dag_details_endpoint(jp_fetch):
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "dags",
+        "details",
+        params={"dag_id": "demo"},
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["params"]["region"]["value"] == "eu-west-1"
 
 
 async def test_trigger_endpoint(jp_fetch):

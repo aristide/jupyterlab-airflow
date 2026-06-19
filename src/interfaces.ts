@@ -23,6 +23,31 @@ export interface IDag {
   has_import_errors?: boolean;
 }
 
+// One DAG param from `GET /dags/{id}/details`. Airflow serializes each param as
+// `{value (default), description, schema}` where `schema` is a JSON-Schema
+// fragment (type/enum/format/minimum/maximum). Drives the trigger conf form.
+export interface IDagParamSchema {
+  type?: string | string[];
+  enum?: unknown[];
+  format?: string;
+  minimum?: number;
+  maximum?: number;
+  [key: string]: unknown;
+}
+
+export interface IDagParam {
+  value: unknown;
+  description?: string | null;
+  schema?: IDagParamSchema;
+}
+
+// Subset of `GET /dags/{id}/details` the trigger conf form needs (PRD §15.10).
+export interface IDagDetails {
+  dag_id: string;
+  params?: Record<string, IDagParam> | null;
+  [key: string]: unknown;
+}
+
 export interface ITaskInstance {
   task_id: string;
   dag_run_id?: string;

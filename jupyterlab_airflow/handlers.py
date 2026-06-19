@@ -140,6 +140,16 @@ class DagsHandler(_AirflowHandler):
         )
 
 
+class DagDetailsHandler(_AirflowHandler):
+    """Full DAG detail incl. the serialized ``params`` dict — drives the manager's
+    trigger-with-conf form (PRD §6.6/§15.10)."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        dag_id = self.get_argument("dag_id")
+        await self.respond(get_client().get_dag_details, dag_id)
+
+
 class DagPauseHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def post(self):
@@ -323,6 +333,7 @@ def setup_handlers(web_app):
         (_url(base_url, "deploy/status"), DeployStatusHandler),
         (_url(base_url, "importerrors"), ImportErrorsHandler),
         (_url(base_url, "dags"), DagsHandler),
+        (_url(base_url, "dags/details"), DagDetailsHandler),
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),
         (_url(base_url, "dags/delete"), DagDeleteHandler),
