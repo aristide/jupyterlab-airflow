@@ -184,15 +184,15 @@ Requirements:
 - Each entry records its **provider package** so the system can warn when an operator's provider isn't installed in the *target Airflow* (not just the Jupyter env).
 - Operators with no TaskFlow equivalent (`Empty`, `TriggerDagRun`) declare `taskflow: operator` so the toggle renders them as operators even in TaskFlow mode.
 
-**6.2.1 Operator catalogue roadmap (prioritized) & provider‑availability gating.** The palette UI (search · categories · drag · keyboard‑add) and the registry mechanism are **built**; the catalogue is intentionally small — 5 ops: `Empty`, `Bash`, `Python`/`@task`, `Branch`, `TriggerDagRun` (all standard provider). Growth is **data‑only** (one YAML per operator, §6.2 / Appendix A) and is sequenced by *impact × gating cost*. Class names / import paths / provider packages below are verified against Airflow 3.x provider docs (use the **non‑deprecated** Airflow‑3 paths). The reference UI's palette (HTTP + a full Sensors group) is the breadth target; **do not** re‑build the palette — only add YAML.
+**6.2.1 Operator catalogue roadmap (prioritized) & provider‑availability gating.** The palette UI (search · categories · drag · keyboard‑add) and the registry mechanism are **built**; the catalogue started at 5 ops (`Empty`, `Bash`, `Python`/`@task`, `Branch`, `TriggerDagRun`, all standard provider). The **P0** tier below is now **shipped (✅, 2026‑06‑19)** — 6 more bundled standard‑provider ops (catalogue → 11): `ShortCircuit` + `LatestOnly` in **Flow Control**, and the new **Sensors** category (`File`, `ExternalTask`, `DateTime`, `TimeDelta`), which also established the sensor `common_params` (`mode`/`poke_interval`/`timeout`, declared on each sensor YAML; per‑node `common` wiring is still pending so they ride Airflow's defaults for now). Growth is **data‑only** (one YAML per operator, §6.2 / Appendix A) and is sequenced by *impact × gating cost*. Class names / import paths / provider packages below are verified against Airflow 3.x provider docs (use the **non‑deprecated** Airflow‑3 paths). The reference UI's palette (HTTP + a full Sensors group) is the breadth target; **do not** re‑build the palette — only add YAML.
 
 | Pri | Operator (class) | Provider pkg | Category | Impact / why |
 |---|---|---|---|---|
-| **P0** | `ShortCircuit` (ShortCircuitOperator) | standard *(bundled)* | Flow Control | Conditional gate that skips **all** downstream — the #2 flow primitive after the existing `Branch`; reuses the Python code‑node form. `@task.short_circuit` exists. |
-| **P0** | `LatestOnly` (LatestOnlyOperator) | standard *(bundled)* | Flow Control | Skip downstream on backfill/catchup so only the latest interval runs; **zero** required params; cheapest add. Render as operator in both modes. |
-| **P0** | `FileSensor` | standard *(bundled)* | Sensors | "Wait for input data to land" — most intuitive sensor; **establishes the Sensors category** + the sensor `common_params` (`mode` poke/reschedule · `poke_interval` · `timeout`). |
-| **P0** | `ExternalTaskSensor` | standard *(bundled)* | Sensors | Cross‑DAG wait; **read‑side complement** to the existing `TriggerDagRun` for no‑code multi‑DAG pipelines. Highest‑effort P0 (`execution_delta` vs `execution_date_fn` — mutually exclusive; needs careful help copy). |
-| **P0** | `DateTimeSensor` · `TimeDeltaSensor` | standard *(bundled)* | Sensors | Wait until a wall‑clock target / a relative delta; low‑effort, teachable. `TimeDelta` reuses the `timedelta` widget already needed for `retry_delay`. |
+| **P0 ✅** | `ShortCircuit` (ShortCircuitOperator) | standard *(bundled)* | Flow Control | Conditional gate that skips **all** downstream — the #2 flow primitive after the existing `Branch`; reuses the Python code‑node form. `@task.short_circuit` exists. |
+| **P0 ✅** | `LatestOnly` (LatestOnlyOperator) | standard *(bundled)* | Flow Control | Skip downstream on backfill/catchup so only the latest interval runs; **zero** required params; cheapest add. Render as operator in both modes. |
+| **P0 ✅** | `FileSensor` | standard *(bundled)* | Sensors | "Wait for input data to land" — most intuitive sensor; **establishes the Sensors category** + the sensor `common_params` (`mode` poke/reschedule · `poke_interval` · `timeout`). |
+| **P0 ✅** | `ExternalTaskSensor` | standard *(bundled)* | Sensors | Cross‑DAG wait; **read‑side complement** to the existing `TriggerDagRun` for no‑code multi‑DAG pipelines. Highest‑effort P0 (`execution_delta` vs `execution_date_fn` — mutually exclusive; needs careful help copy). |
+| **P0 ✅** | `DateTimeSensor` · `TimeDeltaSensor` | standard *(bundled)* | Sensors | Wait until a wall‑clock target / a relative delta; low‑effort, teachable. `TimeDelta` reuses the `timedelta` widget already needed for `retry_delay`. |
 | **P1** | `HTTP` (HttpOperator) | apache‑airflow‑providers‑http | HTTP | Call any REST/webhook/SaaS endpoint — universally useful; the **first gated op**. Use `HttpOperator`, **not** the deprecated `SimpleHttpOperator`; steer users to an Airflow HTTP **Connection**, not raw URLs/secrets. |
 | **P1** | `SQL query` (SQLExecuteQueryOperator) | apache‑airflow‑providers‑common‑sql | SQL | DB‑agnostic SQL — the Airflow‑3 path that **supersedes** per‑DB operators (`PostgresOperator`…); one op + a Connection covers Postgres/MySQL/Snowflake/… |
 | **P1** | `SqlSensor` | apache‑airflow‑providers‑common‑sql | Sensors | Poll a DB until a query returns truthy (row‑count / flag / partition‑loaded) — data‑readiness gate under the same provider. |
@@ -479,13 +479,13 @@ The 3‑pane document: full‑width top bar, then collapsible **palette « · ca
 │   Trigger DAG run  │        │ task_id: print2    │        │ TAGS  [ etl, prod  ] │
 │ ▾ HTTP   (P1 🔭)   │        └─────────┬──────────┘        │ PARAMS  { }          │
 │   HTTP             │                  ▼                   │ CATCHUP  ◯ off       │
-│ ▾ SENSORS (P0+ 🔭) │        ┌────────────────────┐        │                      │
+│ ▾ SENSORS (P0 ✅)   │        ┌────────────────────┐        │                      │
 │   File / External… │        │  … print3 / print4 │ ● green│                      │
 │ ＋ Add note        │        └────────────────────┘ ┌────┐ │                      │
 │                    │     ⊕ ⊖ ⤢ (zoom/fit)         │mmap│ │                      │
 └────────────────────┴──────────────────────────────┴────┴─┴──────────────────────┘
 ```
-Built: palette (search/categories/drag) · rounded‑corner arrow edges · minimap/zoom · DAG form (id/description/schedule/start_date/owner/retries/retry_delay/tags/params/catchup) · live `✓ no errors` badge · Reset/Save/Generate/Deploy. **Locked to TaskFlow** until the Traditional backend (v1.1). Palette **catalogue** grows per §6.2.1 (HTTP/Sensors 🔭).
+Built: palette (search/categories/drag) · rounded‑corner arrow edges · minimap/zoom · DAG form (id/description/schedule/start_date/owner/retries/retry_delay/tags/params/catchup) · live `✓ no errors` badge · Reset/Save/Generate/Deploy. **Locked to TaskFlow** until the Traditional backend (v1.1). Palette **catalogue** grows per §6.2.1: the **P0** tier is shipped — **Flow Control** gains `ShortCircuit` + `LatestOnly`, and a new **Sensors** category lands (`File` · `ExternalTask` · `DateTime` · `TimeDelta`) ✅; gated **HTTP/SQL** and **K8s** stay 🔭.
 
 ### 15.2 Studio editor — empty‑state / onboarding ✅
 

@@ -17,9 +17,52 @@ def test_bundled_registry_loads():
     ops = registry.load_registry()
     ids = {op["id"] for op in ops}
     assert {"empty", "bash", "python_task", "branch", "trigger_dagrun"} <= ids
+    # The §6.2.1 P0 additions: ShortCircuit/LatestOnly + the first Sensors.
+    assert {
+        "shortcircuit",
+        "latest_only",
+        "file_sensor",
+        "external_task_sensor",
+        "datetime_sensor",
+        "timedelta_sensor",
+    } <= ids
     # Sorted by (category, label) for a deterministic palette order.
     keys = [(op.get("category", ""), op.get("label", op["id"])) for op in ops]
     assert keys == sorted(keys)
+
+
+def test_sensors_are_airflow3_standard_provider():
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    expected = {
+        "file_sensor": "airflow.providers.standard.sensors.filesystem",
+        "external_task_sensor": "airflow.providers.standard.sensors.external_task",
+        "datetime_sensor": "airflow.providers.standard.sensors.date_time",
+        "timedelta_sensor": "airflow.providers.standard.sensors.time_delta",
+        "latest_only": "airflow.providers.standard.operators.latest_only",
+        "shortcircuit": "airflow.providers.standard.operators.python",
+    }
+    for op_id, module in expected.items():
+        op = by_id[op_id]
+        assert module in op["import"], op_id
+        # Never an Airflow-2 import path (those fail to import in Airflow 3).
+        assert "airflow.sensors." not in op["import"], op_id
+        assert "airflow.operators." not in op["import"], op_id
+        assert op["provider"] == "apache-airflow-providers-standard", op_id
+
+
+def test_sensors_declare_the_sensor_common_params():
+    # FileSensor establishes the Sensors category + the sensor common_params
+    # (mode / poke_interval / timeout) on top of the universal per-task ones.
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    for op_id in (
+        "file_sensor",
+        "external_task_sensor",
+        "datetime_sensor",
+        "timedelta_sensor",
+    ):
+        common = by_id[op_id].get("common_params", [])
+        assert {"mode", "poke_interval", "timeout"} <= set(common), op_id
+        assert by_id[op_id]["category"] == "Sensors", op_id
 
 
 def test_bash_is_airflow3_correct():
@@ -53,6 +96,20 @@ def test_client_view_ships_doc_fields_for_info_tab():
     # Per-param contextual help reaches the client.
     cmd = next(p for p in bash["params"] if p["name"] == "bash_command")
     assert cmd["help"]
+
+
+def test_client_view_ships_sensor_for_palette_and_form():
+    view = {op["id"]: op for op in registry.client_view()}
+    fs = view["file_sensor"]
+    # The palette groups by category; "Sensors" is a new group rendered as-is.
+    assert fs["category"] == "Sensors"
+    assert fs["taskIdPrefix"] == "file_sensor"
+    # The NODE form needs the required/optional params (with help) for this op.
+    required = {p["name"] for p in fs["params"] if p["required"]}
+    assert required == {"filepath"}
+    assert any(p["name"] == "fs_conn_id" and not p["required"] for p in fs["params"])
+    # Codegen-only fields stay server-side even for the new ops.
+    assert "import" not in fs and "template_taskflow" not in fs
 
 
 def test_caches_until_files_change():

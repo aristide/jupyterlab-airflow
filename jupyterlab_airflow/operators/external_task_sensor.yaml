@@ -1,0 +1,39 @@
+id: external_task_sensor
+label: External task sensor
+category: Sensors
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+description: >-
+  Waits for a task (or a whole run) in another DAG to finish before continuing —
+  the read side of a multi-DAG pipeline, complementing "Trigger DAG run". By
+  default it waits for the other DAG's run with the SAME logical date, so it fits
+  best when both DAGs share a schedule. If they run on different schedules you
+  need an execution-time offset (not yet exposed here) — see the docs.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/sensors/external_task_sensor.html
+example: |
+  external_dag_id:   ingest_sales
+  external_task_id:  (blank = wait for the whole DAG run)
+import: 'from airflow.providers.standard.sensors.external_task import ExternalTaskSensor'
+handles: { in: true, out: true }
+taskflow: operator            # sensors have no TaskFlow-native form — render as an operator
+task_id_prefix: wait_for
+params:
+  - { name: external_dag_id, label: 'DAG to wait for', type: string, required: true, widget: text,
+      help: 'The dag_id of the DAG to wait on. It is matched on the same logical date as this run.' }
+  - { name: external_task_id, label: 'Task to wait for', type: string, required: false, widget: text,
+      help: 'A specific task_id in that DAG to wait for. Leave blank to wait for the entire DAG run to succeed.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = ExternalTaskSensor(
+      task_id={{ task_id | pyrepr }},
+      external_dag_id={{ params.external_dag_id | pyrepr }},
+      {% if params.external_task_id %}external_task_id={{ params.external_task_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = ExternalTaskSensor(
+      task_id={{ task_id | pyrepr }},
+      external_dag_id={{ params.external_dag_id | pyrepr }},
+      {% if params.external_task_id %}external_task_id={{ params.external_task_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

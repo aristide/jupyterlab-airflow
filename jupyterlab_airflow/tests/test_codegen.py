@@ -84,6 +84,100 @@ def test_operators_render_as_assignments():
     assert code.count("from airflow.sdk import task\n") == 0
 
 
+def test_sensors_render_as_airflow3_operators():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "file_sensor", "task_id": "wait_file",
+             "params": {"filepath": "/data/in_{{ ds }}.csv"}},
+            {"id": "b", "op": "external_task_sensor", "task_id": "wait_etl",
+             "params": {"external_dag_id": "ingest", "external_task_id": "load"}},
+            {"id": "c", "op": "datetime_sensor", "task_id": "after_six",
+             "params": {"target_time": "{{ ds }}T18:00:00+00:00"}},
+            {"id": "d", "op": "timedelta_sensor", "task_id": "hold",
+             "params": {"delta_seconds": 3600}},
+        ],
+        edges=[
+            {"source": "a", "target": "b"},
+            {"source": "b", "target": "c"},
+            {"source": "c", "target": "d"},
+        ],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+
+    # Operator-style instances, Airflow-3 standard-provider imports only.
+    assert "wait_file = FileSensor(" in code
+    assert "wait_etl = ExternalTaskSensor(" in code
+    assert "after_six = DateTimeSensor(" in code
+    assert "hold = TimeDeltaSensor(" in code
+    assert "from airflow.providers.standard.sensors.filesystem import FileSensor" in code
+    assert (
+        "from airflow.providers.standard.sensors.external_task import ExternalTaskSensor"
+        in code
+    )
+    assert "airflow.sensors." not in code and "airflow.operators." not in code
+    # TimeDeltaSensor reuses the pinned timedelta import; the seconds are int()-
+    # coerced so a stringified value can't emit an importable-but-broken delta.
+    assert "delta=timedelta(seconds=int(3600))" in code
+    # An optional param left out is simply not emitted.
+    assert "fs_conn_id" not in code
+
+
+def test_timedelta_sensor_coerces_a_stringified_value():
+    # If delta_seconds reaches the IR as a string, int(...) keeps the emitted
+    # timedelta importable instead of `timedelta(seconds='3600')` (a runtime
+    # TypeError that still passes ast.parse).
+    ir = _ir(
+        nodes=[{"id": "n", "op": "timedelta_sensor", "task_id": "hold",
+                "params": {"delta_seconds": "3600"}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    assert "delta=timedelta(seconds=int('3600'))" in res["code"]
+
+
+def test_optional_sensor_param_is_emitted_when_set():
+    ir = _ir(
+        nodes=[{"id": "a", "op": "file_sensor", "task_id": "wait_file",
+                "params": {"filepath": "/data/x", "fs_conn_id": "my_fs"}}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    assert "fs_conn_id='my_fs'" in code
+
+
+def test_shortcircuit_renders_taskflow_decorator():
+    ir = _ir(
+        nodes=[{"id": "n", "op": "shortcircuit", "task_id": "gate",
+                "params": {"code": "return bool(rows)"}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    assert "@task.short_circuit(task_id='gate')" in code
+    assert "return bool(rows)" in code
+
+
+def test_latest_only_renders_as_operator():
+    ir = _ir(
+        nodes=[{"id": "n", "op": "latest_only", "task_id": "only_latest",
+                "params": {}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    assert "only_latest = LatestOnlyOperator(" in code
+    assert (
+        "from airflow.providers.standard.operators.latest_only import LatestOnlyOperator"
+        in code
+    )
+
+
 def test_cycle_is_rejected():
     ir = _ir(
         nodes=[

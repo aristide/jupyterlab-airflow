@@ -1,0 +1,28 @@
+id: latest_only
+label: Latest-only operator
+category: Flow Control
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+description: >-
+  Skips everything downstream unless this is the most recent scheduled run, so a
+  backfill or catch-up does not re-run the tasks below for old intervals. Use it
+  to guard steps that should only ever act on the latest data — sending a daily
+  summary email, refreshing a "current" dashboard, and the like. Takes no
+  configuration.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/latest_only.html
+import: 'from airflow.providers.standard.operators.latest_only import LatestOnlyOperator'
+handles: { in: true, out: true }
+taskflow: operator            # no TaskFlow-native form — render as an operator in both modes
+task_id_prefix: latest_only
+params: []
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = LatestOnlyOperator(
+      task_id={{ task_id | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = LatestOnlyOperator(
+      task_id={{ task_id | pyrepr }},
+      {{ common | pyargs }}
+  )

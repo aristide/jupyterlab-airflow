@@ -1,0 +1,33 @@
+id: timedelta_sensor
+label: Time-delta sensor
+category: Sensors
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+description: >-
+  Waits for a fixed amount of time past the end of the run's data interval before
+  continuing. Use it as a simple delay — for example, give an upstream system a
+  grace period to settle before reading from it. The wait is expressed in
+  seconds.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/sensors/time_delta.html
+example: |
+  delta_seconds:  3600   # wait one hour
+import: 'from airflow.providers.standard.sensors.time_delta import TimeDeltaSensor'
+handles: { in: true, out: true }
+taskflow: operator            # sensors have no TaskFlow-native form — render as an operator
+task_id_prefix: wait_for_delay
+params:
+  - { name: delta_seconds, label: 'Delay (seconds)', type: integer, required: true, widget: text,
+      help: 'How long to wait, in seconds, after the data interval ends — e.g. 3600 for one hour.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = TimeDeltaSensor(
+      task_id={{ task_id | pyrepr }},
+      delta=timedelta(seconds=int({{ params.delta_seconds | pyrepr }})),
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = TimeDeltaSensor(
+      task_id={{ task_id | pyrepr }},
+      delta=timedelta(seconds=int({{ params.delta_seconds | pyrepr }})),
+      {{ common | pyargs }}
+  )

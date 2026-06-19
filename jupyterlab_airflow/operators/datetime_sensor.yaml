@@ -1,0 +1,33 @@
+id: datetime_sensor
+label: Date-time sensor
+category: Sensors
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+description: >-
+  Waits until a specific wall-clock moment before letting the run continue. Use
+  it to hold downstream work until a fixed time of day — for example, do not
+  publish a report until 18:00. Give an absolute timestamp or a templated one
+  built from the run date.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/sensors/datetime.html
+example: |
+  target_time:  {{ ds }}T18:00:00+00:00
+import: 'from airflow.providers.standard.sensors.date_time import DateTimeSensor'
+handles: { in: true, out: true }
+taskflow: operator            # sensors have no TaskFlow-native form — render as an operator
+task_id_prefix: wait_until
+params:
+  - { name: target_time, label: 'Wait until (date-time)', type: string, required: true, widget: text,
+      help: 'The moment to wait for, as an ISO date-time with timezone, e.g. `2026-06-15T18:00:00+00:00`. Jinja templating is supported, e.g. `{{ ds }}T18:00:00+00:00`.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = DateTimeSensor(
+      task_id={{ task_id | pyrepr }},
+      target_time={{ params.target_time | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = DateTimeSensor(
+      task_id={{ task_id | pyrepr }},
+      target_time={{ params.target_time | pyrepr }},
+      {{ common | pyargs }}
+  )

@@ -1,0 +1,38 @@
+id: file_sensor
+label: File sensor
+category: Sensors
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+description: >-
+  Waits for a file (or a glob of files) to appear before letting the run
+  continue. Use it to hold a pipeline until input data lands — a daily export, an
+  upload, a "done" marker. By default it checks periodically (about once a minute)
+  for up to roughly a week; it uses the Airflow Filesystem connection to resolve
+  where to look.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/sensors/filesystem.html
+example: |
+  filepath:  /data/incoming/sales_{{ ds }}.csv
+import: 'from airflow.providers.standard.sensors.filesystem import FileSensor'
+handles: { in: true, out: true }
+taskflow: operator            # sensors have no TaskFlow-native form — render as an operator
+task_id_prefix: file_sensor
+params:
+  - { name: filepath, label: 'File path', type: string, required: true, widget: text,
+      help: 'Path (or glob) to wait for, relative to the Filesystem connection''s root. Jinja templating is supported, e.g. `/data/sales_{{ ds }}.csv`.' }
+  - { name: fs_conn_id, label: 'Filesystem connection', type: string, required: false, widget: text, default: fs_default,
+      help: 'The Airflow Filesystem (`fs_default`) connection that defines the base directory. Leave as the default unless you configured another.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = FileSensor(
+      task_id={{ task_id | pyrepr }},
+      filepath={{ params.filepath | pyrepr }},
+      {% if params.fs_conn_id %}fs_conn_id={{ params.fs_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = FileSensor(
+      task_id={{ task_id | pyrepr }},
+      filepath={{ params.filepath | pyrepr }},
+      {% if params.fs_conn_id %}fs_conn_id={{ params.fs_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

@@ -1,0 +1,36 @@
+id: shortcircuit
+label: Short-circuit operator
+category: Flow Control
+provider: apache-airflow-providers-standard
+airflow_min_version: '3.0'
+description: >-
+  A conditional gate: run your Python logic and, if it returns a falsy value
+  (False, None, 0, an empty list…), skip every task downstream of this one. Use
+  it to abort the rest of a run when there is nothing to do — for example, stop
+  early when an input file is empty or a feature flag is off.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/python.html
+example: |
+  def has_work():
+      # return False to skip everything downstream
+      return bool(get_new_rows())
+import: 'from airflow.providers.standard.operators.python import ShortCircuitOperator'
+import_taskflow: 'from airflow.sdk import task'
+handles: { in: true, out: true }
+taskflow: native
+task_id_prefix: short_circuit
+params:
+  - { name: code, label: 'Condition code (return truthy to continue)', type: string, required: true, widget: code,
+      help: 'Python that returns a value. Truthy continues to the downstream tasks; falsy (False/None/0/empty) skips all of them.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_taskflow: |
+  @task.short_circuit(task_id={{ task_id | pyrepr }})
+  def {{ task_id }}():
+  {{ params.code | indent(4, true) }}
+template_traditional: |
+  def _{{ task_id }}(**context):
+  {{ params.code | indent(4, true) }}
+  {{ task_id }} = ShortCircuitOperator(
+      task_id={{ task_id | pyrepr }},
+      python_callable=_{{ task_id }},
+      {{ common | pyargs }}
+  )
