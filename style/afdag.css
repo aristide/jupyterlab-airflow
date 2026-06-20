@@ -415,6 +415,91 @@
   color: var(--jp-ui-font-color3);
 }
 
+/* First-run onboarding coachmark (PRD §7 / §15.2) — a small, non-blocking
+   guided card pinned top-centre of the canvas. */
+.jp-afdag-coach {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 5;
+  box-sizing: border-box;
+  width: 330px;
+  max-width: calc(100% - 24px);
+  padding: 10px 12px;
+  transform: translateX(-50%);
+  border: 1px solid var(--jp-brand-color1);
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  box-shadow: var(--jp-elevation-z4, 0 2px 8px rgb(0 0 0 / 25%));
+  font-size: var(--jp-ui-font-size1);
+
+  /* Don't trap canvas clicks/drag-to-pan under the card — only the buttons are
+     interactive (mirrors .jp-afdag-empty). */
+  pointer-events: none;
+}
+
+.jp-afdag-coach-skip,
+.jp-afdag-coach-actions {
+  pointer-events: auto;
+}
+
+.jp-afdag-coach-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.jp-afdag-coach-eyebrow {
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.jp-afdag-coach-skip {
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.jp-afdag-coach-dots {
+  display: flex;
+  gap: 5px;
+  margin: 7px 0;
+}
+
+.jp-afdag-coach-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--jp-border-color1);
+}
+
+.jp-afdag-coach-dots span.jp-mod-active {
+  background: var(--jp-brand-color1);
+}
+
+.jp-afdag-coach-title {
+  margin-bottom: 2px;
+  color: var(--jp-ui-font-color0);
+  font-weight: 600;
+}
+
+.jp-afdag-coach-body {
+  margin: 0 0 8px;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-afdag-coach-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* Nodes */
 .jp-afdag-node {
   position: relative;

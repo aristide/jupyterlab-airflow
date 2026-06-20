@@ -73,6 +73,7 @@ import {
 import { IStudioServices } from '../services';
 import { AfdagEdge } from './AfdagEdge';
 import { AfdagNode } from './AfdagNode';
+import { Coachmark, CoachStep } from './Coachmark';
 import { DeployBanner, IDeployState } from './DeployBanner';
 import { EditorActionsContext, IEditorActions } from './editorContext';
 import { Inspector } from './Inspector';
@@ -101,6 +102,9 @@ const RUN_TERMINAL_STATES = new Set([
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => window.setTimeout(resolve, ms));
+
+// First-run onboarding is shown once per browser (PRD §7).
+const ONBOARDED_KEY = 'jp-afdag-onboarded';
 
 // Custom node/edge types must be a stable, module-scope object or ReactFlow
 // re-renders endlessly.
@@ -146,6 +150,10 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   // The generated-code syntax family (PRD §6.3). Lives in the IR; the toggle
   // persists it and the CODE preview / Deploy regenerate accordingly.
   const [syntaxStyle, setSyntaxStyle] = React.useState<SyntaxStyle>('taskflow');
+  // First-run onboarding (PRD §7): 0 = hidden, 1/2/3 = the active step. Set by
+  // `load()` (step 1 only for a genuinely empty new doc, and only if not yet
+  // onboarded — a localStorage flag, once per browser), advanced from state.
+  const [coachStep, setCoachStep] = React.useState<number>(0);
   const [deploy, setDeploy] = React.useState<IDeployState>({
     phase: 'idle',
     message: ''
@@ -238,6 +246,16 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       setDag(ir.dag);
       setSyntaxStyle(ir.syntax_style ?? 'taskflow');
       setReady(true);
+      // Onboarding (§7): start the tour only for a genuinely empty new document
+      // (don't mis-stage over an already-built DAG), and only if the user hasn't
+      // been onboarded in this browser.
+      let onboarded = true;
+      try {
+        onboarded = !!window.localStorage.getItem(ONBOARDED_KEY);
+      } catch {
+        /* localStorage blocked → treat as onboarded (don't nag). */
+      }
+      setCoachStep(!onboarded && flow.nodes.length === 0 ? 1 : 0);
       // Remount the form tabs so they reseed local state from the new IR.
       setReloadKey(key => key + 1);
     };
@@ -481,6 +499,30 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   }, [taskNodes, edges]);
 
   const selected = taskNodes.find(n => n.id === selectedId) ?? null;
+
+  // Onboarding (PRD §7): dismiss/finish the tour and don't show it again.
+  const completeOnboarding = React.useCallback((): void => {
+    setCoachStep(0);
+    try {
+      window.localStorage.setItem(ONBOARDED_KEY, '1');
+    } catch {
+      /* localStorage blocked — the tour just won't persist; harmless. */
+    }
+  }, []);
+
+  // Step 1 → 2 once the first task is on the canvas.
+  React.useEffect(() => {
+    if (coachStep === 1 && taskNodes.length > 0) {
+      setCoachStep(2);
+    }
+  }, [coachStep, taskNodes.length]);
+
+  // Deploying (from any step) means the user has it — finish the tour.
+  React.useEffect(() => {
+    if (coachStep !== 0 && deploy.phase !== 'idle') {
+      completeOnboarding();
+    }
+  }, [coachStep, deploy.phase, completeOnboarding]);
 
   // The IR projected from the live graph, fed to the CODE preview.
   const currentIR = React.useMemo(
@@ -1244,6 +1286,17 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
               <div className="jp-afdag-empty">
                 Add operators from the left panel to get started.
               </div>
+            )}
+            {coachStep !== 0 && (
+              <Coachmark
+                step={coachStep as CoachStep}
+                onSkip={completeOnboarding}
+                onNext={() =>
+                  coachStep >= 3
+                    ? completeOnboarding()
+                    : setCoachStep(coachStep + 1)
+                }
+              />
             )}
           </div>
           <Inspector

@@ -271,7 +271,7 @@ Extends the existing `AirflowPanel`. Requirements (endpoints in Appendix D):
 
 - **Layout & theming.** Match the reference UI shape (top bar / palette / canvas / inspector). Style **exclusively with JupyterLab CSS variables** (`--jp-layout-color*`, `--jp-ui-font-color*`, `--jp-border-color*`, `--jp-brand-color1`, `--jp-error-color1`, `--jp-success-color1`); map ReactFlow's CSS vars onto `--jp-*` so dark mode reskins automatically.
 - **Reclaimable canvas.** The left palette and right inspector each **collapse to a rail and re‑expand** (§6.1.6) via a header chevron; the canvas grows to fill the freed width and ReactFlow re‑fits. A collapsed panel still exposes its **expand** control (keyboard‑reachable, so the user is never trapped and the palette's add‑node path stays one click away). Transitions are quick (≤150 ms) and the toggle has an ARIA label + state.
-- **First‑run onboarding.** Beyond "Drop operators here," provide a guided first‑DAG (seed a template DAG config; a 3‑step coachmark: add node → configure → deploy).
+- **First‑run onboarding ✅ (§15.2).** Beyond "Drop operators here," a dismissible **3‑step coachmark** (add task → configure → deploy) guides a first‑time user; it advances from graph/deploy state and shows once per browser (`localStorage`). A new `.afdag` already seeds a sensible DAG config (`createEmptyIR`: `@daily`, `catchup=false`, a `studio` tag). *(A scripted template‑DAG seed is a possible follow‑up 🔭.)*
 - **Learning & contextual help (the "teach Airflow" goal).** Studio is also a way to *learn* Airflow: every NODE field shows a plain‑language one‑liner (what it is, a valid example), and the **INFO** tab explains the selected operator (purpose, when to use it, required inputs, provider/version, docs deep link) and, with nothing selected, core DAG concepts (schedule/`start_date`/`catchup`/retries). Help text avoids jargon, never blocks the form, and is non‑color‑only (an `(i)` glyph + text). All such copy goes through `trans.__()` (raw Airflow errors and generated code are **not** localized).
 - **Deploy feedback.** A persistent tri‑state indicator (Writing / Waiting / Registered‑Failed‑Processing) with timeout copy; never a silent success.
 - **Failure recovery (make‑or‑break).** On import error: pull `stack_trace`, **map back to the offending node/field** where possible, show a plain‑language card ("Your DAG couldn't be loaded — …") with a *Show technical details* expander and a **one‑click "Open in Studio to fix"** that loads the `.afdag` (not the broken `.py`). **Undeploy / rollback to the previous deployed version ✅** — the deploy banner's *Undeploy* (remove `.py` + history) and *↩ Roll back to previous* (restore the `.bak` saved on the last overwrite‑deploy; the prior *deployed* file, which itself re‑imports through the lifecycle and may still need fixing) (§6.5.5 / §15.6).
@@ -492,15 +492,17 @@ Built: palette (search/categories/drag) · rounded‑corner arrow edges · minim
 0 nodes → drop‑zone. *(src: 01-small-demo f0000; the clip also demos the syntax toggle.)*
 
 ```
-│ … palette …  │            ╭───────────────────────╮            │ DAG CONFIG … │
-│              │            │        ⬚  (icon)        │            │ DAG ID [my_dag]│
-│              │            │   Drop operators here   │            │  …           │
-│              │            │ Drag from the left      │            │              │
-│              │            │ panel to get started    │            │              │
+│ … palette …  │   ┌ Getting started · Step 1 of 3   Skip tour ┐   │ DAG CONFIG … │
+│              │   │ ● ○ ○                                      │   │ DAG ID [my_dag]│
+│              │   │ Add your first task — pick an operator     │   │  …           │
+│              │   │ from the Operators palette on the left.    │   │              │
+│              │   └────────────────────────────────────────────┘   │              │
+│              │            ╭───────────────────────╮            │              │
+│              │            │   Drop operators here   │            │              │
 │              │            ╰───────────────────────╯            │              │
                  top bar shows “0 nodes”; [Traditional│▣TaskFlow] toggle is the clip’s subject
 ```
-Beyond the drop hint, §7 adds a 3‑step coachmark (add → configure → deploy) 🔭.
+Built ✅: beyond the drop hint, a dismissible **3‑step coachmark** (`Coachmark`) pinned top‑centre of the canvas walks a first‑time user **add task → configure → deploy**. It advances from state (step 1→2 when the first task lands; finishes when a Deploy starts) with *Next*/*Done* + *Skip tour*, and is shown **once per browser** (a `localStorage` flag), so it never nags a returning user (§7).
 
 ### 15.3 Studio editor — NODE tab + live validation ✅
 
