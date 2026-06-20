@@ -197,9 +197,18 @@ export interface IDeployRes {
   path?: string;
   filename?: string;
   dag_id: string;
+  /** This deploy overwrote a prior version, so a rollback target exists (§7). */
+  backed_up?: boolean;
   warnings: string[];
   errors: string[];
   dagbag: IDagBagResult;
+}
+
+// Result of `POST dags/rollback` — restore the previous deployed version (§7).
+export interface IRollbackRes {
+  dag_id: string;
+  rolled_back: boolean;
+  filename: string;
 }
 
 // A DAG-file import error from `GET /api/v2/importErrors`.

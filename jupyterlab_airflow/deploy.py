@@ -25,8 +25,15 @@ from .validation import validate_dag
 MANAGED_PREFIX = "# airflow-studio: managed"
 
 # Glob patterns (Airflow 3 `.airflowignore` is glob) for files the dag-processor
-# must skip in the dags folder.
-_AIRFLOWIGNORE_PATTERNS = [".afdag-tmp-*", "*.afdag"]
+# must skip in the dags folder. `*.bak` covers the rollback backups below (which
+# already end in `.bak`, not `.py`, but ignore them defensively).
+_AIRFLOWIGNORE_PATTERNS = [".afdag-tmp-*", "*.afdag", "*.bak"]
+
+# A deploy that overwrites a managed DAG first copies the prior version here, so
+# a bad re-deploy can be rolled back to the last deployed version (PRD §6.5.5 /
+# §7). `{dag_id}.py.bak` doesn't end in `.py`, so the dag-processor never parses
+# it.
+_BACKUP_SUFFIX = ".bak"
 
 # Deployed `.py` files must be readable by the Airflow dag-processor, which on a
 # shared dags volume typically runs as a *different* uid than the JupyterLab
@@ -116,21 +123,10 @@ class SharedVolumeTarget:
         if not os.access(self.root, os.W_OK):
             raise DeployError(hint)
 
-    def write(self, filename: str, content: str) -> str:
-        """Atomically write ``content`` to ``filename``. Refuses to clobber a
-        file that lacks the Studio provenance header (collision safety, §6.5.3).
-        """
-        target = self.path_for(filename)
-        self._ensure_root()
-
-        if os.path.isfile(target):
-            existing = self.read(filename)
-            if _parse_header(existing) is None:
-                raise DeployError(
-                    f"Refusing to overwrite {filename!r}: it is not a Studio-managed "
-                    "file (no provenance header)."
-                )
-
+    def _atomic_write(self, target_path: str, content: str) -> None:
+        """Atomically write ``content`` to ``target_path`` (a co-located temp +
+        ``os.replace``), world-readable so the dag-processor (often a different
+        uid on a shared volume) can read it."""
         # Temp file co-located so os.replace is atomic (same filesystem).
         fd, tmp = tempfile.mkstemp(dir=self.root, prefix=".afdag-tmp-", suffix=".py")
         try:
@@ -147,17 +143,59 @@ class SharedVolumeTarget:
             # discovery works across the uid boundary. os.replace preserves this
             # mode, so set it on the temp file before the atomic rename.
             os.chmod(tmp, _DEPLOY_FILE_MODE)
-            os.replace(tmp, target)
+            os.replace(tmp, target_path)
         except BaseException:
             if os.path.exists(tmp):
                 os.unlink(tmp)
             raise
+
+    def _backup_path(self, filename: str) -> str:
+        return self.path_for(filename) + _BACKUP_SUFFIX
+
+    def has_backup(self, filename: str) -> bool:
+        return os.path.isfile(self._backup_path(filename))
+
+    def restore_backup(self, filename: str) -> bool:
+        """Restore the rollback backup over the live file, then drop the backup.
+        Returns False (no-op) when there is no backup (PRD §6.5.5 / §7)."""
+        backup = self._backup_path(filename)
+        if not os.path.isfile(backup):
+            return False
+        with open(backup, encoding="utf-8") as fh:
+            content = fh.read()
+        self._atomic_write(self.path_for(filename), content)
+        os.unlink(backup)
+        return True
+
+    def write(self, filename: str, content: str) -> str:
+        """Atomically write ``content`` to ``filename``. Refuses to clobber a
+        file that lacks the Studio provenance header (collision safety, §6.5.3).
+        When overwriting a managed file, the prior version is saved as a `.bak`
+        first so a bad re-deploy can be rolled back (§6.5.5 / §7).
+        """
+        target = self.path_for(filename)
+        self._ensure_root()
+
+        if os.path.isfile(target):
+            existing = self.read(filename)
+            if _parse_header(existing) is None:
+                raise DeployError(
+                    f"Refusing to overwrite {filename!r}: it is not a Studio-managed "
+                    "file (no provenance header)."
+                )
+            self._atomic_write(self._backup_path(filename), existing)
+
+        self._atomic_write(target, content)
         return target
 
     def delete(self, filename: str) -> None:
         target = self.path_for(filename)
         if os.path.isfile(target):
             os.unlink(target)
+        # Drop the rollback backup too (an undeploy/purge removes the DAG wholly).
+        backup = self._backup_path(filename)
+        if os.path.isfile(backup):
+            os.unlink(backup)
 
     def list(self) -> List[Dict[str, str]]:
         """Studio-managed files in the dags dir, with parsed provenance."""
@@ -355,6 +393,10 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) 
 
     filename = _safe_filename(dag_id)
     target.ensure_airflowignore()
+    # An overwrite of a managed file backs up the prior version (write() refuses a
+    # non-managed file, so a pre-existing file here is always Studio-managed) →
+    # `backed_up` tells the editor a rollback target exists (§6.5.5 / §7).
+    backed_up = target.exists(filename)
     # Stamp a body hash into the header so a later out-of-band hand-edit of the
     # deployed file is detectable on re-deploy (§6.5.3).
     path = target.write(filename, _stamp_code_hash(result["code"]))
@@ -364,10 +406,25 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) 
         "path": path,
         "filename": filename,
         "dag_id": dag_id,
+        "backed_up": backed_up,
         "warnings": warnings,
         "errors": [],
         "dagbag": result["dagbag"],
     }
+
+
+def rollback_dag(
+    dag_id: str, target: Optional[SharedVolumeTarget] = None
+) -> Dict[str, Any]:
+    """Roll a deployed DAG back to its previous version (PRD §6.5.5 / §7): restore
+    the `.bak` saved on the last overwrite-deploy. The restored file re-imports
+    via the dag-processor (the editor re-polls the deploy lifecycle). Returns
+    ``{dag_id, rolled_back, filename}``; ``rolled_back`` is False when there is no
+    backup to restore."""
+    target = target or SharedVolumeTarget()
+    filename = _safe_filename(dag_id)
+    rolled_back = target.restore_backup(filename)
+    return {"dag_id": dag_id, "rolled_back": rolled_back, "filename": filename}
 
 
 def purge_dag(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:

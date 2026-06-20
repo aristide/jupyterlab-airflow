@@ -17,6 +17,7 @@ import {
   IOrphansRes,
   IPurgeRes,
   IRenamePreflightRes,
+  IRollbackRes,
   IRetireRes,
   ITaskInstancesRes,
   ITaskLogsRes,
@@ -144,6 +145,11 @@ export const triggerDag = (
 
 export const deleteDag = (dagId: string): Promise<IApiRes<IPurgeRes>> =>
   POST<IPurgeRes>('dags/delete', { dag_id: dagId });
+
+// Roll a deployed DAG back to its previous version (PRD §6.5.5 / §7): restore the
+// `.bak` saved on the last overwrite-deploy.
+export const rollbackDag = (dagId: string): Promise<IApiRes<IRollbackRes>> =>
+  POST<IRollbackRes>('dags/rollback', { dag_id: dagId });
 
 // Deployed Studio DAGs whose source `.afdag` was deleted (PRD §6.5.6).
 export const findOrphans = (): Promise<IApiRes<IOrphansRes>> =>

@@ -26,6 +26,8 @@ export interface IDeployState {
   runState?: string;
   /** Secondary line kept across the run (e.g. a rename "old DAG retired"). */
   note?: string;
+  /** A prior deployed version was backed up, so a rollback is available (§7). */
+  backedUp?: boolean;
   importError?: IImportError;
 }
 
@@ -35,6 +37,10 @@ export interface IDeployBannerProps {
   onUnpauseTrigger: () => void;
   onStopRun: () => void;
   onKeepWaiting: () => void;
+  /** Remove the deployed DAG (file + history) — PRD §7. */
+  onUndeploy: () => void;
+  /** Restore the previous deployed version — PRD §6.5.5 / §7. */
+  onRollback: () => void;
 }
 
 const MOD: Record<DeployPhase, string> = {
@@ -55,11 +61,25 @@ const MOD: Record<DeployPhase, string> = {
  * Purely presentational; StudioApp drives the state machine and polling.
  */
 export function DeployBanner(props: IDeployBannerProps): JSX.Element | null {
-  const { state, onDismiss, onUnpauseTrigger, onStopRun, onKeepWaiting } =
-    props;
+  const {
+    state,
+    onDismiss,
+    onUnpauseTrigger,
+    onStopRun,
+    onKeepWaiting,
+    onUndeploy,
+    onRollback
+  } = props;
   if (state.phase === 'idle') {
     return null;
   }
+
+  // The DAG is on disk in Airflow in these phases, so Undeploy is offered.
+  const undeployBtn = (
+    <button className="jp-afdag-btn" onClick={onUndeploy}>
+      Undeploy
+    </button>
+  );
 
   const busy =
     state.phase === 'writing' ||
@@ -88,6 +108,7 @@ export function DeployBanner(props: IDeployBannerProps): JSX.Element | null {
               Unpause &amp; trigger
             </button>
           )}
+          {undeployBtn}
           <button
             className="jp-afdag-btn jp-afdag-btn-ghost"
             onClick={onDismiss}
@@ -119,6 +140,7 @@ export function DeployBanner(props: IDeployBannerProps): JSX.Element | null {
           <button className="jp-afdag-btn" onClick={onUnpauseTrigger}>
             ▶ Run again
           </button>
+          {undeployBtn}
           <button
             className="jp-afdag-btn jp-afdag-btn-ghost"
             onClick={onDismiss}
@@ -133,6 +155,7 @@ export function DeployBanner(props: IDeployBannerProps): JSX.Element | null {
           <button className="jp-afdag-btn" onClick={onKeepWaiting}>
             Keep waiting
           </button>
+          {undeployBtn}
           <button
             className="jp-afdag-btn jp-afdag-btn-ghost"
             onClick={onDismiss}
@@ -142,9 +165,24 @@ export function DeployBanner(props: IDeployBannerProps): JSX.Element | null {
         </span>
       )}
 
-      {(state.phase === 'waiting' ||
-        state.phase === 'failed' ||
-        state.phase === 'error') && (
+      {state.phase === 'failed' && (
+        <span className="jp-afdag-deploybanner-actions">
+          {state.backedUp && (
+            <button className="jp-afdag-btn" onClick={onRollback}>
+              ↩ Roll back to previous
+            </button>
+          )}
+          {undeployBtn}
+          <button
+            className="jp-afdag-btn jp-afdag-btn-ghost"
+            onClick={onDismiss}
+          >
+            Dismiss
+          </button>
+        </span>
+      )}
+
+      {(state.phase === 'waiting' || state.phase === 'error') && (
         <span className="jp-afdag-deploybanner-actions">
           <button
             className="jp-afdag-btn jp-afdag-btn-ghost"

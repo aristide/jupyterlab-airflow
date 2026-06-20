@@ -246,6 +246,26 @@ async def test_dag_details_endpoint(jp_fetch):
     assert data["params"]["region"]["value"] == "eu-west-1"
 
 
+async def test_dag_rollback_endpoint(jp_fetch, tmp_path, monkeypatch):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    from jupyterlab_airflow.deploy import MANAGED_PREFIX, SharedVolumeTarget
+
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("demo.py", f"{MANAGED_PREFIX}\nx = 1\n")
+    target.write("demo.py", f"{MANAGED_PREFIX}\nx = 2\n")  # creates demo.py.bak
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "dags",
+        "rollback",
+        method="POST",
+        body=json.dumps({"dag_id": "demo"}),
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["rolled_back"] is True
+    assert (tmp_path / "demo.py").read_text().endswith("x = 1\n")
+
+
 async def test_trigger_endpoint(jp_fetch):
     response = await jp_fetch(
         "jupyterlab-airflow",

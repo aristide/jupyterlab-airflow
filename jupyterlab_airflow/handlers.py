@@ -14,6 +14,7 @@ from .deploy import (
     purge_dag,
     rename_preflight,
     retire_old_dag,
+    rollback_dag,
 )
 from .providers import annotated_operators
 from .validation import validate_dag
@@ -283,7 +284,8 @@ class TaskClearHandler(_AirflowHandler):
 
 
 class DagDeleteHandler(_AirflowHandler):
-    """Delete a DAG: remove the deployed `.py` first, then purge its history."""
+    """Delete a DAG: remove the deployed `.py` first, then purge its history.
+    Also serves the editor's **Undeploy** (PRD §7) — same teardown."""
 
     @tornado.web.authenticated
     async def post(self):
@@ -294,6 +296,22 @@ class DagDeleteHandler(_AirflowHandler):
             self.finish(json.dumps({"error": "dag_id required"}))
             return
         await self.respond(purge_dag, dag_id)
+
+
+class DagRollbackHandler(_AirflowHandler):
+    """Roll a deployed DAG back to its previous version (PRD §6.5.5 / §7): restore
+    the `.bak` saved on the last overwrite-deploy. File-only; the dag-processor
+    re-imports the restored version."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self.get_json_body() or {}
+        dag_id = body.get("dag_id")
+        if not dag_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id required"}))
+            return
+        await self.respond(rollback_dag, dag_id)
 
 
 class RenamePreflightHandler(_AirflowHandler):
@@ -341,6 +359,7 @@ def setup_handlers(web_app):
         (_url(base_url, "dags/pause"), DagPauseHandler),
         (_url(base_url, "dags/trigger"), DagTriggerHandler),
         (_url(base_url, "dags/delete"), DagDeleteHandler),
+        (_url(base_url, "dags/rollback"), DagRollbackHandler),
         (_url(base_url, "dags/orphans"), OrphansHandler),
         (_url(base_url, "dags/rename/preflight"), RenamePreflightHandler),
         (_url(base_url, "dags/retire"), DagRetireHandler),

@@ -15,6 +15,7 @@ from jupyterlab_airflow.deploy import (
     is_drifted,
     rename_preflight,
     retire_old_dag,
+    rollback_dag,
 )
 
 
@@ -67,6 +68,57 @@ def test_written_file_is_world_readable(tmp_path):
     mode = stat.S_IMODE(os.stat(path).st_mode)
     assert mode & stat.S_IROTH, f"deployed DAG not other-readable: {oct(mode)}"
     assert mode & stat.S_IRGRP, f"deployed DAG not group-readable: {oct(mode)}"
+
+
+def test_backup_created_only_on_overwrite_and_rollback_restores(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    v1 = f"{MANAGED_PREFIX}  dag_id=demo  v1\nx = 1\n"
+    v2 = f"{MANAGED_PREFIX}  dag_id=demo  v2\nx = 2\n"
+
+    # First write: no prior version, so no backup.
+    target.write("demo.py", v1)
+    assert target.has_backup("demo.py") is False
+
+    # Overwrite: the prior version is saved as a `.bak` the dag-processor ignores.
+    target.write("demo.py", v2)
+    assert target.has_backup("demo.py") is True
+    assert (tmp_path / "demo.py.bak").exists()
+    assert (tmp_path / "demo.py").read_text() == v2
+
+    # Rollback restores the previous version and drops the backup.
+    res = rollback_dag("demo", target=target)
+    assert res == {"dag_id": "demo", "rolled_back": True, "filename": "demo.py"}
+    assert (tmp_path / "demo.py").read_text() == v1
+    assert target.has_backup("demo.py") is False
+
+    # No backup left -> rollback is a no-op.
+    assert rollback_dag("demo", target=target)["rolled_back"] is False
+
+
+def test_delete_removes_the_backup_too(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("demo.py", f"{MANAGED_PREFIX}\nx = 1\n")
+    target.write("demo.py", f"{MANAGED_PREFIX}\nx = 2\n")  # creates a backup
+    assert target.has_backup("demo.py")
+    target.delete("demo.py")
+    assert not (tmp_path / "demo.py").exists()
+    assert not (tmp_path / "demo.py.bak").exists()
+
+
+def test_deploy_reports_backed_up_on_re_deploy(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    first = deploy_dag(_ir(), target=target)
+    assert first["backed_up"] is False  # nothing to back up yet
+    second = deploy_dag(_ir(), target=target)
+    assert second["backed_up"] is True  # the first version was saved
+    assert target.has_backup("dep_dag.py")
+
+
+def test_airflowignore_covers_backups(tmp_path):
+    target = SharedVolumeTarget(str(tmp_path))
+    target.ensure_airflowignore()
+    ignore = (tmp_path / ".airflowignore").read_text().split()
+    assert "*.bak" in ignore
 
 
 def test_refuses_to_overwrite_handwritten_file(tmp_path):

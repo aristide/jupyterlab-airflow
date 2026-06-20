@@ -42,11 +42,13 @@ import {
   isNoteNode
 } from '../graph';
 import {
+  deleteDag,
   deployDag,
   deployStatus,
   getDagRun,
   renamePreflight,
   retireOldDag,
+  rollbackDag,
   setDagPaused,
   setDagRunState,
   triggerDag
@@ -695,13 +697,16 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
           if (res.data.state === 'failed') {
             // A migration's new DAG failed to import → leave the old one intact.
             pendingRetireRef.current = null;
-            setDeploy({
+            // Functional update preserves `backedUp` (set on the prior waiting
+            // state) so the failed banner can offer Roll back (§7).
+            setDeploy(prev => ({
+              ...prev,
               phase: 'failed',
               dagId,
               filename,
-              importError: res.data.import_error,
+              importError: res.data?.import_error,
               message: `${filename} failed to import.`
-            });
+            }));
             return;
           }
         }
@@ -744,6 +749,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         phase: 'waiting',
         dagId,
         filename,
+        // Carried into a later `failed` so the banner can offer Roll back (§7).
+        backedUp: res.data.backed_up,
         message: 'Waiting for Airflow to pick it up… (up to a few minutes)'
       });
       void pollLifecycle(dagId, filename);
@@ -976,6 +983,83 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     }
   }, [deploy.dagId, deploy.filename, deploy.runId, cancelPoll, pollRunState]);
 
+  // Undeploy the open DAG from the editor (PRD §7): the same teardown as the
+  // manager's Delete — remove the deployed `.py` + purge run history. The
+  // `.afdag` design file stays, so the DAG can be re-deployed.
+  const onUndeploy = React.useCallback(async (): Promise<void> => {
+    const dagId = deploy.dagId;
+    if (!dagId) {
+      return;
+    }
+    const confirmed = await showDialog({
+      title: 'Undeploy this DAG?',
+      body:
+        `Remove “${dagId}” from Airflow? This deletes the deployed .py and ` +
+        'purges its run history. The .afdag design stays in your workspace, so ' +
+        'you can deploy it again.',
+      buttons: [
+        Dialog.cancelButton({ label: 'Cancel' }),
+        Dialog.warnButton({ label: 'Undeploy' })
+      ]
+    });
+    if (!confirmed.button.accept) {
+      return;
+    }
+    cancelPoll();
+    setDeploy(prev => ({
+      ...prev,
+      phase: 'writing',
+      message: `Undeploying ${dagId}…`
+    }));
+    const res = await deleteDag(dagId);
+    if (res.status !== 'OK') {
+      setDeploy(prev => ({
+        ...prev,
+        phase: 'error',
+        message: `Undeploy failed: ${res.error ?? 'unknown error'}`
+      }));
+      return;
+    }
+    setDeploy({ phase: 'idle', message: '' });
+  }, [deploy.dagId, cancelPoll]);
+
+  // Roll the deployed DAG back to its previous version (PRD §6.5.5 / §7) — the
+  // recovery path when a re-deploy broke the import. The restored file
+  // re-imports, so re-enter the deploy lifecycle.
+  const onRollback = React.useCallback(async (): Promise<void> => {
+    const { dagId, filename } = deploy;
+    if (!dagId || !filename) {
+      return;
+    }
+    cancelPoll();
+    setDeploy(prev => ({
+      ...prev,
+      phase: 'writing',
+      message: `Rolling ${dagId} back to the previous version…`
+    }));
+    const res = await rollbackDag(dagId);
+    if (res.status !== 'OK' || !res.data?.rolled_back) {
+      setDeploy(prev => ({
+        ...prev,
+        phase: 'failed',
+        backedUp: false,
+        message:
+          res.status === 'OK' && res.data && !res.data.rolled_back
+            ? 'No previous version to roll back to.'
+            : `Rollback failed: ${res.error ?? 'unknown error'}`
+      }));
+      return;
+    }
+    setDeploy({
+      phase: 'waiting',
+      dagId,
+      filename,
+      message:
+        'Rolled back — waiting for Airflow to reload the previous version…'
+    });
+    void pollLifecycle(dagId, filename);
+  }, [deploy.dagId, deploy.filename, cancelPoll, pollLifecycle]);
+
   // Cancel any poll loop if the editor unmounts.
   React.useEffect(() => cancelPoll, [cancelPoll]);
 
@@ -1062,6 +1146,8 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
           onUnpauseTrigger={onUnpauseTrigger}
           onStopRun={() => void onStopRun()}
           onKeepWaiting={onKeepWaiting}
+          onUndeploy={() => void onUndeploy()}
+          onRollback={() => void onRollback()}
         />
         <div className="jp-afdag-body">
           <Palette
