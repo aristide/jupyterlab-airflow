@@ -209,11 +209,30 @@
 }
 
 .jp-afdag-palette-title {
+  margin-right: auto;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
+}
+
+.jp-afdag-palette-refresh {
+  flex: 0 0 auto;
+  margin-right: 2px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jp-afdag-palette-refresh:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
 }
 
 /* Collapsed side-panel rail (palette + inspector) */
@@ -274,7 +293,10 @@
 }
 
 .jp-afdag-palette-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   width: 100%;
   text-align: left;
   padding: 5px 8px;
@@ -288,6 +310,28 @@
 
 .jp-afdag-palette-item:hover {
   border-color: var(--jp-brand-color1);
+}
+
+.jp-afdag-palette-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Operator unavailable in the target Airflow: dimmed + an (i) glyph (never
+   color-only) and a pip/version tooltip; still clickable (PRD §6.2.1). */
+.jp-afdag-palette-item.jp-mod-unavailable {
+  opacity: 0.55;
+}
+
+.jp-afdag-palette-item.jp-mod-unavailable:hover {
+  border-color: var(--jp-border-color1);
+}
+
+.jp-afdag-palette-item-warn {
+  flex: 0 0 auto;
+  color: var(--jp-warn-color1, var(--jp-ui-font-color2));
+  font-size: var(--jp-ui-font-size0);
 }
 
 /* Canvas */
@@ -695,6 +739,16 @@
   margin-bottom: 12px;
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
+}
+
+.jp-afdag-info-unavailable {
+  margin: 0 0 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--jp-warn-color1, var(--jp-border-color1));
+  border-radius: 3px;
+  background: var(--jp-warn-color3, var(--jp-layout-color2));
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
 }
 
 .jp-afdag-info-section {

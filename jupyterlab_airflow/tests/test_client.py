@@ -160,6 +160,31 @@ def test_delete_dag_issues_delete(requests_mock):
     assert m.called
 
 
+def test_list_providers_reads_target(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    m = requests_mock.get(
+        f"{BASE}{API_PREFIX}/providers",
+        json={
+            "providers": [
+                {"package_name": "apache-airflow-providers-http", "version": "5.0.0"}
+            ],
+            "total_entries": 1,
+        },
+    )
+    out = make_client().list_providers()
+    assert m.called
+    assert out["providers"][0]["package_name"] == "apache-airflow-providers-http"
+
+
+def test_version_reads_target(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/version",
+        json={"version": "3.0.2", "git_version": "abc"},
+    )
+    assert make_client().version()["version"] == "3.0.2"
+
+
 def test_get_dag_details_fetches_params(requests_mock):
     requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
     m = requests_mock.get(

@@ -185,6 +185,23 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     };
   }, []);
 
+  // Re-fetch the registry, forcing the server to re-read the target Airflow's
+  // installed providers (PRD §6.2.1) — so installing a provider then refreshing
+  // un-dims its operators without restarting the editor. A refresh failure is
+  // surfaced non-destructively (the last-good operators stay; the editor is
+  // never torn down) — it must NOT route through the fatal opsError path.
+  const refreshOperators = React.useCallback((): void => {
+    loadOperators(true)
+      .then(list => setOperators(list))
+      .catch(
+        error =>
+          void showErrorMessage(
+            'Could not refresh operators',
+            String((error && error.message) || error)
+          )
+      );
+  }, []);
+
   // Load the IR from the document model, and reload on external changes.
   React.useEffect(() => {
     let disconnected = false;
@@ -962,7 +979,10 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   // Cancel any poll loop if the editor unmounts.
   React.useEffect(() => cancelPoll, [cancelPoll]);
 
-  if (opsError) {
+  // Only a *first-load* registry failure is fatal (there's no editor to show
+  // yet). A later failure (e.g. a palette refresh blip) must never tear down a
+  // working editor — it's surfaced non-destructively instead (refreshOperators).
+  if (opsError && !opsLoaded) {
     return (
       <div className="jp-afdag-loading jp-mod-error">
         Could not load the operator registry: {opsError}
@@ -1048,6 +1068,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             operators={operators}
             onAdd={addNode}
             onAddNote={addNote}
+            onRefresh={refreshOperators}
             collapsed={leftCollapsed}
             onToggle={toggleLeft}
           />

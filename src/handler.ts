@@ -88,8 +88,12 @@ async function POST<T>(
 export const getHealth = (): Promise<IApiRes<IHealth>> =>
   GET<IHealth>('health');
 
-export const listOperators = (): Promise<IApiRes<IOperatorDef[]>> =>
-  GET<IOperatorDef[]>('operators');
+// `refresh` forces a fresh read of the target Airflow's installed providers
+// (the availability annotations); otherwise the server serves its short-TTL cache.
+export const listOperators = (
+  refresh = false
+): Promise<IApiRes<IOperatorDef[]>> =>
+  GET<IOperatorDef[]>('operators', refresh ? { refresh: '1' } : {});
 
 export const generateDag = (ir: IAfdagIR): Promise<IApiRes<IGenerateRes>> =>
   POST<IGenerateRes>('generate', ir as unknown as Record<string, unknown>);

@@ -15,7 +15,7 @@ from .deploy import (
     rename_preflight,
     retire_old_dag,
 )
-from .registry import client_view
+from .providers import annotated_operators
 from .validation import validate_dag
 
 NAMESPACE = "jupyterlab-airflow"
@@ -50,16 +50,20 @@ class HealthHandler(_AirflowHandler):
 
 
 class OperatorsHandler(_AirflowHandler):
-    """Serve the operator registry to the editor palette + node forms.
+    """Serve the operator registry to the editor palette + node forms, annotated
+    with provider-availability against the target Airflow (PRD §6.2.1).
 
-    This endpoint does not talk to Airflow; it reads the bundled (and optional
-    user) operator YAML registry. The file I/O still runs off the event loop via
-    :meth:`respond`/``run_in_executor``.
+    Reads the bundled (and optional user) operator YAML registry, then reads the
+    target's installed providers (cached, short-TTL) to tag each entry
+    ``available | missing-provider | version-too-old | unknown``. ``?refresh=1``
+    forces a fresh provider read. The Airflow round-trip + file I/O run off the
+    event loop via :meth:`respond`/``run_in_executor``.
     """
 
     @tornado.web.authenticated
     async def get(self):
-        await self.respond(client_view)
+        refresh = self.get_argument("refresh", "").lower() in ("1", "true")
+        await self.respond(annotated_operators, force=refresh)
 
 
 class GenerateHandler(_AirflowHandler):

@@ -195,6 +195,18 @@ class AirflowClient:
         """All current DAG-file import errors (the deploy recovery surface)."""
         return self._request("GET", "/importErrors", params={"limit": limit})
 
+    def list_providers(self, limit: int = 1000) -> dict:
+        """Providers installed in the **target** Airflow — the gating key for the
+        operator palette (PRD §6.2.1). Returns ``{providers: [{package_name,
+        version, description}], total_entries}``."""
+        return self._request("GET", "/providers", params={"limit": limit})
+
+    def version(self) -> dict:
+        """The target Airflow version (``{version, git_version}``) — drives the
+        ``version-too-old`` palette annotation against each op's
+        ``airflow_min_version`` (PRD §6.2.1)."""
+        return self._request("GET", "/version")
+
     def deploy_status(self, dag_id: str, filename: str) -> dict:
         """One observation of a deploy's tri-state (PRD §6.5.4).
 

@@ -33,7 +33,7 @@ export function loadOperators(force = false): Promise<IOperatorDef[]> {
   if (pending && !force) {
     return pending;
   }
-  pending = listOperators().then(res => {
+  pending = listOperators(force).then(res => {
     if (res.status !== 'OK' || !res.data) {
       pending = null; // allow a retry
       throw new Error(res.error || 'Failed to load the operator registry');

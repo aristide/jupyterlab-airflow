@@ -74,6 +74,19 @@ function OperatorInfo(props: { def: IOperatorDef }): JSX.Element {
           )}
         </div>
       )}
+      {def.availability === 'missing-provider' && (
+        <div className="jp-afdag-info-unavailable">
+          ⓘ Not installed in your Airflow.{' '}
+          {def.pipInstall ?? `pip install ${def.provider ?? ''}`} — then refresh
+          the palette. Deploy is blocked until it's installed.
+        </div>
+      )}
+      {def.availability === 'version-too-old' && (
+        <div className="jp-afdag-info-unavailable">
+          ⓘ Needs Airflow {def.airflowMinVersion}+ — your target Airflow is
+          older.
+        </div>
+      )}
       <ParamList title="Required inputs" params={required} />
       <ParamList title="Optional inputs" params={optional} />
       {def.example && (

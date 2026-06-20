@@ -331,6 +331,21 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) 
             "dagbag": dagbag,
         }
 
+    # Hard-gate on provider availability in the TARGET Airflow (PRD §6.2.1):
+    # fail fast with a plain-language message *before* writing, instead of an
+    # opaque /importErrors later. A no-op when the target is unreachable.
+    from .providers import get_target_index, provider_block_errors
+
+    provider_errors = provider_block_errors(ir, get_target_index())
+    if provider_errors:
+        return {
+            "deployed": False,
+            "dag_id": dag_id,
+            "warnings": [],
+            "errors": provider_errors,
+            "dagbag": result["dagbag"],
+        }
+
     warnings: List[str] = []
     if result["dagbag"].get("status") == "skipped":
         warnings.append(

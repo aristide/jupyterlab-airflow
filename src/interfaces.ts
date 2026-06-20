@@ -152,6 +152,15 @@ export interface IOperatorDef {
   example?: string;
   provider?: string;
   airflowMinVersion?: string;
+  // Provider-availability against the *target* Airflow (PRD §6.2.1). `unknown`
+  // when the target couldn't be read — the op is still shown and never blocked.
+  availability?:
+    | 'available'
+    | 'missing-provider'
+    | 'version-too-old'
+    | 'unknown';
+  /** `pip install …` hint; present when `availability === 'missing-provider'`. */
+  pipInstall?: string;
 }
 
 // Result of `POST generate` (IR → Airflow 3.x Python). Validation failures come

@@ -31,6 +31,17 @@ class FakeClient:
     def list_dags(self, limit=100, offset=0, dag_id_pattern=None, **kwargs):
         return {"dags": [{"dag_id": "demo", "is_paused": False}], "total_entries": 1}
 
+    def list_providers(self, limit=1000):
+        return {
+            "providers": [
+                {"package_name": "apache-airflow-providers-standard", "version": "1.0"}
+            ],
+            "total_entries": 1,
+        }
+
+    def version(self):
+        return {"version": "3.0.2", "git_version": "abc"}
+
     def get_dag_details(self, dag_id):
         return {
             "dag_id": dag_id,
@@ -73,6 +84,11 @@ def fake_client(monkeypatch):
     from jupyterlab_airflow import handlers as handlers_module
 
     monkeypatch.setattr(handlers_module, "get_client", lambda: fake)
+    # The provider-availability index is process-cached; start each test clean so
+    # it re-reads via the fake client (PRD §6.2.1).
+    from jupyterlab_airflow import providers as providers_module
+
+    providers_module.reset_cache()
     yield fake
 
 
@@ -94,6 +110,8 @@ async def test_operators_endpoint(jp_fetch):
     assert bash["taskIdPrefix"] == "bash"
     # Codegen-only fields stay server-side.
     assert "import" not in bash and "template_taskflow" not in bash
+    # Provider-availability annotation (PRD §6.2.1): bash is standard -> available.
+    assert bash["availability"] == "available"
 
 
 async def test_generate_endpoint(jp_fetch):
