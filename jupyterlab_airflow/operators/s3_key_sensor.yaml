@@ -1,0 +1,42 @@
+id: s3_key_sensor
+label: S3 key sensor
+category: Sensors
+provider: apache-airflow-providers-amazon
+airflow_min_version: '3.0'
+description: >-
+  Waits for an object (a "key") to appear in an Amazon S3 bucket before letting
+  the run continue — the AWS analogue of the File sensor. Use it to hold a
+  pipeline until an upstream system drops a file in S3. Credentials come from an
+  AWS Connection; the bucket must already exist.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/sensors/s3.html
+example: |
+  bucket_name:  my-data-lake
+  bucket_key:   incoming/sales_{{ ds }}.csv
+import: 'from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor'
+handles: { in: true, out: true }
+taskflow: operator            # sensors have no TaskFlow-native form — render as an operator
+task_id_prefix: wait_s3
+params:
+  - { name: bucket_name, label: 'Bucket', type: string, required: true, widget: text,
+      help: 'The S3 bucket name (no s3:// prefix), e.g. `my-data-lake`.' }
+  - { name: bucket_key, label: 'Key (object path)', type: string, required: true, widget: text,
+      help: 'The object key within the bucket to wait for, e.g. `incoming/sales_{{ ds }}.csv`. Jinja templating is supported.' }
+  - { name: aws_conn_id, label: 'AWS connection', type: string, required: false, widget: text, default: aws_default,
+      help: 'The Airflow AWS Connection that holds the credentials/region. Defaults to `aws_default`.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = S3KeySensor(
+      task_id={{ task_id | pyrepr }},
+      bucket_name={{ params.bucket_name | pyrepr }},
+      bucket_key={{ params.bucket_key | pyrepr }},
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = S3KeySensor(
+      task_id={{ task_id | pyrepr }},
+      bucket_name={{ params.bucket_name | pyrepr }},
+      bucket_key={{ params.bucket_key | pyrepr }},
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

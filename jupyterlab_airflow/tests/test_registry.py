@@ -64,6 +64,49 @@ def test_p1_gated_ops_present_with_correct_providers():
     )
 
 
+def test_p2_cloud_k8s_ops_present_with_correct_providers():
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    assert {
+        "kubernetes_pod",
+        "s3_key_sensor",
+        "gcs_object_sensor",
+        "bigquery_insert_job",
+    } <= set(by_id)
+    expected = {
+        "kubernetes_pod": (
+            "apache-airflow-providers-cncf-kubernetes",
+            "airflow.providers.cncf.kubernetes.operators.pod",
+            "Kubernetes",
+        ),
+        "s3_key_sensor": (
+            "apache-airflow-providers-amazon",
+            "airflow.providers.amazon.aws.sensors.s3",
+            "Sensors",
+        ),
+        "gcs_object_sensor": (
+            "apache-airflow-providers-google",
+            "airflow.providers.google.cloud.sensors.gcs",
+            "Sensors",
+        ),
+        "bigquery_insert_job": (
+            "apache-airflow-providers-google",
+            "airflow.providers.google.cloud.operators.bigquery",
+            "Cloud",
+        ),
+    }
+    for op_id, (provider, module, category) in expected.items():
+        op = by_id[op_id]
+        assert op["provider"] == provider, op_id
+        assert module in op["import"], op_id
+        assert op["category"] == category, op_id
+        # Gated (non-standard) providers, non-Airflow-2 import paths.
+        assert op["provider"] != "apache-airflow-providers-standard", op_id
+        assert "airflow.operators." not in op["import"], op_id
+        assert "airflow.sensors." not in op["import"], op_id
+    # KubernetesPodOperator carries the new (non-legacy) `operators.pod` module.
+    assert "operators.kubernetes_pod" not in by_id["kubernetes_pod"]["import"]
+
+
 def test_sensors_are_airflow3_standard_provider():
     by_id = {op["id"]: op for op in registry.load_registry()}
     expected = {

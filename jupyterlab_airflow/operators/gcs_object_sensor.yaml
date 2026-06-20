@@ -1,0 +1,42 @@
+id: gcs_object_sensor
+label: GCS object sensor
+category: Sensors
+provider: apache-airflow-providers-google
+airflow_min_version: '3.0'
+description: >-
+  Waits for an object to exist in a Google Cloud Storage bucket before letting
+  the run continue — the GCP analogue of the File sensor. Use it to gate a
+  pipeline on an upstream drop into GCS. Credentials come from a Google Cloud
+  Connection; the bucket must already exist.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-google/stable/sensors/gcs.html
+example: |
+  bucket:  my-gcs-bucket
+  object:  incoming/sales_{{ ds }}.csv
+import: 'from airflow.providers.google.cloud.sensors.gcs import GCSObjectExistenceSensor'
+handles: { in: true, out: true }
+taskflow: operator            # sensors have no TaskFlow-native form — render as an operator
+task_id_prefix: wait_gcs
+params:
+  - { name: bucket, label: 'Bucket', type: string, required: true, widget: text,
+      help: 'The GCS bucket name (no gs:// prefix), e.g. `my-gcs-bucket`.' }
+  - { name: object, label: 'Object (path)', type: string, required: true, widget: text,
+      help: 'The object path within the bucket to wait for, e.g. `incoming/sales_{{ ds }}.csv`. Jinja templating is supported.' }
+  - { name: google_cloud_conn_id, label: 'Google Cloud connection', type: string, required: false, widget: text, default: google_cloud_default,
+      help: 'The Airflow Google Cloud Connection that holds the credentials/project. Defaults to `google_cloud_default`.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = GCSObjectExistenceSensor(
+      task_id={{ task_id | pyrepr }},
+      bucket={{ params.bucket | pyrepr }},
+      object={{ params['object'] | pyrepr }},
+      {% if params.google_cloud_conn_id %}google_cloud_conn_id={{ params.google_cloud_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = GCSObjectExistenceSensor(
+      task_id={{ task_id | pyrepr }},
+      bucket={{ params.bucket | pyrepr }},
+      object={{ params['object'] | pyrepr }},
+      {% if params.google_cloud_conn_id %}google_cloud_conn_id={{ params.google_cloud_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

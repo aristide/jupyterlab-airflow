@@ -1,6 +1,7 @@
 """Tests for IR -> Airflow 3.x TaskFlow code generation."""
 
 import ast
+import re
 
 import pytest
 
@@ -237,6 +238,79 @@ def test_http_optional_params_only_emitted_when_set():
     code2 = generate_dag(ir2)["code"]
     assert "data='payload'" in code2
     assert "headers={'X-Key': '1'}" in code2
+
+
+def test_p2_cloud_k8s_ops_render_airflow3():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "kubernetes_pod", "task_id": "pod",
+             "params": {"image": "python:3.12-slim", "arguments": ["print(1)"]}},
+            {"id": "b", "op": "s3_key_sensor", "task_id": "wait_s3",
+             "params": {"bucket_name": "lake", "bucket_key": "in/x.csv"}},
+            {"id": "c", "op": "gcs_object_sensor", "task_id": "wait_gcs",
+             "params": {"bucket": "gb", "object": "in/x.csv"}},
+            {"id": "d", "op": "bigquery_insert_job", "task_id": "bq",
+             "params": {"configuration": {"query": {"query": "SELECT 1"}}}},
+        ],
+        edges=[{"source": "b", "target": "a"}, {"source": "c", "target": "d"}],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+
+    assert "pod = KubernetesPodOperator(" in code and "image='python:3.12-slim'" in code
+    assert "wait_s3 = S3KeySensor(" in code and "bucket_key='in/x.csv'" in code
+    assert "wait_gcs = GCSObjectExistenceSensor(" in code and "object='in/x.csv'" in code
+    assert "bq = BigQueryInsertJobOperator(" in code and "configuration=" in code
+    assert (
+        "from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator"
+        in code
+    )
+    assert "from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor" in code
+    assert (
+        "from airflow.providers.google.cloud.sensors.gcs import GCSObjectExistenceSensor"
+        in code
+    )
+    assert (
+        "from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator"
+        in code
+    )
+    assert "airflow.operators." not in code and "airflow.sensors." not in code
+
+
+def test_operator_block_drops_blank_for_omitted_middle_optional():
+    # KubernetesPodOperator with image + env_vars set but the optionals BETWEEN
+    # them (name/namespace/cmds/arguments) omitted must not leave a stray blank
+    # line inside the constructor call (operator blocks are blank-stripped at
+    # render time, since they hold no user code).
+    ir = _ir(
+        nodes=[{"id": "n", "op": "kubernetes_pod", "task_id": "pod",
+                "params": {"image": "img", "env_vars": {"K": "1"}}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    block = re.search(r"pod = KubernetesPodOperator\(.*?\n {4}\)", code, re.S)
+    assert block, code
+    assert "\n\n" not in block.group(0)
+    assert "image='img'" in code and "env_vars={'K': '1'}" in code
+
+
+def test_code_node_body_blank_lines_are_preserved():
+    # The operator-block blank-strip must NOT touch a code node's user-authored
+    # body — blank lines the user wrote (incl. inside a multi-line literal) stay.
+    body = "vals = [\n    1,\n\n    2,\n]\nreturn sum(vals)"
+    ir = _ir(
+        nodes=[{"id": "n", "op": "python_task", "task_id": "t",
+                "params": {"code": body}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    # Both the between-statements blank and the in-literal blank survive.
+    assert "1,\n\n" in res["code"]
 
 
 def test_cycle_is_rejected():

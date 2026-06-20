@@ -1,0 +1,68 @@
+id: kubernetes_pod
+label: Kubernetes pod
+category: Kubernetes
+provider: apache-airflow-providers-cncf-kubernetes
+airflow_min_version: '3.0'
+description: >-
+  Runs any container image as a pod on a Kubernetes cluster — the escape hatch
+  for non-Python work or heavy jobs (a model train, a CLI tool, a custom binary).
+  You give an image and an optional command; Airflow launches the pod, streams its
+  logs, and cleans it up. WARNING: this runs an arbitrary image with the worker's
+  cluster privileges — the same blast radius as a code task — so only point it at
+  images you trust. PREREQUISITES Studio can't check: your Airflow needs a
+  reachable Kubernetes cluster and a K8s-capable executor (or an in-cluster /
+  Kubernetes Connection); without them the pod won't launch even though the
+  operator is installed.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-cncf-kubernetes/stable/operators.html
+example: |
+  image:      python:3.12-slim
+  cmds:       ["python", "-c"]
+  arguments:  ["print('hello from a pod')"]
+import: 'from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator'
+handles: { in: true, out: true }
+taskflow: operator            # no TaskFlow-native form — render as an operator
+task_id_prefix: pod
+params:
+  - { name: image, label: 'Container image', type: string, required: true, widget: text,
+      help: 'The container image to run, e.g. `python:3.12-slim` or `myregistry/job:1.4`. Trust only images you control — it runs with cluster privileges.' }
+  - { name: name, label: 'Pod name', type: string, required: false, widget: text,
+      help: 'A name for the pod. Leave blank to let Airflow generate one (a random suffix is added either way).' }
+  - { name: namespace, label: 'Namespace', type: string, required: false, widget: text, default: default,
+      help: 'The Kubernetes namespace to run in. Defaults to `default`.' }
+  - { name: cmds, label: 'Command (entrypoint)', type: array, required: false, widget: json,
+      help: 'Overrides the image entrypoint, as a JSON list of strings, e.g. ["python", "-c"]. Leave blank to use the image default.' }
+  - { name: arguments, label: 'Arguments', type: array, required: false, widget: json,
+      help: 'Arguments passed to the command, as a JSON list of strings, e.g. ["print(1)"].' }
+  - { name: env_vars, label: 'Environment vars', type: object, required: false, widget: json, default: {},
+      help: 'Environment variables for the container, as a JSON object of name→value.' }
+  - { name: on_finish_action, label: 'On finish', type: string, required: false, widget: text, default: delete_pod,
+      help: 'What to do with the pod when the task ends: delete_pod (default), delete_succeeded_pod, or keep_pod.' }
+  - { name: kubernetes_conn_id, label: 'Kubernetes connection', type: string, required: false, widget: text,
+      help: 'The Airflow Kubernetes Connection to reach the cluster. Leave blank to use in-cluster config or the executor''s default.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = KubernetesPodOperator(
+      task_id={{ task_id | pyrepr }},
+      image={{ params.image | pyrepr }},
+      {% if params.name %}name={{ params.name | pyrepr }},{% endif %}
+      {% if params.namespace %}namespace={{ params.namespace | pyrepr }},{% endif %}
+      {% if params.cmds %}cmds={{ params.cmds | pyrepr }},{% endif %}
+      {% if params.arguments %}arguments={{ params.arguments | pyrepr }},{% endif %}
+      {% if params.env_vars %}env_vars={{ params.env_vars | pyrepr }},{% endif %}
+      {% if params.on_finish_action %}on_finish_action={{ params.on_finish_action | pyrepr }},{% endif %}
+      {% if params.kubernetes_conn_id %}kubernetes_conn_id={{ params.kubernetes_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = KubernetesPodOperator(
+      task_id={{ task_id | pyrepr }},
+      image={{ params.image | pyrepr }},
+      {% if params.name %}name={{ params.name | pyrepr }},{% endif %}
+      {% if params.namespace %}namespace={{ params.namespace | pyrepr }},{% endif %}
+      {% if params.cmds %}cmds={{ params.cmds | pyrepr }},{% endif %}
+      {% if params.arguments %}arguments={{ params.arguments | pyrepr }},{% endif %}
+      {% if params.env_vars %}env_vars={{ params.env_vars | pyrepr }},{% endif %}
+      {% if params.on_finish_action %}on_finish_action={{ params.on_finish_action | pyrepr }},{% endif %}
+      {% if params.kubernetes_conn_id %}kubernetes_conn_id={{ params.kubernetes_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

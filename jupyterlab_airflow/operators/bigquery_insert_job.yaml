@@ -1,0 +1,46 @@
+id: bigquery_insert_job
+label: BigQuery job
+category: Cloud
+provider: apache-airflow-providers-google
+airflow_min_version: '3.0'
+description: >-
+  Runs a job on Google BigQuery — a query, a load, a copy, or an extract. This is
+  the current, non-deprecated way to run BigQuery work (it supersedes the old
+  BigQueryExecuteQuery operator). You describe the job as a configuration object;
+  for a query that is `{"query": {"query": "…", "useLegacySql": false}}`.
+  Credentials come from a Google Cloud Connection.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-google/stable/operators/cloud/bigquery.html
+example: |
+  configuration: {"query": {"query": "SELECT 1", "useLegacySql": false}}
+import: 'from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator'
+handles: { in: true, out: true }
+taskflow: operator            # no TaskFlow-native form — render as an operator
+task_id_prefix: bq_job
+params:
+  - { name: configuration, label: 'Job configuration', type: object, required: true, widget: json,
+      help: 'The BigQuery job config as a JSON object. For a query: {"query": {"query": "SELECT ...", "useLegacySql": false}}.' }
+  - { name: project_id, label: 'Project id', type: string, required: false, widget: text,
+      help: 'The Google Cloud project to run the job in. Leave blank to use the connection''s default project.' }
+  - { name: location, label: 'Location', type: string, required: false, widget: text,
+      help: 'The BigQuery location/region (e.g. `US`, `EU`, `europe-west1`). Leave blank for the dataset''s location.' }
+  - { name: gcp_conn_id, label: 'Google Cloud connection', type: string, required: false, widget: text, default: google_cloud_default,
+      help: 'The Airflow Google Cloud Connection that holds the credentials. Defaults to `google_cloud_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = BigQueryInsertJobOperator(
+      task_id={{ task_id | pyrepr }},
+      configuration={{ params.configuration | pyrepr }},
+      {% if params.project_id %}project_id={{ params.project_id | pyrepr }},{% endif %}
+      {% if params.location %}location={{ params.location | pyrepr }},{% endif %}
+      {% if params.gcp_conn_id %}gcp_conn_id={{ params.gcp_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = BigQueryInsertJobOperator(
+      task_id={{ task_id | pyrepr }},
+      configuration={{ params.configuration | pyrepr }},
+      {% if params.project_id %}project_id={{ params.project_id | pyrepr }},{% endif %}
+      {% if params.location %}location={{ params.location | pyrepr }},{% endif %}
+      {% if params.gcp_conn_id %}gcp_conn_id={{ params.gcp_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

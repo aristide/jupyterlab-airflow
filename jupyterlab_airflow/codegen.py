@@ -278,9 +278,17 @@ def _render(ir: Dict[str, Any]) -> str:
         rendered = env.from_string(template).render(
             task_id=node["task_id"], params=node.get("params") or {}, common={}
         )
+        is_operator = op.get("taskflow", "native") == "operator"
+        if is_operator:
+            # An operator-instance block (`Cls(...)`) has no user code — only
+            # kwarg lines — so an omitted optional `{% if %}` kwarg or an empty
+            # `{{ common | pyargs }}` leaves a blank line that is pure artifact.
+            # Drop blank lines here (NOT in `_tidy`, which would also touch the
+            # user-authored body of a code node).
+            rendered = "\n".join(ln for ln in rendered.splitlines() if ln.strip())
         definitions.append(_indent(rendered, 4))
 
-        if op.get("taskflow", "native") == "operator":
+        if is_operator:
             handle[node["id"]] = node["task_id"]  # the assignment is the instance
         else:
             inst = f"{node['task_id']}_task"
