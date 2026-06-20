@@ -102,14 +102,14 @@ The locked decisions are honored; the phasing applies the pre‑mortem's "ruthle
 ### MVP — v0.1 "vertical slice that actually runs"
 - **Editor:** ReactFlow canvas with **full graph editing** (add / **delete** / connect / **reconnect** nodes and edges), **rounded‑corner arrow edges**, searchable/categorized palette, **five inspector tabs** (DAG / NODE / **INFO** / CODE / SAVED) with **inline contextual field help**, **collapsible side panels**, top‑bar with live error badge, empty‑state, minimap + zoom, save/reopen via `.afdag`.
 - **Operators (core set):** `Empty`, `Bash`, `Python`/Custom `@task` (the code node — decision #3), `Branch` (BranchPython), `TriggerDagRun`. (~5–6 nodes covering the common shapes: linear, fan‑in/out, branch.) The catalogue's growth path — the next **P0** standard ops + first **Sensors**, then gated provider ops, with the user‑requested `KubernetesPodOperator` at **P2** — is the prioritized roadmap in **§6.2.1**.
-- **Codegen:** **TaskFlow backend only** (matches the repo's existing example DAG). The Traditional↔TaskFlow *toggle* is built into the IR/UI but defaults to (and only emits) TaskFlow in MVP. *Rationale: shipping both backends doubles the codegen + test surface; see §6.3.*
+- **Codegen:** **both backends shipped ✅** — the Traditional↔TaskFlow toggle selects the IR's `syntax_style` and codegen emits `@dag`/`@task` (TaskFlow, the default) or `with DAG(…)` + operator instances + `>>` (Traditional), with a task‑graph equivalence test (§6.3). *(Originally MVP-TaskFlow-only; the Traditional backend landed 2026‑06‑20 once the per-op `template_traditional` set was complete.)*
 - **Validation:** client‑side cycle detection + required‑field checks → live error badge & node dots; **server‑side authoritative re‑validation + parse‑check** before deploy.
 - **Deploy:** `SharedVolumeTarget` (atomic write) + **lifecycle polling** (appears? import error?) with tri‑state UI.
 - **Manager:** extend sidebar with **import errors**, **task instances + states**, **task logs**, **clear/retry**, **delete** (file + history), plus the existing list/pause/trigger/runs.
 - **Foundations:** `DeployTarget` interface, operator‑registry mechanism, provenance + collision/namespacing model, secrets guidance, accessibility baseline.
 
 ### v1.1 — "dual syntax & breadth"
-- Traditional operator codegen backend + the working **Traditional↔TaskFlow toggle** (with golden‑file equivalence tests).
+- Traditional operator codegen backend + the working **Traditional↔TaskFlow toggle** (with a task‑graph equivalence test) — **shipped ✅ (2026‑06‑20, §6.3)**.
 - **Operator breadth + provider gating (§6.2.1):** the **P1** tier — the **provider‑availability gating mechanism** (the prerequisite for any gated op), then `HTTP` (`HttpOperator`) and `SQL` (`SQLExecuteQueryOperator`/`SqlSensor`); plus any remaining **P0** standard ops/sensors (`ShortCircuit`, `LatestOnly`, `File`/`ExternalTask`/`DateTime`/`TimeDelta` sensors) not shipped in the MVP.
 - **Annotation / note cards** (§6.1.7) — resizable on‑canvas notes (Markdown) stored in IR `notes[]`, excluded from codegen/validation, for team documentation.
 - One‑click **Tidy layout** (dagre), richer undo/redo, optional minimap toggle.
@@ -152,7 +152,7 @@ Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (N
 - **SAVED** — lists `.afdag` documents in the workspace (via Contents API) to reopen; marks which are deployed.
 - **Tab order** is DAG · NODE · INFO · CODE · SAVED; selecting a node focuses NODE, and INFO sits beside it so "configure" and "understand" are one click apart.
 
-**6.1.4 Top bar.** Logo · live `dag_id` · node count · **live error badge** (`✕ N errors`, with text not just color) · Traditional↔TaskFlow toggle (v1.1; disabled/ taskflow‑locked in MVP) · Undo · **Reset** (revert to last saved IR) · **Save** (writes the `.afdag` via the document context) · **Generate DAG** (server codegen preview) · **Deploy**.
+**6.1.4 Top bar.** Logo · live `dag_id` · node count · **live error badge** (`✕ N errors`, with text not just color) · **Traditional↔TaskFlow toggle ✅ (§6.3)** — a segmented control that flips the IR's `syntax_style`, persists it, and regenerates the CODE preview / next Deploy · Undo · **Reset** (revert to last saved IR) · **Save** (writes the `.afdag` via the document context) · **Generate DAG** (server codegen preview) · **Deploy**.
 
 **6.1.5 Save / reopen.** The editor is a JupyterLab **document** bound to the `.afdag` file; Save/dirty/restore come from the Contents API. Reopening loads the IR (never the generated `.py`). See §8.2–8.3. **Renaming** the document vs changing the `dag_id` (and what each does to a deployed/running pipeline) is **§6.1.8**.
 
@@ -207,12 +207,12 @@ Requirements:
 ### 6.3 Code generation
 
 - **Authoritative codegen is server‑side** (Python + Jinja2), because only the server can parse‑check against an Airflow install and because templates + import paths live with the deploy target. Client TS does *instant, non‑authoritative* hints only.
-- The **IR is syntax‑agnostic**; the syntax mode selects a template family:
-  - **TaskFlow** (`from airflow.sdk import dag, task`): `@dag(...)` wrapping `@task`‑decorated functions; dependencies expressed by function calls and/or `chain(...)`. Code nodes are TaskFlow‑native.
-  - **Traditional** (`from airflow.sdk import DAG` + provider operator imports): `with DAG(...) as dag:` + operator instances + `>>`/`chain()`/`cross_downstream()` from the edge list. A code node renders as `PythonOperator(python_callable=...)`.
+- The **IR is syntax‑agnostic** (`syntax_style`); the mode selects a template family — **both built ✅ (2026‑06‑20)**, switched by the top‑bar toggle (§6.1.4) and `_render` keying on `ir.syntax_style`:
+  - **TaskFlow** (`from airflow.sdk import dag, task`): `@dag(...)` wrapping `@task`‑decorated functions; a native op is instantiated by a `task_id_task = task_id()` call; dependencies expressed by `>>`. Code nodes are TaskFlow‑native.
+  - **Traditional** (`from airflow.sdk import DAG` + operator‑class imports): `with DAG(...) as dag:` + operator instances + `>>` wiring. **Every** op renders as an operator instance via its `template_traditional` (a code node as `PythonOperator(python_callable=…)` / `BranchPythonOperator` etc.). (`chain()`/`cross_downstream()` collapse for the common fan shapes is a follow‑up 🔭.) Verified: `from airflow.sdk import DAG` is exported by the Airflow‑3 task SDK; output parses + compiles.
 - **Airflow 3.x correctness (verified):** emit `airflow.sdk` for `DAG`/`dag`/`task`/`chain`, and **`airflow.providers.standard.*`** for operators/sensors. **Never** emit Airflow‑2 paths (`airflow.operators.bash`, `airflow.models.DAG`, `airflow.decorators.task`) — they fail to import in Airflow 3. Defaults: `catchup=False`; `retry_delay` as `timedelta`; `start_date` as `datetime`; `schedule` handled distinctly for `None`/preset/cron/`timedelta`.
 - **Determinism:** format output with `black`/`ruff format` so identical IR → byte‑identical file (idempotent deploys, clean diffs for the future Git target).
-- **Toggle = two backends that must be semantically equivalent.** This is a top correctness risk; v1.1 ships it only with golden‑file equivalence tests (§10). MVP emits TaskFlow only.
+- **Toggle = two backends that must be semantically equivalent.** This is a top correctness risk (R7). **Shipped ✅** with a codegen **task‑graph equivalence test** (`test_codegen.py::test_taskflow_and_traditional_yield_the_same_task_graph`): the same IR renders in both families and is asserted to yield the **same tasks + the same `>>` dependency edges** (handles resolved to `task_id`s). **Caveat:** the families pass Airflow **context** to a code node differently — TaskFlow `@task` (use `get_current_context()`) vs Traditional `PythonOperator(python_callable=…, **context)` — so a context‑dependent user body is not transparently portable; the graph is equivalent, the body contract differs.
 
 See **Appendix C** for example output.
 
@@ -386,7 +386,7 @@ Interface in §6.5.1. `SharedVolumeTarget` reads its dags path from an env var (
 
 - **Golden‑file tests:** IR → expected `.py` for **every operator** and **every escaping edge case** (quotes, newlines, unicode, backslashes, dict/JSON params, reserved/duplicate `task_id`s, identifier sanitization).
 - **Round‑trip property test:** IR → `.py` → reopen `.afdag` → identical IR.
-- **Toggle equivalence (v1.1):** Traditional and TaskFlow output for the same IR parse to semantically equivalent DAGs.
+- **Toggle equivalence ✅:** Traditional and TaskFlow output for the same IR yield the same task graph (tasks + `>>` dependency edges) — asserted by `test_codegen.py::test_taskflow_and_traditional_yield_the_same_task_graph` (§6.3). *(Graph equivalence; a context‑dependent code‑node body still differs between families — see the §6.3 caveat.)*
 - **Real‑Airflow integration:** parse generated DAGs in the pinned `apache/airflow:3.0.2` image; assert **zero import errors** and a **successful run** — not just `compile()`.
 - **REST contract tests:** new `/api/v2` endpoints (importErrors, taskInstances, logs, clear/retry, delete) — shapes differ from `/api/v1`.
 - **Concurrency:** two simultaneous deploys to the shared folder; collision/overwrite behavior.
@@ -408,7 +408,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | R4 | **Shared‑folder collisions** (duplicate `dag_id`, clobbering) | Namespacing + pre‑write ownership check + provenance refuse‑overwrite (§8.9, §9) |
 | R5 | **Round‑trip drift** (`.py` hand‑edited; `.afdag`/`.py` two sources) | `ir-hash` checksum; "modified outside Studio" reopen flow |
 | R6 | **Single shared admin** → no attribution/authz; fragile cached JWT | Hub‑injected per‑user creds (v1.2); audit now; per‑process token |
-| R7 | **Toggle** = two backends that can silently diverge | Defer to v1.1 with equivalence golden tests; TaskFlow‑only MVP |
+| R7 | **Toggle** = two backends that can silently diverge | **Shipped ✅** with a task‑graph **equivalence test** (same IR → same tasks + `>>` edges in both families, §6.3/§10); residual: a code‑node body's Airflow‑context contract differs between families (caveated, §6.3) |
 | R8 | **Code node = RCE** on shared workers | Isolated‑subprocess validation; deploy is privileged; document; (later) sandbox/queue |
 | R9 | **Scope creep** (sensors, Git/S3, dual backend) | Phased plan §5; keep only the `DeployTarget` interface in v1 |
 | R10 | **Prod may not have a writable shared volume** | `DeployTarget` is load‑bearing from day one, not "later" |
@@ -445,7 +445,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | **M5 — Manager ops** | Import‑errors view, task instances, logs, clear/retry, delete (file+history); list param drift fixed |
 | **M6 — Recovery UX + a11y** | Friendly import‑error → node/field mapping + "Open in Studio to fix" + undeploy; keyboard path + non‑color‑only indicators |
 | **M7 — Lifecycle automation** | **Run on deploy:** after register, the server unpauses + triggers a run and the banner reaches *Running* (integration test on `3.0.2` asserts a green run, no manual step); **Stop run** (manager + editor) `PATCH`es a run to `failed` and its tasks terminate; **orphan reconciliation:** deleting a `.afdag` — via the in‑session `fileChanged` signal **and** the server sweep (terminal/`git`/`rm` deletes) — flags, confirms, then removes the `.py` and `DELETE`s the DAG; delete is blocked while a task runs; all three are audited (`{user, action, dag_id, correlation_id}`) |
-| **v1.1** | Traditional backend + working toggle (equivalence tests); Tidy layout; more operators |
+| **v1.1** | Traditional backend + working toggle (task‑graph equivalence test) ✅; Tidy layout 🔭; more operators ✅ (catalogue → 18) |
 | **v1.2** | Git + S3 `DeployTarget`; per‑user identity + audit; asset scheduling |
 
 ## 15. Wireframes (screen drafts)
@@ -485,7 +485,7 @@ The 3‑pane document: full‑width top bar, then collapsible **palette « · ca
 │                    │     ⊕ ⊖ ⤢ (zoom/fit)         │mmap│ │                      │
 └────────────────────┴──────────────────────────────┴────┴─┴──────────────────────┘
 ```
-Built: palette (search/categories/drag) · rounded‑corner arrow edges · minimap/zoom · DAG form (id/description/schedule/start_date/owner/retries/retry_delay/tags/params/catchup) · live `✓ no errors` badge · Reset/Save/Generate/Deploy. **Locked to TaskFlow** until the Traditional backend (v1.1). Palette **catalogue** grows per §6.2.1: **P0** shipped — **Flow Control** gains `ShortCircuit` + `LatestOnly`, and a new **Sensors** category lands (`File` · `ExternalTask` · `DateTime` · `TimeDelta`); **P1** shipped — the first gated ops `HTTP` · `SQL query` · `SqlSensor`; **P2** shipped — `KubernetesPodOperator` (Kubernetes), `S3KeySensor`/`GCSObjectExistenceSensor` (Sensors), `BigQueryInsertJobOperator` (Cloud) — all dimmed when their provider is absent (§15.7) ✅. Catalogue → 18.
+Built: palette (search/categories/drag) · rounded‑corner arrow edges · minimap/zoom · DAG form (id/description/schedule/start_date/owner/retries/retry_delay/tags/params/catchup) · live `✓ no errors` badge · Reset/Save/Generate/Deploy. **TaskFlow + Traditional ✅:** the top‑bar toggle flips the IR's `syntax_style`; codegen renders `@dag`/`@task` (TaskFlow) or `with DAG(…)` + operator instances + `>>` wiring (Traditional) accordingly (§6.3). Palette **catalogue** grows per §6.2.1: **P0** shipped — **Flow Control** gains `ShortCircuit` + `LatestOnly`, and a new **Sensors** category lands (`File` · `ExternalTask` · `DateTime` · `TimeDelta`); **P1** shipped — the first gated ops `HTTP` · `SQL query` · `SqlSensor`; **P2** shipped — `KubernetesPodOperator` (Kubernetes), `S3KeySensor`/`GCSObjectExistenceSensor` (Sensors), `BigQueryInsertJobOperator` (Cloud) — all dimmed when their provider is absent (§15.7) ✅. Catalogue → 18.
 
 ### 15.2 Studio editor — empty‑state / onboarding ✅
 
@@ -547,7 +547,7 @@ Live generated‑Python preview + Copy; the cycle path replaces the code until t
  └─────────────────────────────────────────┘    ↑ keyword/str/comment colored;
    └─ line-number gutter; tokens syntax-colored    gutter on the left
 ```
-Built ✅: server codegen (TaskFlow), Copy, validation panel showing client errors **and** post‑deploy Airflow import status. **Traditional output is v1.1** (templates exist; backend + toggle unlock pending). **Planned 📝:** replace the plain `<pre>` with the read‑only `CodeMirrorField` (`language="python"`) so the preview gains **Python syntax highlighting + a line‑number gutter** — `--jp‑*`‑themed (light/dark), selectable, scrollable (§6.1.3 / §8.2).
+Built ✅: server codegen (**TaskFlow + Traditional**, selected by the top‑bar toggle / IR `syntax_style`; the CODE‑tab header shows the active family), Copy, validation panel showing client errors **and** post‑deploy Airflow import status. **Planned 📝:** replace the plain `<pre>` with the read‑only `CodeMirrorField` (`language="python"`) so the preview gains **Python syntax highlighting + a line‑number gutter** — `--jp‑*`‑themed (light/dark), selectable, scrollable (§6.1.3 / §8.2).
 
 ### 15.5 Studio editor — INFO tab (learn‑Airflow) ✅
 

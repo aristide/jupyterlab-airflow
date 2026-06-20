@@ -56,6 +56,7 @@ import {
 import { IOperatorDef } from '../interfaces';
 import {
   IAfdagIR,
+  SyntaxStyle,
   createEmptyIR,
   dagIdFromPath,
   normalizeAfdagFilename,
@@ -142,6 +143,9 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const [reloadKey, setReloadKey] = React.useState(0);
   const [leftCollapsed, setLeftCollapsed] = React.useState(false);
   const [rightCollapsed, setRightCollapsed] = React.useState(false);
+  // The generated-code syntax family (PRD §6.3). Lives in the IR; the toggle
+  // persists it and the CODE preview / Deploy regenerate accordingly.
+  const [syntaxStyle, setSyntaxStyle] = React.useState<SyntaxStyle>('taskflow');
   const [deploy, setDeploy] = React.useState<IDeployState>({
     phase: 'idle',
     message: ''
@@ -232,6 +236,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       setNodes(flow.nodes);
       setEdges(flow.edges);
       setDag(ir.dag);
+      setSyntaxStyle(ir.syntax_style ?? 'taskflow');
       setReady(true);
       // Remount the form tabs so they reseed local state from the new IR.
       setReloadKey(key => key + 1);
@@ -480,7 +485,22 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   // The IR projected from the live graph, fed to the CODE preview.
   const currentIR = React.useMemo(
     () => flowToIR(nodes, edges, dag, baseRef.current),
-    [nodes, edges, dag]
+    [nodes, edges, dag, syntaxStyle]
+  );
+
+  // Switch the codegen syntax family (PRD §6.3): update the base IR (which
+  // flowToIR threads through), re-render the CODE preview, and persist so the
+  // `.afdag` and the next Deploy use the new style.
+  const onToggleSyntax = React.useCallback(
+    (next: SyntaxStyle): void => {
+      if (next === baseRef.current.syntax_style) {
+        return;
+      }
+      baseRef.current = { ...baseRef.current, syntax_style: next };
+      setSyntaxStyle(next);
+      commit();
+    },
+    [commit]
   );
 
   // Instant, client-side validation messages for the CODE tab's panel.
@@ -1098,6 +1118,36 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
               ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
               : '✓ no errors'}
           </span>
+          <div
+            className="jp-afdag-syntax-toggle"
+            role="group"
+            aria-label="Generated code syntax"
+          >
+            <button
+              className={
+                syntaxStyle === 'taskflow'
+                  ? 'jp-afdag-syntax-opt jp-mod-active'
+                  : 'jp-afdag-syntax-opt'
+              }
+              aria-pressed={syntaxStyle === 'taskflow'}
+              title="TaskFlow — @dag / @task decorators (Airflow-3 idiomatic)"
+              onClick={() => onToggleSyntax('taskflow')}
+            >
+              TaskFlow
+            </button>
+            <button
+              className={
+                syntaxStyle === 'traditional'
+                  ? 'jp-afdag-syntax-opt jp-mod-active'
+                  : 'jp-afdag-syntax-opt'
+              }
+              aria-pressed={syntaxStyle === 'traditional'}
+              title="Traditional — with DAG(…) + operator instances + >> wiring"
+              onClick={() => onToggleSyntax('traditional')}
+            >
+              Traditional
+            </button>
+          </div>
           <span className="jp-afdag-spacer" />
           <button
             className="jp-afdag-btn"

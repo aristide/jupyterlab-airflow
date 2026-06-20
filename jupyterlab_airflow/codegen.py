@@ -171,7 +171,9 @@ def _default_args(dag: Dict[str, Any]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-def _dag_decorator(dag: Dict[str, Any]) -> str:
+def _dag_args(dag: Dict[str, Any]) -> List[str]:
+    """The shared ``DAG(...)`` keyword args (used by both the TaskFlow ``@dag``
+    decorator and the Traditional ``with DAG(...)`` context)."""
     args: List[str] = [f'dag_id={_pyrepr(dag["dag_id"])}']
     if dag.get("description"):
         args.append(f'description={_pyrepr(dag["description"])}')
@@ -186,15 +188,38 @@ def _dag_decorator(dag: Dict[str, Any]) -> str:
         args.append(f"tags={_pyrepr(list(dag['tags']))}")
     if dag.get("params"):
         args.append(f"params={_pyrepr(dag['params'])}")
-    body = "".join(f"    {arg},\n" for arg in args)
+    return args
+
+
+def _dag_decorator(dag: Dict[str, Any]) -> str:
+    body = "".join(f"    {arg},\n" for arg in _dag_args(dag))
     return f"@dag(\n{body})"
+
+
+def _dag_context(dag: Dict[str, Any]) -> str:
+    """The Traditional ``with DAG(...) as dag:`` line (PRD §6.3)."""
+    body = "".join(f"    {arg},\n" for arg in _dag_args(dag))
+    return f"with DAG(\n{body}) as dag:"
 
 
 # --------------------------------------------------------------------------- #
 # Imports + body
 # --------------------------------------------------------------------------- #
-def _collect_imports(ops: List[Dict[str, Any]]) -> List[str]:
-    """datetime + airflow.sdk first, then de-duplicated provider imports."""
+def _collect_imports(ops: List[Dict[str, Any]], traditional: bool = False) -> List[str]:
+    """datetime + airflow.sdk first, then de-duplicated provider imports.
+
+    Traditional uses ``from airflow.sdk import DAG`` and every op's **operator
+    class** import (`import:`); TaskFlow uses ``dag, task`` and a native op's
+    ``import_taskflow`` (operator-style ops still use `import:`)."""
+    if traditional:
+        pinned = ["from datetime import datetime, timedelta", "from airflow.sdk import DAG"]
+        extra: List[str] = []
+        for op in ops:
+            line = op.get("import")
+            if line and line not in pinned and line not in extra:
+                extra.append(line)
+        return pinned + sorted(extra)
+
     pinned = ["from datetime import datetime, timedelta", "from airflow.sdk import dag, task"]
     # `dag`/`task` are already pinned above, so a native operator's
     # `import_taskflow` that only re-imports them is redundant.
@@ -203,7 +228,7 @@ def _collect_imports(ops: List[Dict[str, Any]]) -> List[str]:
         "from airflow.sdk import dag",
         "from airflow.sdk import dag, task",
     }
-    extra: List[str] = []
+    extra = []
     for op in ops:
         if op.get("taskflow", "native") == "operator":
             line = op.get("import")
@@ -217,6 +242,13 @@ def _collect_imports(ops: List[Dict[str, Any]]) -> List[str]:
 def _indent(block: str, spaces: int = 4) -> str:
     pad = " " * spaces
     return "\n".join((pad + line) if line.strip() else "" for line in block.splitlines())
+
+
+def _has_code_param(op: Dict[str, Any]) -> bool:
+    """Whether the op embeds a user-authored code body (a `code`-widget param) —
+    its rendered block keeps its blank lines; every other op is a pure kwarg
+    list whose template blanks are artifacts to strip."""
+    return any(p.get("widget") == "code" for p in op.get("params") or [])
 
 
 def _tidy(code: str) -> str:
@@ -297,6 +329,10 @@ def _render(ir: Dict[str, Any]) -> str:
     nodes = ir.get("nodes") or []
     edges = ir.get("edges") or []
     dag_id = dag.get("dag_id", "")
+    syntax = ir.get("syntax_style")
+    if syntax not in ("taskflow", "traditional"):
+        syntax = "taskflow"
+    traditional = syntax == "traditional"
 
     # Stage 1–3: structural + identifier validation (no code executed).
     id_errors = _validate_identifiers(dag_id, nodes)
@@ -317,30 +353,35 @@ def _render(ir: Dict[str, Any]) -> str:
     definitions: List[str] = []
     instantiations: List[str] = []
     handle: Dict[str, str] = {}
+    template_key = "template_traditional" if traditional else "template_taskflow"
+    family = "Traditional" if traditional else "TaskFlow"
 
     for node in ordered:
         op = registry[node["op"]]
         used_ops.append(op)
-        template = op.get("template_taskflow")
+        template = op.get(template_key)
         if not template:
-            raise CodegenError(f"Operator {op['id']!r} has no TaskFlow template")
+            raise CodegenError(f"Operator {op['id']!r} has no {family} template")
         rendered = env.from_string(template).render(
             task_id=node["task_id"],
             params=node.get("params") or {},
             common=_node_common(node, op),
         )
         is_operator = op.get("taskflow", "native") == "operator"
-        if is_operator:
-            # An operator-instance block (`Cls(...)`) has no user code — only
-            # kwarg lines — so an omitted optional `{% if %}` kwarg or an empty
-            # `{{ common | pyargs }}` leaves a blank line that is pure artifact.
-            # Drop blank lines here (NOT in `_tidy`, which would also touch the
-            # user-authored body of a code node).
+        if not _has_code_param(op):
+            # A block with no user-code body is only kwarg lines, so an omitted
+            # optional `{% if %}` kwarg or an empty `{{ common | pyargs }}` leaves
+            # a blank line that is pure artifact — drop it. (A code node's body is
+            # left untouched; in Traditional even native ops like bash render as a
+            # pure `Cls(...)`, so key on the code param, not the taskflow kind.)
             rendered = "\n".join(ln for ln in rendered.splitlines() if ln.strip())
         definitions.append(_indent(rendered, 4))
 
-        if is_operator:
-            handle[node["id"]] = node["task_id"]  # the assignment is the instance
+        # Traditional: every op renders a `task_id = Cls(...)` assignment, so the
+        # task_id IS the handle. TaskFlow: an operator's assignment is the
+        # instance, but a native `@task` needs a `task_id_task = task_id()` call.
+        if traditional or is_operator:
+            handle[node["id"]] = node["task_id"]
         else:
             inst = f"{node['task_id']}_task"
             handle[node["id"]] = inst
@@ -361,10 +402,9 @@ def _render(ir: Dict[str, Any]) -> str:
     afdag_id = "".join(str((ir.get("provenance") or {}).get("afdag_id", "")).split())
     header = (
         f"# airflow-studio: managed  studio={STUDIO_VERSION}  "
-        f"{_ir_hash(ir)}  dag_id={dag_id}  afdag_id={afdag_id}  syntax=taskflow"
+        f"{_ir_hash(ir)}  dag_id={dag_id}  afdag_id={afdag_id}  syntax={syntax}"
     )
-    imports = "\n".join(_collect_imports(used_ops))
-    decorator = _dag_decorator(dag)
+    imports = "\n".join(_collect_imports(used_ops, traditional))
 
     body_sections = ["\n\n".join(definitions)] if definitions else ["    pass"]
     if instantiations:
@@ -373,10 +413,14 @@ def _render(ir: Dict[str, Any]) -> str:
         body_sections.append("\n".join(wiring))
     body = "\n\n".join(section for section in body_sections if section)
 
-    code = (
-        f"{header}\n{imports}\n\n\n"
-        f"{decorator}\n"
-        f"def {dag_id}():\n{body}\n\n\n"
-        f"{dag_id}()\n"
-    )
+    if traditional:
+        # `with DAG(...) as dag:` owns the task graph — no decorator or call.
+        code = f"{header}\n{imports}\n\n\n{_dag_context(dag)}\n{body}\n"
+    else:
+        code = (
+            f"{header}\n{imports}\n\n\n"
+            f"{_dag_decorator(dag)}\n"
+            f"def {dag_id}():\n{body}\n\n\n"
+            f"{dag_id}()\n"
+        )
     return _tidy(code)

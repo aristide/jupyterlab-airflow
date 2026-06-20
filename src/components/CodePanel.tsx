@@ -55,7 +55,10 @@ export function CodePanel(props: ICodePanelProps): JSX.Element {
   return (
     <div className="jp-afdag-tabpanel jp-afdag-code">
       <div className="jp-afdag-saved-head">
-        <span>Generated DAG (TaskFlow)</span>
+        <span>
+          Generated DAG (
+          {ir.syntax_style === 'traditional' ? 'Traditional' : 'TaskFlow'})
+        </span>
         <button
           className="jp-afdag-btn"
           onClick={() => setNonce(n => n + 1)}

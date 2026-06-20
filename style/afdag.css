@@ -65,6 +65,32 @@
   flex: 1 1 auto;
 }
 
+/* TaskFlow / Traditional segmented toggle (PRD §6.3 / §15.1) */
+.jp-afdag-syntax-toggle {
+  display: inline-flex;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.jp-afdag-syntax-opt {
+  border: none;
+  padding: 3px 10px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  cursor: pointer;
+}
+
+.jp-afdag-syntax-opt:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-afdag-syntax-opt.jp-mod-active {
+  background: var(--jp-brand-color1);
+  color: #fff;
+}
+
 .jp-afdag-btn {
   border: 1px solid var(--jp-border-color1);
   background: var(--jp-brand-color1);

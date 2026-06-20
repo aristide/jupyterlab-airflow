@@ -368,6 +368,166 @@ def test_no_common_is_unchanged():
     assert "@task.bash(task_id='t')" in code
 
 
+def test_traditional_syntax_renders_with_dag_and_wiring():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "bash", "task_id": "extract",
+             "params": {"bash_command": "echo hi"}},
+            {"id": "b", "op": "python_task", "task_id": "transform",
+             "params": {"code": "return 1"}},
+            {"id": "c", "op": "empty", "task_id": "done", "params": {}},
+        ],
+        edges=[{"source": "a", "target": "b"}, {"source": "b", "target": "c"}],
+    )
+    ir["syntax_style"] = "traditional"
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+
+    # Traditional structure: `with DAG(...) as dag:`, no @dag/@task decorators.
+    assert "from airflow.sdk import DAG" in code
+    assert "with DAG(" in code and ") as dag:" in code
+    assert "@dag(" not in code and "def my_dag():" not in code
+    assert "from airflow.sdk import dag, task" not in code
+    assert "@task" not in code and "my_dag()" not in code
+    # Every op renders as an operator instance — incl. native bash/python.
+    assert "extract = BashOperator(" in code
+    assert "transform = PythonOperator(" in code
+    assert "done = EmptyOperator(" in code
+    # The code node's body rides in a nested callable.
+    assert "def _transform(**context):" in code and "return 1" in code
+    # `>>` wiring + the header tagged traditional.
+    assert "extract >> transform" in code and "transform >> done" in code
+    assert "syntax=traditional" in code
+
+
+def _task_graph(code):
+    """Extract ({task_ids}, {(src_task_id, tgt_task_id)}) from generated Python,
+    resolving handle names to task_ids so TaskFlow (`x_task`) and Traditional
+    (`x`) compare equal. The basis for the toggle-equivalence test (PRD §10 / R7)."""
+    tree = ast.parse(code)
+
+    def _task_id_of(call):
+        for kw in call.keywords:
+            if kw.arg == "task_id" and isinstance(kw.value, ast.Constant):
+                return kw.value.value
+        return None
+
+    task_ids = set()
+    func_to_task = {}  # @task-decorated def name -> task_id (TaskFlow native)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            for dec in node.decorator_list:
+                if isinstance(dec, ast.Call):
+                    tid = _task_id_of(dec)
+                    if tid is not None:
+                        func_to_task[node.name] = tid
+                        task_ids.add(tid)
+
+    handle_to_task = {}  # variable used in `>>` -> task_id
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Call)
+        ):
+            name = node.targets[0].id
+            tid = _task_id_of(node.value)
+            if tid is not None:  # `x = SomeOperator(task_id='x', ...)`
+                handle_to_task[name] = tid
+                task_ids.add(tid)
+            elif (
+                isinstance(node.value.func, ast.Name)
+                and node.value.func.id in func_to_task
+            ):  # `x_task = x()` (TaskFlow instantiation)
+                handle_to_task[name] = func_to_task[node.value.func.id]
+
+    edges = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.BinOp)
+            and isinstance(node.value.op, ast.RShift)
+            and isinstance(node.value.left, ast.Name)
+            and isinstance(node.value.right, ast.Name)
+        ):
+            src = handle_to_task.get(node.value.left.id)
+            tgt = handle_to_task.get(node.value.right.id)
+            if src and tgt:
+                edges.add((src, tgt))
+    return task_ids, edges
+
+
+def test_taskflow_and_traditional_yield_the_same_task_graph():
+    # PRD §10 / R7: the two backends must be semantically equivalent. They differ
+    # in form, but the same IR must produce the same tasks + dependency edges.
+    nodes = [
+        {"id": "s", "op": "file_sensor", "task_id": "wait",
+         "params": {"filepath": "/d"}, "common": {"poke_interval": 30}},
+        {"id": "a", "op": "bash", "task_id": "extract",
+         "params": {"bash_command": "echo hi"}, "common": {"retries": 2}},
+        {"id": "b", "op": "python_task", "task_id": "transform",
+         "params": {"code": "return 1"}},
+        {"id": "c", "op": "branch", "task_id": "choose",
+         "params": {"code": "return 'extract'"}},
+        {"id": "d", "op": "empty", "task_id": "done", "params": {}},
+    ]
+    edges = [
+        {"source": "s", "target": "a"},
+        {"source": "a", "target": "b"},
+        {"source": "c", "target": "a"},
+        {"source": "b", "target": "d"},
+    ]
+    tf = _ir(nodes=nodes, edges=edges)
+    tf["syntax_style"] = "taskflow"
+    trad = _ir(nodes=nodes, edges=edges)
+    trad["syntax_style"] = "traditional"
+
+    tf_code = generate_dag(tf)
+    trad_code = generate_dag(trad)
+    assert tf_code["valid"] and trad_code["valid"]
+
+    tf_ids, tf_edges = _task_graph(tf_code["code"])
+    trad_ids, trad_edges = _task_graph(trad_code["code"])
+    assert tf_ids == {"wait", "extract", "transform", "choose", "done"}
+    assert tf_ids == trad_ids, (tf_ids, trad_ids)
+    assert tf_edges == {
+        ("wait", "extract"),
+        ("extract", "transform"),
+        ("choose", "extract"),
+        ("transform", "done"),
+    }
+    assert tf_edges == trad_edges, (tf_edges, trad_edges)
+
+
+def test_default_syntax_is_taskflow():
+    # No syntax_style on the IR -> TaskFlow (unchanged default).
+    ir = _ir(
+        nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo hi"}}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    assert "@dag(" in code and "@task.bash" in code
+    assert "with DAG(" not in code
+    assert "syntax=taskflow" in code
+
+
+def test_traditional_emits_common_params_on_instances():
+    ir = _ir(
+        nodes=[{"id": "n", "op": "file_sensor", "task_id": "w",
+                "params": {"filepath": "/d"},
+                "common": {"mode": "reschedule", "poke_interval": 30}}],
+        edges=[],
+    )
+    ir["syntax_style"] = "traditional"
+    code = generate_dag(ir)["code"]
+    assert "w = FileSensor(" in code
+    assert "mode='reschedule'" in code and "poke_interval=30" in code
+
+
 def test_cycle_is_rejected():
     ir = _ir(
         nodes=[
