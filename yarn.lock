@@ -1614,6 +1614,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@dagrejs/dagre@npm:^3.0.0":
+  version: 3.0.0
+  resolution: "@dagrejs/dagre@npm:3.0.0"
+  dependencies:
+    "@dagrejs/graphlib": 4.0.1
+  checksum: 5b901b76d428a857944ed94ab7f3145f56d7264b057c57fedaef79ad67ed8af078d656fac68691c64bea950bec3eff44f38c8a48276bc25fe6b632b2fde490bf
+  languageName: node
+  linkType: hard
+
+"@dagrejs/graphlib@npm:4.0.1":
+  version: 4.0.1
+  resolution: "@dagrejs/graphlib@npm:4.0.1"
+  checksum: ca01fac378ca52d4b2169649687d7e1bb33e0ba734bf6dd204629a9f3a4a92746dd15c7bcd56aa9c9211fbf303b2c8c02d647d96d61e1b44822944fd0e1c662b
+  languageName: node
+  linkType: hard
+
 "@discoveryjs/json-ext@npm:^0.5.0":
   version: 0.5.7
   resolution: "@discoveryjs/json-ext@npm:0.5.7"
@@ -8177,8 +8193,10 @@ __metadata:
     "@codemirror/commands": ^6.3.0
     "@codemirror/lang-json": ^6.0.1
     "@codemirror/lang-python": ^6.1.0
+    "@codemirror/language": ^6.0.0
     "@codemirror/state": ^6.4.0
     "@codemirror/view": ^6.23.0
+    "@dagrejs/dagre": ^3.0.0
     "@jupyterlab/application": ^4.1.6
     "@jupyterlab/apputils": ^4.2.6
     "@jupyterlab/builder": ^4.0.0

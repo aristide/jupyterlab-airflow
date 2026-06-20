@@ -67,6 +67,7 @@
         "@codemirror/language": "^6.0.0",
         "@codemirror/state": "^6.4.0",
         "@codemirror/view": "^6.23.0",
+        "@dagrejs/dagre": "^3.0.0",
         "@jupyterlab/application": "^4.1.6",
         "@jupyterlab/apputils": "^4.2.6",
         "@jupyterlab/codemirror": "^4.1.6",

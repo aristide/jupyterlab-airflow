@@ -30,6 +30,7 @@ module.exports = {
     '<rootDir>/_temp_extension'
   ],
   reporters: ['default', 'github-actions'],
+  setupFiles: [...(baseConfig.setupFiles || []), '<rootDir>/jest.setup.js'],
   testRegex: 'src/.*/.*.spec.ts[x]?$',
   transformIgnorePatterns: [`/node_modules/(?!${esModules}).+`]
 };

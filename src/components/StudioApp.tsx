@@ -54,6 +54,7 @@ import {
   triggerDag
 } from '../handler';
 import { IOperatorDef } from '../interfaces';
+import { tidyLayout } from '../layout';
 import {
   IAfdagIR,
   SyntaxStyle,
@@ -165,6 +166,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const rfRef = React.useRef<ReactFlowInstance<AfdagFlowNode, Edge> | null>(
     null
   );
+  const tidyTimerRef = React.useRef<number | undefined>(undefined);
   // Cancellation token for the in-flight deploy poll loop.
   const pollRef = React.useRef<{ cancelled: boolean } | null>(null);
   // While a node drag is in progress we hold off committing the IR (ReactFlow
@@ -317,6 +319,40 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     draggingRef.current = false;
     commit();
   }, [commit]);
+
+  // One-click "Tidy layout" (PRD §8.2): re-position the task nodes via a dagre
+  // top-to-bottom layered layout. The persist effect saves the new positions;
+  // re-fit once they've rendered. Notes stay where they are.
+  const onTidyLayout = React.useCallback((): void => {
+    const { nodes: liveNodes, edges: liveEdges } = latestRef.current;
+    const positions = tidyLayout(liveNodes, liveEdges);
+    if (positions.size === 0) {
+      return;
+    }
+    setNodes(nds =>
+      nds.map(node => {
+        const next = positions.get(node.id);
+        return next ? { ...node, position: next } : node;
+      })
+    );
+    // Re-fit after the position change renders, scoped to just the task nodes
+    // we laid out so a far-parked note card doesn't drag the view wide. Cancel
+    // any pending timer (and on unmount, below) so it can't fire post-teardown.
+    window.clearTimeout(tidyTimerRef.current);
+    tidyTimerRef.current = window.setTimeout(
+      () =>
+        rfRef.current?.fitView({
+          padding: 0.2,
+          nodes: Array.from(positions.keys(), id => ({ id }))
+        }),
+      0
+    );
+  }, [setNodes]);
+
+  React.useEffect(
+    () => () => window.clearTimeout(tidyTimerRef.current),
+    []
+  );
 
   // Re-fit the canvas when the Lumino widget is shown or resized.
   React.useEffect(() => {
@@ -1191,6 +1227,14 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             </button>
           </div>
           <span className="jp-afdag-spacer" />
+          <button
+            className="jp-afdag-btn"
+            title="Auto-arrange the tasks (top-to-bottom layered layout)"
+            disabled={taskNodes.length === 0}
+            onClick={onTidyLayout}
+          >
+            ≣ Tidy
+          </button>
           <button
             className="jp-afdag-btn"
             title="Rename the .afdag file (does not change the dag_id or affect a deployed DAG)"

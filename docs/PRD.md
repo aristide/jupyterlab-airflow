@@ -112,7 +112,7 @@ The locked decisions are honored; the phasing applies the pre‑mortem's "ruthle
 - Traditional operator codegen backend + the working **Traditional↔TaskFlow toggle** (with a task‑graph equivalence test) — **shipped ✅ (2026‑06‑20, §6.3)**.
 - **Operator breadth + provider gating (§6.2.1):** the **P1** tier — the **provider‑availability gating mechanism** (the prerequisite for any gated op), then `HTTP` (`HttpOperator`) and `SQL` (`SQLExecuteQueryOperator`/`SqlSensor`); plus any remaining **P0** standard ops/sensors (`ShortCircuit`, `LatestOnly`, `File`/`ExternalTask`/`DateTime`/`TimeDelta` sensors) not shipped in the MVP.
 - **Annotation / note cards** (§6.1.7) — resizable on‑canvas notes (Markdown) stored in IR `notes[]`, excluded from codegen/validation, for team documentation.
-- One‑click **Tidy layout** (dagre), richer undo/redo, optional minimap toggle.
+- One‑click **Tidy layout** (dagre) ✅, richer undo/redo, optional minimap toggle.
 
 ### v1.2 — "beyond a single shared volume"
 - **Git** and **S3 / object‑storage** `DeployTarget` implementations (Airflow DAG‑bundle aware).
@@ -152,7 +152,7 @@ Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (N
 - **SAVED** — lists `.afdag` documents in the workspace (via Contents API) to reopen; marks which are deployed.
 - **Tab order** is DAG · NODE · INFO · CODE · SAVED; selecting a node focuses NODE, and INFO sits beside it so "configure" and "understand" are one click apart.
 
-**6.1.4 Top bar.** Logo · live `dag_id` · node count · **live error badge** (`✕ N errors`, with text not just color) · **Traditional↔TaskFlow toggle ✅ (§6.3)** — a segmented control that flips the IR's `syntax_style`, persists it, and regenerates the CODE preview / next Deploy · Undo · **Reset** (revert to last saved IR) · **Save** (writes the `.afdag` via the document context) · **Generate DAG** (server codegen preview) · **Deploy**.
+**6.1.4 Top bar.** Logo · live `dag_id` · node count · **live error badge** (`✕ N errors`, with text not just color) · **Traditional↔TaskFlow toggle ✅ (§6.3)** — a segmented control that flips the IR's `syntax_style`, persists it, and regenerates the CODE preview / next Deploy · **`≣ Tidy` ✅ (§8.2)** — one‑click auto‑layout (dagre) that re‑positions the task nodes top‑to‑bottom, persists them, and re‑fits the view (disabled when empty; leaves note cards in place) · Undo · **Reset** (revert to last saved IR) · **Save** (writes the `.afdag` via the document context) · **Generate DAG** (server codegen preview) · **Deploy**.
 
 **6.1.5 Save / reopen.** The editor is a JupyterLab **document** bound to the `.afdag` file; Save/dirty/restore come from the Contents API. Reopening loads the IR (never the generated `.py`). See §8.2–8.3. **Renaming** the document vs changing the `dag_id` (and what each does to a deployed/running pipeline) is **§6.1.8**.
 
@@ -316,7 +316,7 @@ Register a custom file type + document widget so JupyterLab owns open/save/dirty
 - **Restore:** `WidgetTracker({namespace:'airflow-studio'})` + `restorer.restore(tracker, { command:'docmanager:open', args: w=>({path:w.context.path, factory:FACTORY}), name: w=>w.context.path })`. Leave the sidebar's existing `restorer.add` untouched (distinct trackers; no conflict).
 - **Forms:** RJSF (`@rjsf/core` + `@rjsf/validator-ajv8`) rendered from registry‑derived JSON Schema + uiSchema; custom widgets: `json` (JSON/dict editor), `code` (CodeMirror 6 from `@jupyterlab/codemirror`), schedule/date pickers. `onChange` writes back into the IR (single source of truth).
 - **CODE‑tab editor & Python syntax highlighting + line numbers (§6.1.3 CODE / §15.4).** Render the generated Python in the shared **`CodeMirrorField`** (`language="python"`, `readOnly`) instead of `<pre><code>` — the field already wires the Python grammar (`@codemirror/lang-python`) and a **line‑number gutter** (`lineNumbers()`), so the gutter is free; the editor is also selectable and scrollable. **Gap to close:** `CodeMirrorField` configures the *language* + gutter but **no CodeMirror highlight *style***, so tokens currently render uncolored — add `syntaxHighlighting(...)` **once, in `CodeMirrorField`**, which colorizes **both** the CODE preview **and** the `code`/`json` node fields in one change. Prefer a **`--jp‑*`‑aware** style so colors track light/dark and match JupyterLab: either `@jupyterlab/codemirror`'s theme/highlight registry (already a dep), or a small `HighlightStyle.define([...])` mapping CodeMirror highlight tags (`tags.keyword/string/comment/number/definition/operator/typeName…`) to `var(--jp-mirror-editor-*-color)`; **fall back** to `@codemirror/language`'s `defaultHighlightStyle` via `syntaxHighlighting(defaultHighlightStyle, { fallback: true })` if the JL registry is too heavy. Keep it strictly read‑only (`EditorState.readOnly` + `EditorView.editable.of(false)`, already supported via the `readOnly` prop), hide the caret, and let the editor scroll inside the tab (CSS on `.jp-afdag-cm`; the old `.jp-afdag-code-pre` rule is then dead). **All deps are already in `package.json`** (`@codemirror/lang-python`, `@codemirror/view`, `@codemirror/state`, `@jupyterlab/codemirror`) — no new install. Test: the CODE tab mounts a `.cm-editor` with a `.cm-gutters` line‑number gutter (not a `<pre>`), and the editor is non‑editable.
-- **Layout:** `@dagrejs/dagre` (maintained fork) for one‑click "Tidy layout" (v1.1); elkjs behind a flag for dense graphs.
+- **Layout:** `@dagrejs/dagre` (maintained fork) for one‑click "Tidy layout" ✅ — `src/layout.ts` `tidyLayout(nodes, edges)` builds a dagre graph (`rankdir: TB`) from the **task** nodes (note cards excluded) using each node's measured size, lays it out, and returns id → top‑left positions; the top‑bar `≣ Tidy` button applies them via `setNodes`, the persist effect saves them, and the view re‑fits. elkjs behind a flag for dense graphs (future).
 - **New deps:** `@xyflow/react`, `@rjsf/core`, `@rjsf/validator-ajv8`, `@dagrejs/dagre`, plus `@jupyterlab/docregistry`, `@jupyterlab/docmanager`, `@jupyterlab/launcher`, `@jupyterlab/filebrowser`, `@jupyterlab/codemirror`.
 
 ### 8.3 The `.afdag` document & IR schema
@@ -445,7 +445,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | **M5 — Manager ops** | Import‑errors view, task instances, logs, clear/retry, delete (file+history); list param drift fixed |
 | **M6 — Recovery UX + a11y** | Friendly import‑error → node/field mapping + "Open in Studio to fix" + undeploy; keyboard path + non‑color‑only indicators |
 | **M7 — Lifecycle automation** | **Run on deploy:** after register, the server unpauses + triggers a run and the banner reaches *Running* (integration test on `3.0.2` asserts a green run, no manual step); **Stop run** (manager + editor) `PATCH`es a run to `failed` and its tasks terminate; **orphan reconciliation:** deleting a `.afdag` — via the in‑session `fileChanged` signal **and** the server sweep (terminal/`git`/`rm` deletes) — flags, confirms, then removes the `.py` and `DELETE`s the DAG; delete is blocked while a task runs; all three are audited (`{user, action, dag_id, correlation_id}`) |
-| **v1.1** | Traditional backend + working toggle (task‑graph equivalence test) ✅; Tidy layout 🔭; more operators ✅ (catalogue → 18) |
+| **v1.1** | Traditional backend + working toggle (task‑graph equivalence test) ✅; Tidy layout (dagre) ✅; more operators ✅ (catalogue → 18) |
 | **v1.2** | Git + S3 `DeployTarget`; per‑user identity + audit; asset scheduling |
 
 ## 15. Wireframes (screen drafts)
@@ -465,7 +465,7 @@ The 3‑pane document: full‑width top bar, then collapsible **palette « · ca
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
 │ ✦ Airflow Studio   my_dag.afdag · 4 nodes · ✓ no errors                         │
-│            [ Traditional │▣TaskFlow ]   ↶ ↷   Reset   Save   ⚙ Generate DAG   ▶ Deploy │
+│        [ Traditional │▣TaskFlow ]  ≣ Tidy  ↶ ↷  Reset  Save  ⚙ Generate DAG  ▶ Deploy │
 ├──── OPERATORS ───«─┬─────────────── CANVAS ───────────────┬─»── INSPECTOR ───────┤
 │ 🔍 Search…         │                                      │ [DAG] NODE INFO CODE SAVED │
 │ ▾ PYTHON / BASH    │        ┌────────────────────┐        │ ─────────────────────│
@@ -485,7 +485,7 @@ The 3‑pane document: full‑width top bar, then collapsible **palette « · ca
 │                    │     ⊕ ⊖ ⤢ (zoom/fit)         │mmap│ │                      │
 └────────────────────┴──────────────────────────────┴────┴─┴──────────────────────┘
 ```
-Built: palette (search/categories/drag) · rounded‑corner arrow edges · minimap/zoom · DAG form (id/description/schedule/start_date/owner/retries/retry_delay/tags/params/catchup) · live `✓ no errors` badge · Reset/Save/Generate/Deploy. **TaskFlow + Traditional ✅:** the top‑bar toggle flips the IR's `syntax_style`; codegen renders `@dag`/`@task` (TaskFlow) or `with DAG(…)` + operator instances + `>>` wiring (Traditional) accordingly (§6.3). Palette **catalogue** grows per §6.2.1: **P0** shipped — **Flow Control** gains `ShortCircuit` + `LatestOnly`, and a new **Sensors** category lands (`File` · `ExternalTask` · `DateTime` · `TimeDelta`); **P1** shipped — the first gated ops `HTTP` · `SQL query` · `SqlSensor`; **P2** shipped — `KubernetesPodOperator` (Kubernetes), `S3KeySensor`/`GCSObjectExistenceSensor` (Sensors), `BigQueryInsertJobOperator` (Cloud) — all dimmed when their provider is absent (§15.7) ✅. Catalogue → 18.
+Built: palette (search/categories/drag) · rounded‑corner arrow edges · minimap/zoom · DAG form (id/description/schedule/start_date/owner/retries/retry_delay/tags/params/catchup) · live `✓ no errors` badge · Reset/Save/Generate/Deploy · **`≣ Tidy` ✅** — one‑click auto‑layout (dagre top‑to‑bottom layered layout) that re‑positions the task nodes, persists the new positions, and re‑fits the view; disabled when the canvas is empty, and leaves free‑floating note cards where they are (§8.2). **TaskFlow + Traditional ✅:** the top‑bar toggle flips the IR's `syntax_style`; codegen renders `@dag`/`@task` (TaskFlow) or `with DAG(…)` + operator instances + `>>` wiring (Traditional) accordingly (§6.3). Palette **catalogue** grows per §6.2.1: **P0** shipped — **Flow Control** gains `ShortCircuit` + `LatestOnly`, and a new **Sensors** category lands (`File` · `ExternalTask` · `DateTime` · `TimeDelta`); **P1** shipped — the first gated ops `HTTP` · `SQL query` · `SqlSensor`; **P2** shipped — `KubernetesPodOperator` (Kubernetes), `S3KeySensor`/`GCSObjectExistenceSensor` (Sensors), `BigQueryInsertJobOperator` (Cloud) — all dimmed when their provider is absent (§15.7) ✅. Catalogue → 18.
 
 ### 15.2 Studio editor — empty‑state / onboarding ✅
 
