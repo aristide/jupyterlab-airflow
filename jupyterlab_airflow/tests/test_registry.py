@@ -31,6 +31,39 @@ def test_bundled_registry_loads():
     assert keys == sorted(keys)
 
 
+def test_p1_gated_ops_present_with_correct_providers():
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    assert {"http", "sql", "sql_sensor"} <= set(by_id)
+    expected = {
+        "http": (
+            "apache-airflow-providers-http",
+            "airflow.providers.http.operators.http",
+        ),
+        "sql": (
+            "apache-airflow-providers-common-sql",
+            "airflow.providers.common.sql.operators.sql",
+        ),
+        "sql_sensor": (
+            "apache-airflow-providers-common-sql",
+            "airflow.providers.common.sql.sensors.sql",
+        ),
+    }
+    for op_id, (provider, module) in expected.items():
+        op = by_id[op_id]
+        assert op["provider"] == provider, op_id
+        assert module in op["import"], op_id
+        # Gated ops use a NON-standard provider (so gating dims them when absent).
+        assert op["provider"] != "apache-airflow-providers-standard", op_id
+        # Never an Airflow-2 import path.
+        assert "airflow.operators." not in op["import"], op_id
+        assert "airflow.sensors." not in op["import"], op_id
+    # SqlSensor lives in the Sensors category with the sensor common_params.
+    assert by_id["sql_sensor"]["category"] == "Sensors"
+    assert {"mode", "poke_interval", "timeout"} <= set(
+        by_id["sql_sensor"]["common_params"]
+    )
+
+
 def test_sensors_are_airflow3_standard_provider():
     by_id = {op["id"]: op for op in registry.load_registry()}
     expected = {

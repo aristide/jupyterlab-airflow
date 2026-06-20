@@ -1,0 +1,51 @@
+id: http
+label: HTTP request
+category: HTTP
+provider: apache-airflow-providers-http
+airflow_min_version: '3.0'
+description: >-
+  Calls an HTTP endpoint — a REST API, a webhook, or any SaaS service. The base
+  URL and any credentials live in an Airflow HTTP Connection (so secrets stay out
+  of your DAG); you give the path to call and the method. Use it to trigger an
+  external job, post an event, or fetch data from an API.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-http/stable/operators/http.html
+example: |
+  http_conn_id:  my_api          # Connection holds https://api.example.com + auth
+  endpoint:      v1/orders
+  method:        GET
+import: 'from airflow.providers.http.operators.http import HttpOperator'
+handles: { in: true, out: true }
+taskflow: operator            # no TaskFlow-native form — render as an operator
+task_id_prefix: http
+params:
+  - { name: http_conn_id, label: 'HTTP connection', type: string, required: false, widget: text, default: http_default,
+      help: 'The Airflow HTTP Connection that holds the base URL and any auth. Define it in Airflow → Connections; keep URLs/secrets out of the DAG.' }
+  - { name: endpoint, label: 'Endpoint (path)', type: string, required: true, widget: text,
+      help: 'The path appended to the connection''s base URL, e.g. `v1/orders`. Jinja templating is supported.' }
+  - { name: method, label: 'Method', type: string, required: true, widget: text,
+      help: 'The HTTP method: GET, POST, PUT, PATCH, or DELETE.' }
+  - { name: data, label: 'Request body', type: string, required: false, widget: textarea,
+      help: 'Body to send (for POST/PUT). A raw string, or a JSON string paired with a Content-Type header below.' }
+  - { name: headers, label: 'Headers', type: object, required: false, widget: json, default: {},
+      help: 'Extra HTTP headers as a JSON object, e.g. {"Content-Type": "application/json"}.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = HttpOperator(
+      task_id={{ task_id | pyrepr }},
+      endpoint={{ params.endpoint | pyrepr }},
+      method={{ params.method | pyrepr }},
+      {% if params.http_conn_id %}http_conn_id={{ params.http_conn_id | pyrepr }},{% endif %}
+      {% if params.data %}data={{ params.data | pyrepr }},{% endif %}
+      {% if params.headers %}headers={{ params.headers | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = HttpOperator(
+      task_id={{ task_id | pyrepr }},
+      endpoint={{ params.endpoint | pyrepr }},
+      method={{ params.method | pyrepr }},
+      {% if params.http_conn_id %}http_conn_id={{ params.http_conn_id | pyrepr }},{% endif %}
+      {% if params.data %}data={{ params.data | pyrepr }},{% endif %}
+      {% if params.headers %}headers={{ params.headers | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

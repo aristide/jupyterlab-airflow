@@ -1,0 +1,38 @@
+id: sql
+label: SQL query
+category: SQL
+provider: apache-airflow-providers-common-sql
+airflow_min_version: '3.0'
+description: >-
+  Runs a SQL statement against a database through an Airflow Connection. One
+  operator covers Postgres, MySQL, Snowflake, BigQuery and more — the Connection
+  decides which database. Use it to transform data in-warehouse, refresh a table,
+  or run a stored procedure. Credentials live in the Connection, not the DAG.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-common-sql/stable/operators.html
+example: |
+  conn_id:  warehouse
+  sql:      INSERT INTO daily_totals SELECT date, sum(amount) FROM sales GROUP BY date
+import: 'from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator'
+handles: { in: true, out: true }
+taskflow: operator            # no TaskFlow-native form — render as an operator
+task_id_prefix: sql
+params:
+  - { name: conn_id, label: 'Database connection', type: string, required: true, widget: text,
+      help: 'The Airflow Connection for the target database (Airflow → Connections). It selects the database type and holds the credentials.' }
+  - { name: sql, label: 'SQL', type: string, required: true, widget: textarea,
+      help: 'The SQL to run. Jinja templating is supported, e.g. `WHERE day = ''{{ ds }}''`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SQLExecuteQueryOperator(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      sql={{ params.sql | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SQLExecuteQueryOperator(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      sql={{ params.sql | pyrepr }},
+      {{ common | pyargs }}
+  )

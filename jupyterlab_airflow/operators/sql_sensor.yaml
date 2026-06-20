@@ -1,0 +1,38 @@
+id: sql_sensor
+label: SQL sensor
+category: Sensors
+provider: apache-airflow-providers-common-sql
+airflow_min_version: '3.0'
+description: >-
+  Waits until a SQL query returns a truthy result before letting the run
+  continue. Use it as a data-readiness gate — poll until a row count crosses a
+  threshold, a "loaded" flag flips, or today's partition lands. The query runs
+  through an Airflow Connection; credentials stay out of the DAG.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-common-sql/stable/sensors.html
+example: |
+  conn_id:  warehouse
+  sql:      SELECT count(*) FROM sales WHERE day = '{{ ds }}'
+import: 'from airflow.providers.common.sql.sensors.sql import SqlSensor'
+handles: { in: true, out: true }
+taskflow: operator            # sensors have no TaskFlow-native form — render as an operator
+task_id_prefix: wait_for_sql
+params:
+  - { name: conn_id, label: 'Database connection', type: string, required: true, widget: text,
+      help: 'The Airflow Connection for the database to poll (Airflow → Connections).' }
+  - { name: sql, label: 'SQL', type: string, required: true, widget: textarea,
+      help: 'A query whose result decides success: a non-zero/non-empty first cell continues; 0/NULL/empty keeps waiting. Jinja templating is supported.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = SqlSensor(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      sql={{ params.sql | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SqlSensor(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      sql={{ params.sql | pyrepr }},
+      {{ common | pyargs }}
+  )

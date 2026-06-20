@@ -178,6 +178,67 @@ def test_latest_only_renders_as_operator():
     )
 
 
+def test_gated_provider_ops_render_airflow3():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "http", "task_id": "call_api",
+             "params": {"http_conn_id": "my_api", "endpoint": "v1/orders",
+                        "method": "GET"}},
+            {"id": "b", "op": "sql", "task_id": "load",
+             "params": {"conn_id": "warehouse", "sql": "INSERT INTO t SELECT 1"}},
+            {"id": "c", "op": "sql_sensor", "task_id": "wait_rows",
+             "params": {"conn_id": "warehouse", "sql": "SELECT count(*) FROM t"}},
+        ],
+        edges=[{"source": "c", "target": "a"}, {"source": "a", "target": "b"}],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+
+    assert "call_api = HttpOperator(" in code
+    assert "endpoint='v1/orders'" in code and "method='GET'" in code
+    assert "http_conn_id='my_api'" in code
+    assert "load = SQLExecuteQueryOperator(" in code
+    assert "wait_rows = SqlSensor(" in code
+    assert "conn_id='warehouse'" in code
+    # Airflow-3 provider imports, never Airflow-2 paths.
+    assert "from airflow.providers.http.operators.http import HttpOperator" in code
+    assert (
+        "from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator"
+        in code
+    )
+    assert "from airflow.providers.common.sql.sensors.sql import SqlSensor" in code
+    assert "airflow.operators." not in code and "airflow.sensors." not in code
+
+
+def test_http_optional_params_only_emitted_when_set():
+    # No http_conn_id/data/headers -> those kwargs are omitted (operator defaults).
+    ir = _ir(
+        nodes=[{"id": "n", "op": "http", "task_id": "ping",
+                "params": {"endpoint": "health", "method": "GET"}}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    assert "endpoint='health'" in code
+    assert "http_conn_id" not in code
+    assert "data=" not in code and "headers=" not in code
+    # Optional params come after the required ones, so an omitted http_conn_id
+    # leaves no stray blank line inside the call.
+    assert "ping',\n\n" not in code
+
+    # With them set -> emitted.
+    ir2 = _ir(
+        nodes=[{"id": "n", "op": "http", "task_id": "post",
+                "params": {"endpoint": "hook", "method": "POST",
+                           "data": "payload", "headers": {"X-Key": "1"}}}],
+        edges=[],
+    )
+    code2 = generate_dag(ir2)["code"]
+    assert "data='payload'" in code2
+    assert "headers={'X-Key': '1'}" in code2
+
+
 def test_cycle_is_rejected():
     ir = _ir(
         nodes=[
