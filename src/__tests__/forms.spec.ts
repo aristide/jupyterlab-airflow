@@ -101,6 +101,74 @@ describe('node IR <-> form data', () => {
   });
 });
 
+const sensorOp: IOperatorDef = {
+  id: 'file_sensor',
+  label: 'File sensor',
+  category: 'Sensors',
+  taskIdPrefix: 'fs',
+  params: [
+    { name: 'filepath', label: 'File path', required: true, widget: 'text' }
+  ],
+  commonParams: [
+    'retries',
+    'retry_delay',
+    'depends_on_past',
+    'mode',
+    'poke_interval',
+    'timeout'
+  ]
+};
+
+describe('common params (NODE "Common settings")', () => {
+  it('adds a __common__ fieldset with the declared common params, ordered last', () => {
+    const { schema, uiSchema } = nodeForm(sensorOp);
+    const props = schema.properties as Record<string, any>;
+    expect(props.__common__.type).toBe('object');
+    expect(props.__common__.title).toBe('Common settings');
+    expect(Object.keys(props.__common__.properties)).toEqual(
+      sensorOp.commonParams
+    );
+    expect(props.__common__.properties.mode.enum).toEqual([
+      'poke',
+      'reschedule'
+    ]);
+    expect(props.__common__.properties.retries.type).toBe('integer');
+    const order = uiSchema['ui:order'] as string[];
+    expect(order[order.length - 1]).toBe('__common__');
+  });
+
+  it('round-trips common values; omits false booleans and blanks', () => {
+    const fd = nodeToFormData(
+      sensorOp,
+      'wait',
+      { filepath: '/d' },
+      { mode: 'reschedule', poke_interval: 30 }
+    );
+    expect((fd.__common__ as any).mode).toBe('reschedule');
+    expect((fd.__common__ as any).poke_interval).toBe(30);
+
+    const back = formDataToNode(sensorOp, {
+      task_id: 'wait',
+      filepath: '/d',
+      __common__: {
+        mode: 'reschedule',
+        poke_interval: 30,
+        depends_on_past: false, // default -> omitted
+        retries: '' // blank -> omitted
+      }
+    });
+    expect(back.common).toEqual({ mode: 'reschedule', poke_interval: 30 });
+  });
+
+  it('omits the __common__ section for an op with no commonParams', () => {
+    const { schema } = nodeForm(bashOp);
+    expect((schema.properties as any).__common__).toBeUndefined();
+    expect(
+      formDataToNode(bashOp, { task_id: 't', bash_command: 'x' }).common
+    ).toEqual({});
+  });
+});
+
 describe('DAG form data', () => {
   it('maps schedule None -> null and parses JSON fields', () => {
     const formData = {

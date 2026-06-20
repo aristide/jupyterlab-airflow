@@ -35,6 +35,10 @@ export interface IAfdagNode {
   op: string;
   task_id: string;
   params: Record<string, unknown>;
+  /** Per-task common settings that override the DAG defaults (PRD §6.1.3):
+   * retries/retry_delay/depends_on_past, and for sensors mode/poke_interval/
+   * timeout. Only explicitly-set values are stored. Absent on older `.afdag`. */
+  common?: Record<string, unknown>;
   code?: string | null;
   position?: { x: number; y: number };
 }

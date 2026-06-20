@@ -136,6 +136,9 @@ def client_view() -> List[Dict[str, Any]]:
             "taskflow": op.get("taskflow", "native"),
             "handles": op.get("handles", {"in": True, "out": True}),
             "params": [_client_param(p) for p in op.get("params", [])],
+            # The per-task common settings this op supports (PRD §6.1.3); the
+            # client renders them as the NODE-tab "Common settings" section.
+            "commonParams": list(op.get("common_params", [])),
         }
         for src, dst in _CLIENT_DOC_FIELDS:
             if op.get(src) is not None:

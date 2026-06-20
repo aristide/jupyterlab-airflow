@@ -23,7 +23,7 @@ params:
       help: 'Python that returns the task_id (or list of task_ids) to run next. The returned tasks run; their sibling tasks are skipped.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_taskflow: |
-  @task.branch(task_id={{ task_id | pyrepr }})
+  @task.branch(task_id={{ task_id | pyrepr }}{% if common %}, {{ common | pyargs }}{% endif %})
   def {{ task_id }}():
   {{ params.code | indent(4, true) }}
 template_traditional: |

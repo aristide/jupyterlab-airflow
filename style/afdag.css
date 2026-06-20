@@ -599,6 +599,28 @@
   font-size: var(--jp-ui-font-size0);
 }
 
+/* Nested object fields (the "Common settings" section) render as a fieldset.
+   Drop the default browser box; the legend (present only on the titled common
+   section, not the untitled root) becomes a section divider. */
+.jp-afdag-rjsf fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.jp-afdag-rjsf legend {
+  width: 100%;
+  margin: 14px 0 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--jp-border-color2);
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .jp-afdag-schedule {
   display: flex;
   flex-direction: column;

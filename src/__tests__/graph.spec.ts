@@ -47,6 +47,17 @@ describe('irToFlow / flowToIR mapping', () => {
     expect(edge.markerEnd).toEqual({ type: MarkerType.ArrowClosed });
   });
 
+  it('round-trips per-node common settings, omitting an empty common', () => {
+    const ir = makeIR();
+    ir.nodes[0].common = { retries: 3, retry_delay: 120 };
+    const { nodes, edges } = irToFlow(ir);
+    expect(nodes[0].data.common).toEqual({ retries: 3, retry_delay: 120 });
+    const back = flowToIR(nodes, edges, ir.dag, ir);
+    expect(back.nodes[0].common).toEqual({ retries: 3, retry_delay: 120 });
+    // The node with no common settings doesn't get an empty `common` key.
+    expect('common' in back.nodes[1]).toBe(false);
+  });
+
   it('flowToIR strips edges to {source,target} and rounds positions', () => {
     const ir = makeIR();
     const { nodes, edges } = irToFlow(ir);

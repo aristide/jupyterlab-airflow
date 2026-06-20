@@ -313,6 +313,61 @@ def test_code_node_body_blank_lines_are_preserved():
     assert "1,\n\n" in res["code"]
 
 
+def test_per_node_common_params_emitted():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "bash", "task_id": "x",
+             "params": {"bash_command": "echo hi"},
+             "common": {"retries": 3, "retry_delay": 120, "depends_on_past": True}},
+            {"id": "b", "op": "file_sensor", "task_id": "w",
+             "params": {"filepath": "/d"},
+             "common": {"mode": "reschedule", "poke_interval": 30, "timeout": 600}},
+        ],
+        edges=[{"source": "a", "target": "b"}],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    # Native @task.bash decorator carries the common kwargs; retry_delay is a
+    # timedelta, not a bare int.
+    assert (
+        "@task.bash(task_id='x', retries=3, retry_delay=timedelta(seconds=120), "
+        "depends_on_past=True)" in code
+    )
+    # The operator-type sensor carries the sensor common params.
+    assert "mode='reschedule'" in code
+    assert "poke_interval=30" in code and "timeout=600" in code
+
+
+def test_common_params_restricted_to_declared_and_skip_blank():
+    # `empty` declares only retries/retry_delay/depends_on_past, so a stray
+    # poke_interval is ignored; a blank value is skipped.
+    ir = _ir(
+        nodes=[{"id": "n", "op": "empty", "task_id": "e", "params": {},
+                "common": {"retries": 2, "poke_interval": 30, "retry_delay": ""}}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    # Inspect only the node's operator call (the DAG default_args also mention
+    # retry_delay, so a bare substring check would be confounded).
+    call = re.search(r"e = EmptyOperator\(.*?\n {4}\)", code, re.S).group(0)
+    assert "retries=2" in call
+    assert "poke_interval" not in call  # not declared by `empty`
+    assert "retry_delay" not in call  # blank -> skipped
+
+
+def test_no_common_is_unchanged():
+    # A node without a `common` slot emits exactly as before (no trailing kwargs).
+    ir = _ir(
+        nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo hi"}}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    assert "@task.bash(task_id='t')" in code
+
+
 def test_cycle_is_rejected():
     ir = _ir(
         nodes=[

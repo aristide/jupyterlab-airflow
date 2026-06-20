@@ -146,6 +146,10 @@ export interface IOperatorDef {
   params: IOperatorParam[];
   taskflow?: 'native' | 'operator';
   handles?: { in?: boolean; out?: boolean };
+  /** Per-task common settings this op supports (the NODE "Common settings"
+   * section): retries/retry_delay/depends_on_past + sensor mode/poke_interval/
+   * timeout. See `COMMON_PARAM_DEFS` in forms.ts (PRD §6.1.3). */
+  commonParams?: string[];
   // INFO-tab documentation fields (data-only; see the operator registry YAML).
   description?: string;
   docsUrl?: string;

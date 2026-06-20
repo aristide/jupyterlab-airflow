@@ -161,6 +161,20 @@ def test_client_view_hides_codegen_fields():
     assert required == {"bash_command"}
 
 
+def test_client_view_ships_common_params():
+    view = {op["id"]: op for op in registry.client_view()}
+    # Every op exposes the universal per-task common settings (PRD §6.1.3)...
+    assert view["bash"]["commonParams"] == [
+        "retries",
+        "retry_delay",
+        "depends_on_past",
+    ]
+    # ...and sensors add the sensor common params.
+    assert {"mode", "poke_interval", "timeout"} <= set(
+        view["file_sensor"]["commonParams"]
+    )
+
+
 def test_client_view_ships_doc_fields_for_info_tab():
     bash = next(op for op in registry.client_view() if op["id"] == "bash")
     # Operator-level learning fields, camelCased for the TS IOperatorDef.

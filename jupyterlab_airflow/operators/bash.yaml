@@ -32,6 +32,6 @@ template_traditional: |
       {{ common | pyargs }}
   )
 template_taskflow: |
-  @task.bash(task_id={{ task_id | pyrepr }})
+  @task.bash(task_id={{ task_id | pyrepr }}{% if common %}, {{ common | pyargs }}{% endif %})
   def {{ task_id }}():
       return {{ params.bash_command | pyrepr }}

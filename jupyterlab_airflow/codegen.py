@@ -35,9 +35,16 @@ class CodegenError(Exception):
 # --------------------------------------------------------------------------- #
 # Safe value emitter + Jinja environment
 # --------------------------------------------------------------------------- #
+class _Raw(str):
+    """A value emitted **verbatim** (not ``repr``'d) — e.g. a ``timedelta(...)``
+    expression for a per-task ``retry_delay``."""
+
+
 def _pyrepr(value: Any) -> str:
     """Emit a Python literal for a JSON-derived value. ``repr`` already yields
     valid Python for str/int/float/bool/None/list/dict, and escapes strings."""
+    if isinstance(value, _Raw):
+        return str(value)  # already a Python expression — emit as-is
     if isinstance(value, Undefined):
         value = None
     return repr(value)
@@ -48,6 +55,48 @@ def _pyargs(common: Any) -> str:
     if not isinstance(common, dict) or not common:
         return ""
     return ", ".join(f"{key}={_pyrepr(val)}" for key, val in common.items())
+
+
+# Per-task common settings emitted on a task (overriding the DAG defaults). Most
+# pass through as literals; `retry_delay` is a ``timedelta`` and the rest are
+# coerced to the type Airflow expects. Only values the user explicitly set reach
+# here (see `_node_common`).
+_COMMON_TIMEDELTA = ("retry_delay",)
+_COMMON_INT = ("retries", "poke_interval", "timeout")
+_COMMON_BOOL = ("depends_on_past",)
+
+
+def _node_common(node: Dict[str, Any], op: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the ``common`` kwargs dict for a node from its ``common`` slot,
+    restricted to the params the operator declares in ``common_params`` and in
+    that order (so output stays deterministic). ``retry_delay`` becomes a
+    ``timedelta`` expression; ints/bools are coerced; unset/blank are skipped."""
+    declared = op.get("common_params") or []
+    values = node.get("common")
+    if not isinstance(values, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for name in declared:
+        if name not in values:
+            continue
+        val = values[name]
+        if val is None or val == "":
+            continue
+        if name in _COMMON_TIMEDELTA or name in _COMMON_INT:
+            try:
+                seconds = int(val)
+            except (TypeError, ValueError):
+                continue
+            out[name] = (
+                _Raw(f"timedelta(seconds={seconds})")
+                if name in _COMMON_TIMEDELTA
+                else seconds
+            )
+        elif name in _COMMON_BOOL:
+            out[name] = bool(val)
+        else:  # mode (and any future string common param)
+            out[name] = val
+    return out
 
 
 def _make_env() -> Environment:
@@ -276,7 +325,9 @@ def _render(ir: Dict[str, Any]) -> str:
         if not template:
             raise CodegenError(f"Operator {op['id']!r} has no TaskFlow template")
         rendered = env.from_string(template).render(
-            task_id=node["task_id"], params=node.get("params") or {}, common={}
+            task_id=node["task_id"],
+            params=node.get("params") or {},
+            common=_node_common(node, op),
         )
         is_operator = op.get("taskflow", "native") == "operator"
         if is_operator:

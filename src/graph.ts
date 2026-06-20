@@ -24,6 +24,8 @@ export interface IAfdagNodeData {
   op: string;
   task_id: string;
   params: Record<string, unknown>;
+  /** Per-task common settings (PRD §6.1.3); see `IAfdagNode.common`. */
+  common?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -42,7 +44,12 @@ export function irToFlow(ir: IAfdagIR): {
     id: node.id,
     type: 'afdagNode',
     position: node.position ?? { x: 0, y: 0 },
-    data: { op: node.op, task_id: node.task_id, params: node.params ?? {} }
+    data: {
+      op: node.op,
+      task_id: node.task_id,
+      params: node.params ?? {},
+      common: node.common ?? {}
+    }
   }));
   const noteNodes: AfdagFlowNode[] = (ir.notes ?? []).map(note => ({
     id: note.id,
@@ -71,17 +78,26 @@ export function flowToIR(
 ): IAfdagIR {
   const irNodes: IAfdagNode[] = nodes
     .filter(node => !isNoteNode(node))
-    .map(node => ({
-      id: node.id,
-      op: node.data.op,
-      task_id: node.data.task_id,
-      params: node.data.params,
-      code: (node.data.params.code as string) ?? null,
-      position: {
-        x: Math.round(node.position.x),
-        y: Math.round(node.position.y)
+    .map(node => {
+      const irNode: IAfdagNode = {
+        id: node.id,
+        op: node.data.op,
+        task_id: node.data.task_id,
+        params: node.data.params,
+        code: (node.data.params.code as string) ?? null,
+        position: {
+          x: Math.round(node.position.x),
+          y: Math.round(node.position.y)
+        }
+      };
+      // Persist per-task common settings only when some are set (keeps the IR
+      // and the deployed `.py` clean, and stays back-compatible).
+      const common = node.data.common;
+      if (common && Object.keys(common).length > 0) {
+        irNode.common = common;
       }
-    }));
+      return irNode;
+    });
   const irEdges = edges.map(edge => ({
     source: edge.source,
     target: edge.target

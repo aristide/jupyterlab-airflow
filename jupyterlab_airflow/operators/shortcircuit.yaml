@@ -23,7 +23,7 @@ params:
       help: 'Python that returns a value. Truthy continues to the downstream tasks; falsy (False/None/0/empty) skips all of them.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_taskflow: |
-  @task.short_circuit(task_id={{ task_id | pyrepr }})
+  @task.short_circuit(task_id={{ task_id | pyrepr }}{% if common %}, {{ common | pyargs }}{% endif %})
   def {{ task_id }}():
   {{ params.code | indent(4, true) }}
 template_traditional: |

@@ -29,6 +29,73 @@ function isJsonParam(param: IOperatorParam): boolean {
   return param.widget === 'json' || param.type === 'object';
 }
 
+// The NODE form holds the operator's per-task common settings under this nested
+// object key (rendered as a "Common settings" fieldset); split back out at the
+// IR boundary into `node.common`.
+const COMMON_KEY = '__common__';
+
+interface ICommonParamDef {
+  label: string;
+  type: 'integer' | 'boolean' | 'string';
+  help: string;
+  enum?: string[];
+}
+
+// The fixed set of Airflow per-task common settings (PRD §6.1.3). Each op's
+// `commonParams` (from the registry) selects which apply; codegen emits them
+// (retry_delay -> timedelta) so they override the DAG defaults.
+const COMMON_PARAM_DEFS: Record<string, ICommonParamDef> = {
+  retries: {
+    label: 'Retries',
+    type: 'integer',
+    help: 'How many times to retry this task if it fails — overrides the DAG default.'
+  },
+  retry_delay: {
+    label: 'Retry delay (seconds)',
+    type: 'integer',
+    help: 'Seconds to wait between retries.'
+  },
+  depends_on_past: {
+    label: 'Depends on past',
+    type: 'boolean',
+    help: 'Only run once this same task succeeded in the previous DAG run.'
+  },
+  mode: {
+    label: 'Sensor mode',
+    type: 'string',
+    enum: ['poke', 'reschedule'],
+    help: '“poke” holds a worker slot while waiting; “reschedule” frees it between checks (better for long waits).'
+  },
+  poke_interval: {
+    label: 'Poke interval (seconds)',
+    type: 'integer',
+    help: 'How often the sensor checks, in seconds.'
+  },
+  timeout: {
+    label: 'Timeout (seconds)',
+    type: 'integer',
+    help: 'Give up waiting after this many seconds.'
+  }
+};
+
+function commonNames(op: IOperatorDef): string[] {
+  return (op.commonParams ?? []).filter(name => name in COMMON_PARAM_DEFS);
+}
+
+function commonParamSchema(name: string): RJSFSchema {
+  const def = COMMON_PARAM_DEFS[name];
+  const base: RJSFSchema = { title: def.label, description: def.help };
+  if (def.type === 'integer') {
+    return { ...base, type: 'integer', minimum: 0 };
+  }
+  if (def.type === 'boolean') {
+    return { ...base, type: 'boolean' };
+  }
+  return def.enum
+    ? { ...base, type: 'string', enum: def.enum }
+    : { ...base, type: 'string' };
+}
+
 function paramSchema(param: IOperatorParam): RJSFSchema {
   // The registry `help` becomes the JSON-Schema `description`, which RJSF renders
   // as inline field help (`.field-description`) — contextual learning per field.
@@ -73,9 +140,8 @@ export function nodeForm(op: IOperatorDef): IFormSpec {
     task_id: { type: 'string', title: 'task_id' }
   };
   const required: string[] = ['task_id'];
-  const uiSchema: UiSchema = {
-    'ui:order': ['task_id', ...op.params.map(p => p.name)]
-  };
+  const order = ['task_id', ...op.params.map(p => p.name)];
+  const uiSchema: UiSchema = {};
 
   for (const param of op.params) {
     properties[param.name] = paramSchema(param);
@@ -88,17 +154,35 @@ export function nodeForm(op: IOperatorDef): IFormSpec {
     }
   }
 
+  // The operator's per-task common settings as a nested "Common settings"
+  // fieldset, ordered after the operator params (PRD §6.1.3).
+  const names = commonNames(op);
+  if (names.length > 0) {
+    const commonProps: Record<string, RJSFSchema> = {};
+    for (const name of names) {
+      commonProps[name] = commonParamSchema(name);
+    }
+    properties[COMMON_KEY] = {
+      type: 'object',
+      title: 'Common settings',
+      properties: commonProps
+    };
+    order.push(COMMON_KEY);
+  }
+
+  uiSchema['ui:order'] = order;
   return {
     schema: { type: 'object', properties, required },
     uiSchema
   };
 }
 
-/** Node IR (task_id + params) -> RJSF formData (object params -> JSON text). */
+/** Node IR (task_id + params + common) -> RJSF formData (object params -> JSON text). */
 export function nodeToFormData(
   op: IOperatorDef,
   taskId: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  common: Record<string, unknown> = {}
 ): Record<string, unknown> {
   const data: Record<string, unknown> = { task_id: taskId };
   for (const param of op.params) {
@@ -110,14 +194,30 @@ export function nodeToFormData(
       data[param.name] = value;
     }
   }
+  const names = commonNames(op);
+  if (names.length > 0) {
+    const nested: Record<string, unknown> = {};
+    for (const name of names) {
+      if (common[name] !== undefined) {
+        nested[name] = common[name];
+      }
+    }
+    data[COMMON_KEY] = nested;
+  }
   return data;
 }
 
-/** RJSF formData -> node params (JSON text -> object). Returns task_id + params. */
+/** RJSF formData -> node (JSON text -> object). Returns task_id + params + common.
+ * Only explicitly-set common values are kept (a `false` toggle is the default,
+ * so it is omitted) — an unset common field inherits the DAG default. */
 export function formDataToNode(
   op: IOperatorDef,
   formData: Record<string, unknown>
-): { task_id: string; params: Record<string, unknown> } {
+): {
+  task_id: string;
+  params: Record<string, unknown>;
+  common: Record<string, unknown>;
+} {
   const params: Record<string, unknown> = {};
   for (const param of op.params) {
     const value = formData[param.name];
@@ -130,7 +230,24 @@ export function formDataToNode(
       params[param.name] = value;
     }
   }
-  return { task_id: String(formData.task_id ?? ''), params };
+
+  const common: Record<string, unknown> = {};
+  const nested = (formData[COMMON_KEY] as Record<string, unknown>) ?? {};
+  for (const name of commonNames(op)) {
+    const value = nested[name];
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    if (typeof value === 'boolean') {
+      if (value) {
+        common[name] = true; // false == the Airflow default, so omit it
+      }
+      continue;
+    }
+    common[name] = value;
+  }
+
+  return { task_id: String(formData.task_id ?? ''), params, common };
 }
 
 function parseJsonOr(value: unknown, fallback: unknown): unknown {
