@@ -1,0 +1,23 @@
+id: apprise
+label: Apprise (multi-channel)
+provider: apache-airflow-providers-apprise
+airflow_min_version: '3.0'
+description: >-
+  Sends a notification through Apprise, which fans out to 100+ channels (Teams,
+  Telegram, Discord, ntfy, …) from one Apprise Connection — the simplest way to
+  reach Microsoft Teams (a Power Automate Workflows webhook URL) or WhatsApp.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-apprise/stable/index.html
+example: |
+  body:  ':red_circle: {{ dag.dag_id }} failed'
+  tag:   oncall
+import: 'from airflow.providers.apprise.notifications.apprise import AppriseNotifier'
+params:
+  - { name: body, label: 'Message', type: string, required: true, widget: textarea,
+      help: 'The notification body. Jinja templating works, e.g. ":red_circle: {{ dag.dag_id }} failed".' }
+  - { name: title, label: 'Title', type: string, required: false, widget: text,
+      help: 'Optional notification title/subject.' }
+  - { name: tag, label: 'Tag(s)', type: string, required: false, widget: text,
+      help: 'Which Apprise URLs (by tag) to notify, e.g. "oncall". Defaults to "all".' }
+  - { name: apprise_conn_id, label: 'Apprise connection', type: string, required: false, widget: text, default: apprise_default,
+      help: 'The Airflow Apprise Connection holding the channel URLs. Defaults to "apprise_default".' }
+template: 'AppriseNotifier(body={{ params.body | pyrepr }}{% if params.title %}, title={{ params.title | pyrepr }}{% endif %}{% if params.tag %}, tag={{ params.tag | pyrepr }}{% endif %}{% if params.apprise_conn_id %}, apprise_conn_id={{ params.apprise_conn_id | pyrepr }}{% endif %})'

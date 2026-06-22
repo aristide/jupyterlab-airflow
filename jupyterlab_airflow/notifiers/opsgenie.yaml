@@ -1,0 +1,18 @@
+id: opsgenie
+label: Opsgenie alert
+provider: apache-airflow-providers-opsgenie
+airflow_min_version: '3.0'
+description: >-
+  Creates an Opsgenie alert when the chosen event fires — page the on-call team
+  on failure. Uses an Opsgenie Connection (API key). The callback counterpart of
+  the Opsgenie operator.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-opsgenie/stable/index.html
+example: |
+  payload:  {"message": "{{ dag.dag_id }} failed", "priority": "P2"}
+import: 'from airflow.providers.opsgenie.notifications.opsgenie import OpsgenieNotifier'
+params:
+  - { name: payload, label: 'Alert payload', type: object, required: true, widget: json,
+      help: 'The Opsgenie alert as a JSON object; "message" is required, e.g. {"message": "{{ dag.dag_id }} failed", "priority": "P2"}.' }
+  - { name: opsgenie_conn_id, label: 'Opsgenie connection', type: string, required: false, widget: text, default: opsgenie_default,
+      help: 'The Airflow Opsgenie Connection (API key). Defaults to "opsgenie_default".' }
+template: 'OpsgenieNotifier(payload={{ params.payload | pyrepr }}{% if params.opsgenie_conn_id %}, opsgenie_conn_id={{ params.opsgenie_conn_id | pyrepr }}{% endif %})'

@@ -1,0 +1,19 @@
+id: discord
+label: Discord message
+provider: apache-airflow-providers-discord
+airflow_min_version: '3.0'
+description: >-
+  Posts a Discord message when the chosen event fires, via an incoming-webhook
+  Connection — the callback counterpart of the Discord operator.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-discord/stable/index.html
+example: |
+  text:  ':red_circle: {{ dag.dag_id }} failed'
+import: 'from airflow.providers.discord.notifications.discord import DiscordNotifier'
+params:
+  - { name: text, label: 'Message', type: string, required: true, widget: textarea,
+      help: 'The message to post (max 2000 characters). Jinja templating works.' }
+  - { name: discord_conn_id, label: 'Discord connection', type: string, required: false, widget: text, default: discord_webhook_default,
+      help: 'The Airflow Discord webhook Connection. Defaults to "discord_webhook_default".' }
+  - { name: username, label: 'Username (override)', type: string, required: false, widget: text,
+      help: 'Optional override of the webhook''s display name.' }
+template: 'DiscordNotifier(text={{ params.text | pyrepr }}{% if params.discord_conn_id %}, discord_conn_id={{ params.discord_conn_id | pyrepr }}{% endif %}{% if params.username %}, username={{ params.username | pyrepr }}{% endif %})'

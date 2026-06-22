@@ -798,6 +798,40 @@ def test_dag_callbacks_render_on_event_callbacks():
     assert "slack_conn_id=" not in code
 
 
+def test_dag_callbacks_render_apprise_discord_opsgenie():
+    # PRD §6.8 P3 notifiers: each renders its instance into on_*_callback with the
+    # right import; opsgenie's `payload` is a dict (emitted as a Python dict).
+    ir = _ir(
+        nodes=[{"id": "n1", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo"}}],
+        edges=[],
+        callbacks={
+            "on_failure": [
+                {"notifier_id": "apprise",
+                 "params": {"body": "down", "tag": "oncall"}},
+                {"notifier_id": "discord", "params": {"text": "down"}},
+                {"notifier_id": "opsgenie",
+                 "params": {"payload": {"message": "down", "priority": "P2"}}},
+            ],
+        },
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    assert "AppriseNotifier(body='down', tag='oncall')" in code
+    # The Discord NOTIFIER uses discord_conn_id (not http_conn_id like the op).
+    assert "DiscordNotifier(text='down')" in code
+    # Opsgenie's payload is a dict literal, not a quoted string.
+    assert "OpsgenieNotifier(payload={'message': 'down', 'priority': 'P2'})" in code
+    for imp in (
+        "from airflow.providers.apprise.notifications.apprise import AppriseNotifier",
+        "from airflow.providers.discord.notifications.discord import DiscordNotifier",
+        "from airflow.providers.opsgenie.notifications.opsgenie import OpsgenieNotifier",
+    ):
+        assert imp in code, imp
+
+
 def test_unknown_notifier_is_rejected():
     ir = _ir(
         nodes=[{"id": "n1", "op": "bash", "task_id": "t",

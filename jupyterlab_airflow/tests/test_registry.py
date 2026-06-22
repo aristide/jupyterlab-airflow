@@ -343,7 +343,9 @@ def test_notifier_registry_loads_and_hides_codegen_fields():
     # ship an import + a Jinja `template` (server-side) + a provider, and
     # notifier_client_view() withholds import/template like the operator one.
     by_id = {n["id"]: n for n in registry.load_notifiers()}
-    assert {"smtp", "slack"} <= set(by_id)
+    assert {"smtp", "slack", "apprise", "discord", "opsgenie"} <= set(by_id)
+    # (id, provider, import-module) — verified against the real notification
+    # modules in each provider wheel. (Telegram ships NO notifier, so it's absent.)
     expected = {
         "smtp": (
             "apache-airflow-providers-smtp",
@@ -353,6 +355,18 @@ def test_notifier_registry_loads_and_hides_codegen_fields():
             "apache-airflow-providers-slack",
             "airflow.providers.slack.notifications.slack",
         ),
+        "apprise": (
+            "apache-airflow-providers-apprise",
+            "airflow.providers.apprise.notifications.apprise",
+        ),
+        "discord": (
+            "apache-airflow-providers-discord",
+            "airflow.providers.discord.notifications.discord",
+        ),
+        "opsgenie": (
+            "apache-airflow-providers-opsgenie",
+            "airflow.providers.opsgenie.notifications.opsgenie",
+        ),
     }
     for nid, (provider, module) in expected.items():
         notifier = by_id[nid]
@@ -360,6 +374,7 @@ def test_notifier_registry_loads_and_hides_codegen_fields():
         assert module in notifier["import"], nid
         assert notifier["template"].strip(), nid
         assert "airflow.operators." not in notifier["import"], nid
+        assert "airflow.sensors." not in notifier["import"], nid
 
     cv = {n["id"]: n for n in registry.notifier_client_view()}
     assert cv["smtp"]["label"]
