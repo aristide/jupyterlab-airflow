@@ -1,0 +1,59 @@
+id: opsgenie_create_alert
+label: Opsgenie create alert
+category: Notifications
+provider: apache-airflow-providers-opsgenie
+airflow_min_version: '3.0'
+description: >-
+  Creates an alert in Opsgenie — page the on-call team when a pipeline needs
+  attention. Uses an Airflow "opsgenie" Connection whose password holds the API
+  key. (To alert only on failure, attach an Opsgenie notifier to the DAG instead
+  — that's a callback.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-opsgenie/stable/index.html
+example: |
+  message:   Daily load failed for {{ ds }}
+  priority:  P2
+  tags:      ["etl", "prod"]
+import: 'from airflow.providers.opsgenie.operators.opsgenie import OpsgenieCreateAlertOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: opsgenie
+params:
+  - { name: message, label: 'Alert message', type: string, required: true, widget: textarea,
+      help: 'The alert message (the headline shown in Opsgenie), e.g. "Daily load failed for {{ ds }}".' }
+  - { name: opsgenie_conn_id, label: 'Opsgenie connection', type: string, required: false, widget: text, default: opsgenie_default,
+      help: 'The Airflow "opsgenie" Connection holding the API key. Defaults to "opsgenie_default".' }
+  - { name: alias, label: 'Alias', type: string, required: false, widget: text,
+      help: 'A client-defined identifier used to de-duplicate alerts (the same alias updates an open alert).' }
+  - { name: description, label: 'Description', type: string, required: false, widget: textarea,
+      help: 'A longer description of the alert.' }
+  - { name: priority, label: 'Priority', type: string, required: false, widget: text,
+      help: 'Priority level P1–P5. Opsgenie defaults to P3 when unset.' }
+  - { name: tags, label: 'Tags', type: array, required: false, widget: json,
+      help: 'JSON array of tag strings, e.g. ["prod", "etl"].' }
+  - { name: details, label: 'Details', type: object, required: false, widget: json,
+      help: 'JSON object of custom key/value properties on the alert, e.g. {"env": "prod"}.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = OpsgenieCreateAlertOperator(
+      task_id={{ task_id | pyrepr }},
+      message={{ params.message | pyrepr }},
+      {% if params.opsgenie_conn_id %}opsgenie_conn_id={{ params.opsgenie_conn_id | pyrepr }},{% endif %}
+      {% if params.alias %}alias={{ params.alias | pyrepr }},{% endif %}
+      {% if params.description %}description={{ params.description | pyrepr }},{% endif %}
+      {% if params.priority %}priority={{ params.priority | pyrepr }},{% endif %}
+      {% if params.tags %}tags={{ params.tags | pyrepr }},{% endif %}
+      {% if params.details %}details={{ params.details | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = OpsgenieCreateAlertOperator(
+      task_id={{ task_id | pyrepr }},
+      message={{ params.message | pyrepr }},
+      {% if params.opsgenie_conn_id %}opsgenie_conn_id={{ params.opsgenie_conn_id | pyrepr }},{% endif %}
+      {% if params.alias %}alias={{ params.alias | pyrepr }},{% endif %}
+      {% if params.description %}description={{ params.description | pyrepr }},{% endif %}
+      {% if params.priority %}priority={{ params.priority | pyrepr }},{% endif %}
+      {% if params.tags %}tags={{ params.tags | pyrepr }},{% endif %}
+      {% if params.details %}details={{ params.details | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

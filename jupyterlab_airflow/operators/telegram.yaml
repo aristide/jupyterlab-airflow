@@ -1,0 +1,42 @@
+id: telegram
+label: Telegram message
+category: Notifications
+provider: apache-airflow-providers-telegram
+airflow_min_version: '3.0'
+description: >-
+  Sends a message to a Telegram chat, channel, or group via a bot — announce that
+  a pipeline finished or share a number. Uses an Airflow "telegram" Connection
+  whose password holds the Bot API token. (To alert only on failure, attach a
+  Telegram notifier to the DAG instead — that's a callback.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-telegram/stable/index.html
+example: |
+  chat_id:  '-1001234567890'
+  text:     ':white_check_mark: Daily load finished for {{ ds }}'
+import: 'from airflow.providers.telegram.operators.telegram import TelegramOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: telegram
+params:
+  - { name: text, label: 'Message text', type: string, required: true, widget: textarea,
+      help: 'The message to send. Supports Telegram markdown/HTML, e.g. "done for {{ ds }}".' }
+  - { name: chat_id, label: 'Chat ID', type: string, required: false, widget: text,
+      help: 'The Telegram chat / channel / group ID to post to. Optional if the connection already sets one (in its host field).' }
+  - { name: telegram_conn_id, label: 'Telegram connection', type: string, required: false, widget: text, default: telegram_default,
+      help: 'The Airflow "telegram" Connection holding the Bot API token. Defaults to "telegram_default".' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = TelegramOperator(
+      task_id={{ task_id | pyrepr }},
+      text={{ params.text | pyrepr }},
+      {% if params.chat_id %}chat_id={{ params.chat_id | pyrepr }},{% endif %}
+      {% if params.telegram_conn_id %}telegram_conn_id={{ params.telegram_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = TelegramOperator(
+      task_id={{ task_id | pyrepr }},
+      text={{ params.text | pyrepr }},
+      {% if params.chat_id %}chat_id={{ params.chat_id | pyrepr }},{% endif %}
+      {% if params.telegram_conn_id %}telegram_conn_id={{ params.telegram_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

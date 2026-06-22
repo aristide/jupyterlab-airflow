@@ -437,6 +437,79 @@ def test_s3_delete_objects_keys_param_avoids_dict_method_collision():
     assert "keys=" not in c_prefix
 
 
+def test_v13_lakehouse_p2_ops_render_airflow3():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "ftp_file_transmit", "task_id": "ftp",
+             "params": {"local_filepath": "/tmp/x", "remote_filepath": "/r/x",
+                        "operation": "get", "create_intermediate_dirs": True}},
+            {"id": "b", "op": "ftp_sensor", "task_id": "waitftp",
+             "params": {"path": "/out/x.csv"}},
+            {"id": "c", "op": "imap_attachment_to_s3", "task_id": "imap",
+             "params": {"imap_attachment_name": "s.csv", "s3_bucket": "b",
+                        "s3_key": "raw/s.csv"}},
+            {"id": "d", "op": "imap_attachment_sensor", "task_id": "waitmail",
+             "params": {"attachment_name": "s.csv", "check_regex": True}},
+            {"id": "e", "op": "spark_jdbc", "task_id": "jdbc",
+             "params": {"jdbc_table": "public.s", "metastore_table": "staging.s"}},
+            {"id": "f", "op": "spark_kubernetes", "task_id": "sk8s",
+             "params": {"template_spec": {"spec": {"image": "spark:3.5"}}}},
+            {"id": "g", "op": "discord_webhook", "task_id": "discord",
+             "params": {"http_conn_id": "discord_default", "message": "hi", "tts": True}},
+            {"id": "h", "op": "telegram", "task_id": "tg",
+             "params": {"text": "hi", "chat_id": "-100"}},
+            {"id": "i", "op": "opsgenie_create_alert", "task_id": "page",
+             "params": {"message": "down", "tags": ["etl"], "details": {"env": "prod"}}},
+        ],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    compile(code, "<gen>", "exec")
+
+    assert "ftp = FTPFileTransmitOperator(" in code
+    # Boolean kwargs render as Python literals, not quoted strings.
+    assert "create_intermediate_dirs=True" in code
+    assert "check_regex=True" in code
+    assert "tts=True" in code
+    assert "waitftp = FTPSensor(" in code
+    assert "imap = ImapAttachmentToS3Operator(" in code
+    assert "waitmail = ImapAttachmentSensor(" in code
+    assert "jdbc = SparkJDBCOperator(" in code and "metastore_table='staging.s'" in code
+    assert (
+        "sk8s = SparkKubernetesOperator(" in code
+        and "template_spec={'spec': {'image': 'spark:3.5'}}" in code
+    )
+    assert (
+        "discord = DiscordWebhookOperator(" in code
+        and "http_conn_id='discord_default'" in code
+    )
+    # The real Telegram kwarg is `text`, not `message`.
+    assert "tg = TelegramOperator(" in code and "text='hi'" in code
+    assert (
+        "page = OpsgenieCreateAlertOperator(" in code
+        and "tags=['etl']" in code
+        and "details={'env': 'prod'}" in code
+    )
+
+    for imp in (
+        "from airflow.providers.ftp.operators.ftp import FTPFileTransmitOperator",
+        "from airflow.providers.ftp.sensors.ftp import FTPSensor",
+        "from airflow.providers.amazon.aws.transfers.imap_attachment_to_s3 import ImapAttachmentToS3Operator",
+        "from airflow.providers.imap.sensors.imap_attachment import ImapAttachmentSensor",
+        "from airflow.providers.apache.spark.operators.spark_jdbc import SparkJDBCOperator",
+        "from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import SparkKubernetesOperator",
+        "from airflow.providers.discord.operators.discord_webhook import DiscordWebhookOperator",
+        "from airflow.providers.telegram.operators.telegram import TelegramOperator",
+        "from airflow.providers.opsgenie.operators.opsgenie import OpsgenieCreateAlertOperator",
+    ):
+        assert imp in code, imp
+    assert "airflow.operators." not in code
+    assert "airflow.decorators" not in code
+
+
 def test_operator_block_drops_blank_for_omitted_middle_optional():
     # KubernetesPodOperator with image + env_vars set but the optionals BETWEEN
     # them (name/namespace/cmds/arguments) omitted must not leave a stray blank

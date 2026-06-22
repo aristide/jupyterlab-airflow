@@ -1,0 +1,53 @@
+id: spark_kubernetes
+label: Spark on Kubernetes
+category: Compute
+provider: apache-airflow-providers-cncf-kubernetes
+airflow_min_version: '3.0'
+description: >-
+  Submits a Spark job to Kubernetes as a SparkApplication custom resource and
+  watches the driver pod. Requires the spark-on-k8s-operator (SparkApplication
+  CRD) installed in the cluster, a reachable cluster via the Kubernetes
+  Connection, and the cncf-kubernetes provider. ⚠ Runs an arbitrary Spark image
+  with cluster privileges — the same blast radius as the Kubernetes pod operator.
+  Provide at least one of "Application file/spec" or "Application spec (dict)" (the
+  file wins if both are set); with neither, the task fails at run time.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-cncf-kubernetes/stable/operators.html
+example: |
+  template_spec:  {"spec": {"image": "spark:3.5.0", "mainApplicationFile": "local:///opt/app.py"}}
+  namespace:      spark-jobs
+import: 'from airflow.providers.cncf.kubernetes.operators.spark_kubernetes import SparkKubernetesOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: spark_k8s
+params:
+  - { name: application_file, label: 'Application file / spec', type: string, required: false, widget: textarea,
+      help: 'A path to a SparkApplication CRD YAML/JSON file, OR the inline YAML/JSON body itself. Provide this or the dict spec below (the file wins if both are set).' }
+  - { name: template_spec, label: 'Application spec (dict)', type: object, required: false, widget: json,
+      help: 'The SparkApplication spec as a JSON object, supplied inline instead of a file. Provide this or the file above (the file wins if both are set).' }
+  - { name: namespace, label: 'Namespace', type: string, required: false, widget: text, default: default,
+      help: 'The Kubernetes namespace to create the SparkApplication in. Defaults to "default".' }
+  - { name: kubernetes_conn_id, label: 'Kubernetes connection', type: string, required: false, widget: text, default: kubernetes_default,
+      help: 'The Airflow Kubernetes Connection for the cluster. Defaults to "kubernetes_default".' }
+  - { name: image, label: 'Spark image (override)', type: string, required: false, widget: text,
+      help: 'Docker image for the Spark job; overrides the image set in the spec when provided.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SparkKubernetesOperator(
+      task_id={{ task_id | pyrepr }},
+      {% if params.application_file %}application_file={{ params.application_file | pyrepr }},{% endif %}
+      {% if params.template_spec %}template_spec={{ params.template_spec | pyrepr }},{% endif %}
+      {% if params.namespace %}namespace={{ params.namespace | pyrepr }},{% endif %}
+      {% if params.kubernetes_conn_id %}kubernetes_conn_id={{ params.kubernetes_conn_id | pyrepr }},{% endif %}
+      {% if params.image %}image={{ params.image | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SparkKubernetesOperator(
+      task_id={{ task_id | pyrepr }},
+      {% if params.application_file %}application_file={{ params.application_file | pyrepr }},{% endif %}
+      {% if params.template_spec %}template_spec={{ params.template_spec | pyrepr }},{% endif %}
+      {% if params.namespace %}namespace={{ params.namespace | pyrepr }},{% endif %}
+      {% if params.kubernetes_conn_id %}kubernetes_conn_id={{ params.kubernetes_conn_id | pyrepr }},{% endif %}
+      {% if params.image %}image={{ params.image | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

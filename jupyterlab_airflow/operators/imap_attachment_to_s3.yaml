@@ -1,0 +1,59 @@
+id: imap_attachment_to_s3
+label: IMAP attachment → S3
+category: Ingestion
+provider: apache-airflow-providers-amazon
+airflow_min_version: '3.0'
+description: >-
+  Fetches an email attachment from an IMAP mailbox and uploads it straight into
+  S3 (or MinIO) — for "ingest the file a partner emails us" feeds. Needs an IMAP
+  Connection for the mailbox and an AWS Connection for the destination. (This
+  transfer ships in the amazon provider, not imap.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/transfer/imap_attachment_to_s3.html
+example: |
+  imap_attachment_name:  sales_{{ ds }}.csv
+  s3_bucket:             my-data-lake
+  s3_key:                raw/sales_{{ ds }}.csv
+import: 'from airflow.providers.amazon.aws.transfers.imap_attachment_to_s3 import ImapAttachmentToS3Operator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: imap_to_s3
+params:
+  - { name: imap_attachment_name, label: 'Attachment name', type: string, required: true, widget: text,
+      help: 'The file name of the attachment to fetch, e.g. "sales.csv". Treated as a regex when "Match as regex" is on.' }
+  - { name: s3_bucket, label: 'S3 bucket', type: string, required: true, widget: text,
+      help: 'The destination S3 (or MinIO) bucket, e.g. "my-data-lake".' }
+  - { name: s3_key, label: 'S3 key', type: string, required: true, widget: text,
+      help: 'The destination object key, e.g. "raw/sales_{{ ds }}.csv".' }
+  - { name: imap_mail_folder, label: 'Mail folder', type: string, required: false, widget: text, default: INBOX,
+      help: 'The mailbox folder to search. Defaults to "INBOX".' }
+  - { name: imap_check_regex, label: 'Match name as regex', type: boolean, required: false,
+      help: 'Treat the attachment name as a regular expression instead of an exact match. Defaults to off.' }
+  - { name: imap_conn_id, label: 'IMAP connection', type: string, required: false, widget: text, default: imap_default,
+      help: 'The Airflow IMAP Connection for the source mailbox. Defaults to "imap_default".' }
+  - { name: aws_conn_id, label: 'AWS connection', type: string, required: false, widget: text, default: aws_default,
+      help: 'The Airflow AWS Connection for the destination (set its endpoint_url for MinIO). Defaults to "aws_default".' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = ImapAttachmentToS3Operator(
+      task_id={{ task_id | pyrepr }},
+      imap_attachment_name={{ params.imap_attachment_name | pyrepr }},
+      s3_bucket={{ params.s3_bucket | pyrepr }},
+      s3_key={{ params.s3_key | pyrepr }},
+      {% if params.imap_mail_folder %}imap_mail_folder={{ params.imap_mail_folder | pyrepr }},{% endif %}
+      {% if params.imap_check_regex %}imap_check_regex={{ params.imap_check_regex | pyrepr }},{% endif %}
+      {% if params.imap_conn_id %}imap_conn_id={{ params.imap_conn_id | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = ImapAttachmentToS3Operator(
+      task_id={{ task_id | pyrepr }},
+      imap_attachment_name={{ params.imap_attachment_name | pyrepr }},
+      s3_bucket={{ params.s3_bucket | pyrepr }},
+      s3_key={{ params.s3_key | pyrepr }},
+      {% if params.imap_mail_folder %}imap_mail_folder={{ params.imap_mail_folder | pyrepr }},{% endif %}
+      {% if params.imap_check_regex %}imap_check_regex={{ params.imap_check_regex | pyrepr }},{% endif %}
+      {% if params.imap_conn_id %}imap_conn_id={{ params.imap_conn_id | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

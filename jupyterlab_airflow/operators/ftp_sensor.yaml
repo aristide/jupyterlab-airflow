@@ -1,0 +1,36 @@
+id: ftp_sensor
+label: FTP sensor
+category: Sensors
+provider: apache-airflow-providers-ftp
+airflow_min_version: '3.0'
+description: >-
+  Waits for a file to appear on an FTP server before the run continues — the
+  plain-FTP counterpart to the SFTP sensor (prefer SFTP when you can; FTP is
+  unencrypted). Credentials come from an FTP Connection.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-ftp/stable/index.html
+example: |
+  path:  /outgoing/sales_{{ ds }}.csv
+import: 'from airflow.providers.ftp.sensors.ftp import FTPSensor'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: wait_ftp
+params:
+  - { name: path, label: 'Remote path', type: string, required: true, widget: text,
+      help: 'The remote file (or directory) path on the FTP server to wait for. Jinja templating is supported.' }
+  - { name: ftp_conn_id, label: 'FTP connection', type: string, required: false, widget: text, default: ftp_default,
+      help: 'The Airflow FTP Connection (host, credentials). Defaults to "ftp_default".' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = FTPSensor(
+      task_id={{ task_id | pyrepr }},
+      path={{ params.path | pyrepr }},
+      {% if params.ftp_conn_id %}ftp_conn_id={{ params.ftp_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = FTPSensor(
+      task_id={{ task_id | pyrepr }},
+      path={{ params.path | pyrepr }},
+      {% if params.ftp_conn_id %}ftp_conn_id={{ params.ftp_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

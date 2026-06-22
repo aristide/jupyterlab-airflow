@@ -1,0 +1,50 @@
+id: ftp_file_transmit
+label: FTP file transmit
+category: Ingestion
+provider: apache-airflow-providers-ftp
+airflow_min_version: '3.0'
+description: >-
+  Uploads or downloads a file over plain FTP between an Airflow worker and an FTP
+  server — for legacy feeds that don't support SFTP. Prefer the SFTP transfer when
+  you can (FTP is unencrypted). Credentials come from an FTP Connection.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-ftp/stable/operators/index.html
+example: |
+  operation:        get
+  remote_filepath:  /outgoing/sales_{{ ds }}.csv
+  local_filepath:   /tmp/sales.csv
+import: 'from airflow.providers.ftp.operators.ftp import FTPFileTransmitOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: ftp
+params:
+  - { name: local_filepath, label: 'Local path', type: string, required: true, widget: text,
+      help: 'Path on the Airflow worker — the source for "put", the destination for "get".' }
+  - { name: remote_filepath, label: 'Remote path', type: string, required: true, widget: text,
+      help: 'Path on the FTP server — the destination for "put", the source for "get". Jinja templating is supported.' }
+  - { name: operation, label: 'Operation (put / get)', type: string, required: false, widget: text, default: put,
+      help: 'Direction: "put" uploads the local file to the server, "get" downloads the remote file. Defaults to "put".' }
+  - { name: ftp_conn_id, label: 'FTP connection', type: string, required: false, widget: text, default: ftp_default,
+      help: 'The Airflow FTP Connection (host, credentials). Defaults to "ftp_default".' }
+  - { name: create_intermediate_dirs, label: 'Create missing directories', type: boolean, required: false,
+      help: 'Create missing destination directories during the transfer. Defaults to off.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = FTPFileTransmitOperator(
+      task_id={{ task_id | pyrepr }},
+      local_filepath={{ params.local_filepath | pyrepr }},
+      remote_filepath={{ params.remote_filepath | pyrepr }},
+      {% if params.operation %}operation={{ params.operation | pyrepr }},{% endif %}
+      {% if params.ftp_conn_id %}ftp_conn_id={{ params.ftp_conn_id | pyrepr }},{% endif %}
+      {% if params.create_intermediate_dirs %}create_intermediate_dirs={{ params.create_intermediate_dirs | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = FTPFileTransmitOperator(
+      task_id={{ task_id | pyrepr }},
+      local_filepath={{ params.local_filepath | pyrepr }},
+      remote_filepath={{ params.remote_filepath | pyrepr }},
+      {% if params.operation %}operation={{ params.operation | pyrepr }},{% endif %}
+      {% if params.ftp_conn_id %}ftp_conn_id={{ params.ftp_conn_id | pyrepr }},{% endif %}
+      {% if params.create_intermediate_dirs %}create_intermediate_dirs={{ params.create_intermediate_dirs | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

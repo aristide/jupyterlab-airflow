@@ -1,0 +1,45 @@
+id: imap_attachment_sensor
+label: IMAP attachment sensor
+category: Sensors
+provider: apache-airflow-providers-imap
+airflow_min_version: '3.0'
+description: >-
+  Waits for an email with a matching attachment to arrive in an IMAP mailbox
+  before the run continues — hold a pipeline until a partner emails the file.
+  Credentials come from an IMAP Connection. Pairs with the IMAP→S3 transfer.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-imap/stable/index.html
+example: |
+  attachment_name:  sales_*.csv
+  check_regex:      true
+import: 'from airflow.providers.imap.sensors.imap_attachment import ImapAttachmentSensor'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: wait_imap
+params:
+  - { name: attachment_name, label: 'Attachment name', type: string, required: true, widget: text,
+      help: 'The attachment file name to wait for, e.g. "sales.csv". Treated as a regex when "Match as regex" is on.' }
+  - { name: mail_folder, label: 'Mail folder', type: string, required: false, widget: text, default: INBOX,
+      help: 'The mailbox folder to search. Defaults to "INBOX".' }
+  - { name: check_regex, label: 'Match name as regex', type: boolean, required: false,
+      help: 'Treat the attachment name as a regular expression instead of an exact match. Defaults to off.' }
+  - { name: conn_id, label: 'IMAP connection', type: string, required: false, widget: text, default: imap_default,
+      help: 'The Airflow IMAP Connection for the mailbox. Defaults to "imap_default".' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = ImapAttachmentSensor(
+      task_id={{ task_id | pyrepr }},
+      attachment_name={{ params.attachment_name | pyrepr }},
+      {% if params.mail_folder %}mail_folder={{ params.mail_folder | pyrepr }},{% endif %}
+      {% if params.check_regex %}check_regex={{ params.check_regex | pyrepr }},{% endif %}
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = ImapAttachmentSensor(
+      task_id={{ task_id | pyrepr }},
+      attachment_name={{ params.attachment_name | pyrepr }},
+      {% if params.mail_folder %}mail_folder={{ params.mail_folder | pyrepr }},{% endif %}
+      {% if params.check_regex %}check_regex={{ params.check_regex | pyrepr }},{% endif %}
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

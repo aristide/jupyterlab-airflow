@@ -1,0 +1,60 @@
+id: spark_jdbc
+label: Spark JDBC transfer
+category: Compute
+provider: apache-airflow-providers-apache-spark
+airflow_min_version: '3.0'
+description: >-
+  Bulk-transfers data between a Spark metastore table and a JDBC database using
+  spark-submit — load a warehouse table into Spark or push a Spark table out to a
+  database. Needs spark-submit on the worker, a Spark Connection, and a JDBC
+  Connection (plus the JDBC driver jar on the Spark classpath). Heavy compute,
+  like Spark submit.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/operators.html
+example: |
+  cmd_type:        jdbc_to_spark
+  jdbc_table:      public.sales
+  metastore_table: staging.sales
+import: 'from airflow.providers.apache.spark.operators.spark_jdbc import SparkJDBCOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: spark_jdbc
+params:
+  - { name: jdbc_table, label: 'JDBC table', type: string, required: true, widget: text,
+      help: 'The database table to read from or write to, e.g. "public.sales".' }
+  - { name: metastore_table, label: 'Metastore table', type: string, required: true, widget: text,
+      help: 'The Spark metastore table to read from or write to, e.g. "staging.sales".' }
+  - { name: cmd_type, label: 'Direction', type: string, required: false, widget: text, default: spark_to_jdbc,
+      help: '"spark_to_jdbc" pushes the metastore table to the database; "jdbc_to_spark" loads the database table into Spark. Defaults to "spark_to_jdbc".' }
+  - { name: jdbc_conn_id, label: 'JDBC connection', type: string, required: false, widget: text, default: jdbc-default,
+      help: 'The Airflow JDBC Connection for the database. Defaults to "jdbc-default".' }
+  - { name: spark_conn_id, label: 'Spark connection', type: string, required: false, widget: text, default: spark-default,
+      help: 'The Airflow Spark Connection (the spark-submit cluster). Defaults to "spark-default".' }
+  - { name: jdbc_driver, label: 'JDBC driver class', type: string, required: false, widget: text,
+      help: 'The fully-qualified JDBC driver class, e.g. "org.postgresql.Driver". The driver jar itself must be on the Spark classpath.' }
+  - { name: save_mode, label: 'Save mode', type: string, required: false, widget: text,
+      help: 'Spark save mode for writes, e.g. "overwrite" or "append".' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SparkJDBCOperator(
+      task_id={{ task_id | pyrepr }},
+      jdbc_table={{ params.jdbc_table | pyrepr }},
+      metastore_table={{ params.metastore_table | pyrepr }},
+      {% if params.cmd_type %}cmd_type={{ params.cmd_type | pyrepr }},{% endif %}
+      {% if params.jdbc_conn_id %}jdbc_conn_id={{ params.jdbc_conn_id | pyrepr }},{% endif %}
+      {% if params.spark_conn_id %}spark_conn_id={{ params.spark_conn_id | pyrepr }},{% endif %}
+      {% if params.jdbc_driver %}jdbc_driver={{ params.jdbc_driver | pyrepr }},{% endif %}
+      {% if params.save_mode %}save_mode={{ params.save_mode | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SparkJDBCOperator(
+      task_id={{ task_id | pyrepr }},
+      jdbc_table={{ params.jdbc_table | pyrepr }},
+      metastore_table={{ params.metastore_table | pyrepr }},
+      {% if params.cmd_type %}cmd_type={{ params.cmd_type | pyrepr }},{% endif %}
+      {% if params.jdbc_conn_id %}jdbc_conn_id={{ params.jdbc_conn_id | pyrepr }},{% endif %}
+      {% if params.spark_conn_id %}spark_conn_id={{ params.spark_conn_id | pyrepr }},{% endif %}
+      {% if params.jdbc_driver %}jdbc_driver={{ params.jdbc_driver | pyrepr }},{% endif %}
+      {% if params.save_mode %}save_mode={{ params.save_mode | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

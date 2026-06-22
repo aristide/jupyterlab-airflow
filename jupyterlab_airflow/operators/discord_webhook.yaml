@@ -1,0 +1,54 @@
+id: discord_webhook
+label: Discord message
+category: Notifications
+provider: apache-airflow-providers-discord
+airflow_min_version: '3.0'
+description: >-
+  Posts a message to a Discord channel via an incoming webhook — announce that a
+  pipeline finished, or share a number. Uses an Airflow HTTP/Discord Connection
+  (host https://discord.com/api/, the webhook path in its extra). (To alert only
+  on failure, attach a Discord notifier to the DAG instead — that's a callback.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-discord/stable/index.html
+example: |
+  http_conn_id:  discord_default
+  message:       ':white_check_mark: Daily load finished for {{ ds }}'
+import: 'from airflow.providers.discord.operators.discord_webhook import DiscordWebhookOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: discord
+params:
+  - { name: http_conn_id, label: 'Discord connection', type: string, required: true, widget: text,
+      help: 'The Airflow HTTP Connection for Discord (host https://discord.com/api/, the webhook path in its extra), e.g. "discord_default". Required.' }
+  - { name: message, label: 'Message', type: string, required: true, widget: textarea,
+      help: 'The message to post (max 2000 characters). Supports markdown and emoji, e.g. ":tada: done for {{ ds }}".' }
+  - { name: webhook_endpoint, label: 'Webhook endpoint (override)', type: string, required: false, widget: text,
+      help: 'Optional override of the webhook path "webhooks/{id}/{token}". Leave blank to use the one in the connection.' }
+  - { name: username, label: 'Username (override)', type: string, required: false, widget: text,
+      help: 'Optional override of the webhook''s default display name.' }
+  - { name: avatar_url, label: 'Avatar URL (override)', type: string, required: false, widget: text,
+      help: 'Optional override of the webhook''s default avatar image URL.' }
+  - { name: tts, label: 'Text-to-speech', type: boolean, required: false,
+      help: 'Send the message as a text-to-speech message. Defaults to off.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = DiscordWebhookOperator(
+      task_id={{ task_id | pyrepr }},
+      http_conn_id={{ params.http_conn_id | pyrepr }},
+      message={{ params.message | pyrepr }},
+      {% if params.webhook_endpoint %}webhook_endpoint={{ params.webhook_endpoint | pyrepr }},{% endif %}
+      {% if params.username %}username={{ params.username | pyrepr }},{% endif %}
+      {% if params.avatar_url %}avatar_url={{ params.avatar_url | pyrepr }},{% endif %}
+      {% if params.tts %}tts={{ params.tts | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = DiscordWebhookOperator(
+      task_id={{ task_id | pyrepr }},
+      http_conn_id={{ params.http_conn_id | pyrepr }},
+      message={{ params.message | pyrepr }},
+      {% if params.webhook_endpoint %}webhook_endpoint={{ params.webhook_endpoint | pyrepr }},{% endif %}
+      {% if params.username %}username={{ params.username | pyrepr }},{% endif %}
+      {% if params.avatar_url %}avatar_url={{ params.avatar_url | pyrepr }},{% endif %}
+      {% if params.tts %}tts={{ params.tts | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

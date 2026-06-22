@@ -266,6 +266,78 @@ def test_v13_lakehouse_p1_ops_present_with_correct_providers():
     )
 
 
+def test_v13_lakehouse_p2_ops_present_with_correct_providers():
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    # (id, provider, import-module, category) — verified against the real wheels
+    # (ftp 3.15, imap 3.11, amazon 9.30, apache-spark 6.1, cncf-kubernetes 10.18,
+    # discord 3.12, telegram 4.9, opsgenie 5.10). Note: ImapAttachmentToS3Operator
+    # lives in the AMAZON provider's transfers, not imap.
+    expected = {
+        "ftp_file_transmit": (
+            "apache-airflow-providers-ftp",
+            "airflow.providers.ftp.operators.ftp",
+            "Ingestion",
+        ),
+        "ftp_sensor": (
+            "apache-airflow-providers-ftp",
+            "airflow.providers.ftp.sensors.ftp",
+            "Sensors",
+        ),
+        "imap_attachment_to_s3": (
+            "apache-airflow-providers-amazon",
+            "airflow.providers.amazon.aws.transfers.imap_attachment_to_s3",
+            "Ingestion",
+        ),
+        "imap_attachment_sensor": (
+            "apache-airflow-providers-imap",
+            "airflow.providers.imap.sensors.imap_attachment",
+            "Sensors",
+        ),
+        "spark_jdbc": (
+            "apache-airflow-providers-apache-spark",
+            "airflow.providers.apache.spark.operators.spark_jdbc",
+            "Compute",
+        ),
+        "spark_kubernetes": (
+            "apache-airflow-providers-cncf-kubernetes",
+            "airflow.providers.cncf.kubernetes.operators.spark_kubernetes",
+            "Compute",
+        ),
+        "discord_webhook": (
+            "apache-airflow-providers-discord",
+            "airflow.providers.discord.operators.discord_webhook",
+            "Notifications",
+        ),
+        "telegram": (
+            "apache-airflow-providers-telegram",
+            "airflow.providers.telegram.operators.telegram",
+            "Notifications",
+        ),
+        "opsgenie_create_alert": (
+            "apache-airflow-providers-opsgenie",
+            "airflow.providers.opsgenie.operators.opsgenie",
+            "Notifications",
+        ),
+    }
+    assert set(expected) <= set(by_id)
+    for op_id, (provider, module, category) in expected.items():
+        op = by_id[op_id]
+        assert op["provider"] == provider, op_id
+        assert module in op["import"], op_id
+        assert op["category"] == category, op_id
+        assert op["taskflow"] == "operator", op_id
+        assert op["provider"] != "apache-airflow-providers-standard", op_id
+        assert "airflow.operators." not in op["import"], op_id
+        assert "airflow.sensors." not in op["import"], op_id
+        assert op["template_taskflow"].strip(), op_id
+        assert op["template_traditional"].strip(), op_id
+    # Both FTP and IMAP sensors get the sensor common_params.
+    for sid in ("ftp_sensor", "imap_attachment_sensor"):
+        assert {"mode", "poke_interval", "timeout"} <= set(
+            by_id[sid]["common_params"]
+        ), sid
+
+
 def test_bash_is_airflow3_correct():
     bash = next(op for op in registry.load_registry() if op["id"] == "bash")
     assert "airflow.providers.standard.operators.bash" in bash["import"]
