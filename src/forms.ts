@@ -7,7 +7,7 @@
 import { RJSFSchema, UiSchema } from '@rjsf/utils';
 
 import { IAfdagDagConfig } from './ir';
-import { IOperatorDef, IOperatorParam } from './interfaces';
+import { INotifierDef, IOperatorDef, IOperatorParam } from './interfaces';
 
 export interface IFormSpec {
   schema: RJSFSchema;
@@ -175,6 +175,66 @@ export function nodeForm(op: IOperatorDef): IFormSpec {
     schema: { type: 'object', properties, required },
     uiSchema
   };
+}
+
+/** RJSF schema + uiSchema for a notifier's params (PRD §6.8) — like `nodeForm`
+ * but without `task_id` or the Common-settings section. Reuses the same
+ * param→schema mapping, so each field gets its inline `help` / `ⓘ` bubble. */
+export function notifierForm(def: INotifierDef): IFormSpec {
+  const properties: Record<string, RJSFSchema> = {};
+  const required: string[] = [];
+  const order: string[] = [];
+  const uiSchema: UiSchema = {};
+  for (const param of def.params) {
+    properties[param.name] = paramSchema(param);
+    if (param.required) {
+      required.push(param.name);
+    }
+    order.push(param.name);
+    const ui = paramUi(param);
+    if (ui) {
+      uiSchema[param.name] = ui;
+    }
+  }
+  uiSchema['ui:order'] = order;
+  return { schema: { type: 'object', properties, required }, uiSchema };
+}
+
+/** Notifier params -> RJSF formData (PRD §6.8): a json/object param is shown as
+ * JSON *text* (like the NODE form), so stringify it on seed. */
+export function notifierToFormData(
+  def: INotifierDef,
+  params: Record<string, unknown>
+): Record<string, unknown> {
+  const data: Record<string, unknown> = {};
+  for (const param of def.params) {
+    const value = params[param.name];
+    if (isJsonParam(param)) {
+      data[param.name] =
+        value === undefined ? '' : JSON.stringify(value, null, 2);
+    } else if (value !== undefined) {
+      data[param.name] = value;
+    }
+  }
+  return data;
+}
+
+/** RJSF formData -> notifier params: parse json-text params back to objects and
+ * drop the ones the user left empty (so codegen's `{% if %}` guards + the IR
+ * stay clean). The IR-boundary counterpart to `formDataToNode` for notifiers. */
+export function formDataToNotifierParams(
+  def: INotifierDef,
+  formData: Record<string, unknown>
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  for (const param of def.params) {
+    const value = formData[param.name];
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    params[param.name] = isJsonParam(param) ? parseJsonOr(value, {}) : value;
+  }
+  return params;
 }
 
 /** Node IR (task_id + params + common) -> RJSF formData (object params -> JSON text). */

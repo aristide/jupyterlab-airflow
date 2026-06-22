@@ -338,6 +338,36 @@ def test_v13_lakehouse_p2_ops_present_with_correct_providers():
         ), sid
 
 
+def test_notifier_registry_loads_and_hides_codegen_fields():
+    # PRD §6.8: notifiers are a parallel registry (callbacks counterpart). They
+    # ship an import + a Jinja `template` (server-side) + a provider, and
+    # notifier_client_view() withholds import/template like the operator one.
+    by_id = {n["id"]: n for n in registry.load_notifiers()}
+    assert {"smtp", "slack"} <= set(by_id)
+    expected = {
+        "smtp": (
+            "apache-airflow-providers-smtp",
+            "airflow.providers.smtp.notifications.smtp",
+        ),
+        "slack": (
+            "apache-airflow-providers-slack",
+            "airflow.providers.slack.notifications.slack",
+        ),
+    }
+    for nid, (provider, module) in expected.items():
+        notifier = by_id[nid]
+        assert notifier["provider"] == provider, nid
+        assert module in notifier["import"], nid
+        assert notifier["template"].strip(), nid
+        assert "airflow.operators." not in notifier["import"], nid
+
+    cv = {n["id"]: n for n in registry.notifier_client_view()}
+    assert cv["smtp"]["label"]
+    for hidden in ("import", "template"):
+        assert hidden not in cv["smtp"], hidden
+    assert {p["name"] for p in cv["smtp"]["params"] if p.get("required")} == {"to"}
+
+
 def test_bash_is_airflow3_correct():
     bash = next(op for op in registry.load_registry() if op["id"] == "bash")
     assert "airflow.providers.standard.operators.bash" in bash["import"]

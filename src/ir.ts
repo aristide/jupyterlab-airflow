@@ -16,6 +16,21 @@ export interface IAfdagProvenance {
   updated_at?: string;
 }
 
+/** A notifier attached to a callback event (PRD §6.8): which channel fires, and
+ * its params. `notifier_id` references a notifier-registry entry. */
+export interface IAfdagCallbackEntry {
+  notifier_id: string;
+  params: Record<string, unknown>;
+}
+
+/** DAG-level callbacks (PRD §6.8): notifiers to run on each lifecycle event.
+ * Kept on `dag` (not in `nodes[]`/`edges[]`) so the task graph is untouched.
+ * Only the events that still fire in Airflow 3 (SLAs were removed in 3.0). */
+export interface IAfdagCallbacks {
+  on_success?: IAfdagCallbackEntry[];
+  on_failure?: IAfdagCallbackEntry[];
+}
+
 export interface IAfdagDagConfig {
   dag_id: string;
   description?: string;
@@ -28,6 +43,8 @@ export interface IAfdagDagConfig {
   owner?: string;
   params?: Record<string, unknown>;
   default_args?: Record<string, unknown>;
+  /** Notification callbacks (PRD §6.8); absent on pre-callbacks `.afdag` files. */
+  callbacks?: IAfdagCallbacks;
 }
 
 export interface IAfdagNode {

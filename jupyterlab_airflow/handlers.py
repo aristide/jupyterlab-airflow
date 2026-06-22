@@ -17,7 +17,7 @@ from .deploy import (
     retire_old_dag,
     rollback_dag,
 )
-from .providers import annotated_operators
+from .providers import annotated_notifiers, annotated_operators
 from .validation import validate_dag
 
 NAMESPACE = "jupyterlab-airflow"
@@ -66,6 +66,17 @@ class OperatorsHandler(_AirflowHandler):
     async def get(self):
         refresh = self.get_argument("refresh", "").lower() in ("1", "true")
         await self.respond(annotated_operators, force=refresh)
+
+
+class NotifiersHandler(_AirflowHandler):
+    """Serve the notifier registry (PRD §6.8) to the editor's Notifications tab,
+    annotated with provider-availability against the target Airflow (§6.2.1).
+    ``?refresh=1`` forces a fresh provider read."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        refresh = self.get_argument("refresh", "").lower() in ("1", "true")
+        await self.respond(annotated_notifiers, force=refresh)
 
 
 class GenerateHandler(_AirflowHandler):
@@ -368,6 +379,7 @@ def setup_handlers(web_app):
     handlers = [
         (_url(base_url, "health"), HealthHandler),
         (_url(base_url, "operators"), OperatorsHandler),
+        (_url(base_url, "notifiers"), NotifiersHandler),
         (_url(base_url, "generate"), GenerateHandler),
         (_url(base_url, "validate"), ValidateHandler),
         (_url(base_url, "deploy"), DeployHandler),

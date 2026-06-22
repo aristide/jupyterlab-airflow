@@ -172,6 +172,14 @@ def annotated_operators(force: bool = False) -> List[Dict[str, Any]]:
     return annotate_view(client_view(), get_target_index(force=force))
 
 
+def annotated_notifiers(force: bool = False) -> List[Dict[str, Any]]:
+    """The notifier payload (``notifier_client_view()``) annotated with target
+    provider-availability (PRD §6.8) — what ``GET notifiers`` serves."""
+    from .registry import notifier_client_view
+
+    return annotate_view(notifier_client_view(), get_target_index(force=force))
+
+
 def provider_block_errors(
     ir: Dict[str, Any], index: Optional[Dict[str, Any]]
 ) -> List[str]:
@@ -181,30 +189,51 @@ def provider_block_errors(
     is the authoritative verdict."""
     if index is None:
         return []
-    from .registry import load_registry
+    from .registry import load_notifiers, load_registry
 
-    registry = {op["id"]: op for op in load_registry()}
     errors: List[str] = []
     seen: set = set()
-    for node in ir.get("nodes") or []:
-        op = registry.get(node.get("op"))
-        if op is None or op["id"] in seen:
-            continue
-        provider = op.get("provider", "")
-        avail = availability(provider, op.get("airflow_min_version"), index)
+
+    def _check(kind: str, key: str, defn: Dict[str, Any]) -> None:
+        if key in seen:
+            return
+        provider = defn.get("provider", "")
+        avail = availability(provider, defn.get("airflow_min_version"), index)
         if avail not in ("missing-provider", "version-too-old"):
-            continue
-        seen.add(op["id"])
-        label = op.get("label", op["id"])
+            return
+        seen.add(key)
+        label = defn.get("label", defn["id"])
         if avail == "missing-provider":
             errors.append(
-                f"Operator '{label}' needs the provider '{provider}', which is "
+                f"{kind} '{label}' needs the provider '{provider}', which is "
                 f"not installed in your target Airflow. Install it "
                 f"({pip_install_hint(provider)}), refresh, then deploy."
             )
         else:
             errors.append(
-                f"Operator '{label}' needs Airflow >= {op.get('airflow_min_version')}, "
+                f"{kind} '{label}' needs Airflow >= {defn.get('airflow_min_version')}, "
                 f"but your target Airflow is {index.get('airflow_version')}."
             )
+
+    registry = {op["id"]: op for op in load_registry()}
+    for node in ir.get("nodes") or []:
+        op = registry.get(node.get("op"))
+        if op is not None:
+            _check("Operator", op["id"], op)
+
+    # Notifier callbacks (PRD §6.8) gate on their provider too — otherwise a DAG
+    # with a Slack/SMTP notifier on an uninstalled provider would write and then
+    # fail at import instead of being blocked pre-write.
+    notifiers = {n["id"]: n for n in load_notifiers()}
+    callbacks = (ir.get("dag") or {}).get("callbacks")
+    if isinstance(callbacks, dict):
+        for entries in callbacks.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                notifier = notifiers.get(entry.get("notifier_id"))
+                if notifier is not None:
+                    _check("Notifier", "notifier:" + notifier["id"], notifier)
     return errors

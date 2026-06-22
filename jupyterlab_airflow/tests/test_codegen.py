@@ -759,6 +759,68 @@ def test_traditional_emits_common_params_on_instances():
     assert "mode='reschedule'" in code and "poke_interval=30" in code
 
 
+def test_dag_callbacks_render_on_event_callbacks():
+    # PRD §6.8: dag['callbacks'] renders on_*_callback kwargs on @dag(...) with
+    # each notifier instance built from its registry template, and the notifier
+    # imports collected. Multiple notifiers per event + multiple events.
+    ir = _ir(
+        nodes=[{"id": "n1", "op": "bash", "task_id": "extract",
+                "params": {"bash_command": "echo hi"}}],
+        edges=[],
+        callbacks={
+            "on_failure": [
+                {"notifier_id": "smtp",
+                 "params": {"to": "a@b.com", "subject": "failed"}},
+                {"notifier_id": "slack",
+                 "params": {"text": "down", "channel": "#alerts"}},
+            ],
+            "on_success": [{"notifier_id": "slack", "params": {"text": "done"}}],
+        },
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    assert (
+        "on_failure_callback=[SmtpNotifier(to='a@b.com', subject='failed'), "
+        "SlackNotifier(text='down', channel='#alerts')]"
+    ) in code
+    assert "on_success_callback=[SlackNotifier(text='done')]" in code
+    assert (
+        "from airflow.providers.smtp.notifications.smtp import SmtpNotifier"
+        in code
+    )
+    assert (
+        "from airflow.providers.slack.notifications.slack import SlackNotifier"
+        in code
+    )
+    # A notifier param left unset is omitted (the {% if %} guard).
+    assert "slack_conn_id=" not in code
+
+
+def test_unknown_notifier_is_rejected():
+    ir = _ir(
+        nodes=[{"id": "n1", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo"}}],
+        edges=[],
+        callbacks={"on_failure": [{"notifier_id": "nope", "params": {}}]},
+    )
+    res = generate_dag(ir)
+    assert not res["valid"]
+    assert any("notifier" in err.lower() for err in res["errors"])
+
+
+def test_no_callbacks_emits_no_callback_or_notifier_import():
+    ir = _ir(
+        nodes=[{"id": "n1", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo"}}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    assert "_callback=" not in code
+    assert "notifications" not in code
+
+
 def test_cycle_is_rejected():
     ir = _ir(
         nodes=[

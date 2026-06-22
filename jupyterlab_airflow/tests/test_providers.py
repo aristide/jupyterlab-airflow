@@ -17,6 +17,8 @@ def _reset():
     providers.reset_cache()
     registry._cache["signature"] = None
     registry._cache["operators"] = None
+    registry._notifier_cache["signature"] = None
+    registry._notifier_cache["notifiers"] = None
     yield
     providers.reset_cache()
 
@@ -111,6 +113,28 @@ def test_provider_block_errors_version_too_old(tmp_path, monkeypatch):
     errors = providers.provider_block_errors({"nodes": [{"op": "newop"}]}, INDEX)
     assert len(errors) == 1
     assert "Airflow >= 3.5" in errors[0] and "3.0.2" in errors[0]
+
+
+def test_provider_block_errors_gates_notifier_callbacks():
+    # A DAG with Slack + SMTP notifiers on its callbacks; neither provider is in
+    # the target index -> both blocked pre-write (PRD §6.8), not just operators.
+    ir = {
+        "dag": {
+            "callbacks": {
+                "on_failure": [
+                    {"notifier_id": "slack", "params": {"text": "x"}},
+                    {"notifier_id": "smtp", "params": {"to": "a@b.com"}},
+                ]
+            }
+        },
+        "nodes": [],
+    }
+    errors = providers.provider_block_errors(ir, INDEX)
+    assert len(errors) == 2
+    assert any("Notifier" in e and "providers-slack" in e for e in errors)
+    assert any("Notifier" in e and "providers-smtp" in e for e in errors)
+    # Target unreachable -> no block.
+    assert providers.provider_block_errors(ir, None) == []
 
 
 class _FakeClient:

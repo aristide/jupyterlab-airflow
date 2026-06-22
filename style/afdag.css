@@ -662,6 +662,112 @@
   padding: 8px;
 }
 
+/* Notifications tab (PRD §6.8 / §15.14): DAG-level callback channels per event. */
+.jp-afdag-notify-intro {
+  margin: 0 0 10px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-notify-event {
+  margin-bottom: 14px;
+}
+
+.jp-afdag-notify-event-title {
+  margin: 0 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--jp-border-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+}
+
+.jp-afdag-notify-hint {
+  color: var(--jp-ui-font-color3);
+  font-weight: 400;
+}
+
+.jp-afdag-notify-none {
+  margin: 4px 0;
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-notify-entry {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--jp-border-color2);
+  border-left: 3px solid var(--jp-brand-color1);
+  border-radius: 3px;
+  background: var(--jp-layout-color1);
+}
+
+.jp-afdag-notify-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jp-afdag-notify-channel {
+  font-weight: 600;
+}
+
+.jp-afdag-notify-remove {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--jp-ui-font-color3);
+  cursor: pointer;
+}
+
+.jp-afdag-notify-remove:hover {
+  color: var(--jp-error-color1);
+}
+
+.jp-afdag-notify-warn {
+  margin: 2px 0;
+  color: var(--jp-warn-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-notify-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.jp-afdag-notify-add-label {
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-notify-add-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+  cursor: pointer;
+}
+
+.jp-afdag-notify-add-btn:hover {
+  border-color: var(--jp-brand-color1);
+  color: var(--jp-brand-color1);
+}
+
+.jp-afdag-notify-add-btn.jp-mod-unavailable {
+  opacity: 0.55;
+}
+
+.jp-afdag-notify-error {
+  margin: 2px 0 0;
+  color: var(--jp-error-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
 /* CodeMirror host (code/json fields + read-only preview) */
 .jp-afdag-cm {
   border: 1px solid var(--jp-border-color2);

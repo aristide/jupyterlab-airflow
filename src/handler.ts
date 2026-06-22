@@ -13,6 +13,7 @@ import {
   IGenerateRes,
   IHealth,
   IImportErrorsRes,
+  INotifierDef,
   IOperatorDef,
   IOrphansRes,
   IDagSourceRes,
@@ -96,6 +97,11 @@ export const listOperators = (
   refresh = false
 ): Promise<IApiRes<IOperatorDef[]>> =>
   GET<IOperatorDef[]>('operators', refresh ? { refresh: '1' } : {});
+
+export const listNotifiers = (
+  refresh = false
+): Promise<IApiRes<INotifierDef[]>> =>
+  GET<INotifierDef[]>('notifiers', refresh ? { refresh: '1' } : {});
 
 export const generateDag = (ir: IAfdagIR): Promise<IApiRes<IGenerateRes>> =>
   POST<IGenerateRes>('generate', ir as unknown as Record<string, unknown>);

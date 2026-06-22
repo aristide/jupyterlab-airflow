@@ -167,6 +167,29 @@ export interface IOperatorDef {
   pipInstall?: string;
 }
 
+/**
+ * A notifier (PRD §6.8): a callback channel (email / Slack / …) attachable to a
+ * DAG (or task) lifecycle event in the Notifications tab. Its data shape mirrors
+ * `IOperatorDef` (the `import`/`template` stay server-side). Served by
+ * `GET notifiers`, annotated with provider-availability like operators.
+ */
+export interface INotifierDef {
+  id: string;
+  label: string;
+  params: IOperatorParam[];
+  description?: string;
+  docsUrl?: string;
+  example?: string;
+  provider?: string;
+  airflowMinVersion?: string;
+  availability?:
+    | 'available'
+    | 'missing-provider'
+    | 'version-too-old'
+    | 'unknown';
+  pipInstall?: string;
+}
+
 // Result of `POST generate` (IR → Airflow 3.x Python). Validation failures come
 // back in `errors` with `valid: false`; `code` is best-effort.
 export interface IGenerateRes {

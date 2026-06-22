@@ -4,9 +4,10 @@ import {
   formDataToDag,
   formDataToNode,
   nodeForm,
+  notifierForm,
   nodeToFormData
 } from '../forms';
-import { IOperatorDef } from '../interfaces';
+import { INotifierDef, IOperatorDef } from '../interfaces';
 
 const bashOp: IOperatorDef = {
   id: 'bash',
@@ -243,5 +244,26 @@ describe('DAG form data', () => {
     // A couple of specific ones, to guard the wording source.
     expect(props.schedule.description).toMatch(/how often/i);
     expect(props.catchup.description).toMatch(/back-fill/i);
+  });
+});
+
+describe('notifier form (notifierForm, PRD §6.8)', () => {
+  const smtp: INotifierDef = {
+    id: 'smtp',
+    label: 'Email (SMTP)',
+    params: [
+      { name: 'to', label: 'To', required: true, widget: 'text', help: 'Recipient' },
+      { name: 'subject', label: 'Subject', required: false, widget: 'text' }
+    ]
+  };
+
+  it('builds a schema from the notifier params (no task_id / common section)', () => {
+    const { schema, uiSchema } = notifierForm(smtp);
+    const props = schema.properties as Record<string, { description?: string }>;
+    expect(Object.keys(props)).toEqual(['to', 'subject']);
+    expect(schema.required).toEqual(['to']);
+    expect(uiSchema['ui:order']).toEqual(['to', 'subject']);
+    // Per-param help flows to the field description (the ⓘ bubble).
+    expect(props.to.description).toBe('Recipient');
   });
 });

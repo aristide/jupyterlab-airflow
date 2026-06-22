@@ -123,7 +123,7 @@ The locked decisions are honored; the phasing applies the pre‑mortem's "ruthle
 - **Lakehouse operator expansion (§6.2.2):** Storage (MinIO/S3 object ops), Ingestion (SFTP/FTP/IMAP), Compute (Spark, Papermill), Data Quality (SQL checks), and Notification **operators** (Email/Slack/…) — gated registry YAML. **P0 + P1 + P2 shipped ✅** (24 ops, catalogue → 42); third‑party Great Expectations / OpenMetadata at **P3 🔭**.
 - **Friendly log viewer ✅ (§6.6):** the raw `<pre>` is replaced by a level‑coloured, searchable, attempt‑aware viewer (Copy/Download/Wrap/autoscroll‑to‑first‑error).
 - **Field info bubbles ✅ (§6.1.3):** help on every DAG field + a hoverable `ⓘ` bubble on DAG **and** NODE fields.
-- **Notifications & alerting 📝 (§6.8):** an IR `callbacks` block + a notifier registry + a **Notifications inspector tab** so failures/SLAs can alert via Email/Slack/Apprise — the callback half the canvas can't model. Unblocks the §6.2.2 P3 notifiers.
+- **Notifications & alerting ✅ (DAG‑level; §6.8):** an IR `dag.callbacks` block + a notifier registry (`Smtp`/`Slack` starters) + a **Notifications inspector tab** + codegen into `on_*_callback`, so failures/SLAs alert via Email/Slack — the callback half the canvas can't model. Per‑task scope + more notifiers (Apprise/Discord/…) are 📝.
 
 ### Explicitly deferred / out
 Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (NG4).
@@ -156,7 +156,7 @@ Arbitrary `.py` import to canvas (NG1); RTC (NG2); in‑extension RBAC engine (N
 - **INFO** *(learn‑Airflow surface)* — a **read‑only educational tab** about the **currently selected node/operator**: a plain‑language description of what the operator does, when to use it, its required vs optional inputs (rendered from the registry param metadata), a worked example, the provider/`airflow_min_version` it needs, and a **"docs ↗" deep link** to the official Airflow/provider page. With no node selected it shows DAG‑level concepts (schedule/`start_date`/`catchup`/retries explained). Content is **data‑only**, sourced from new registry fields (`description`, `docs_url`, per‑param `help`; see §6.2) so adding an operator also teaches it — no code change (G6). This tab is the concrete expression of a secondary product goal: Studio should help users *learn* Airflow components, not just wire them.
 - **CODE** — live generated‑Python preview (read‑only), a **Generate DAG** button, and a validation panel that shows **both** client‑side messages (e.g. *"DAG contains a cycle — Airflow does not support cyclic dependencies"*) **and**, after deploy, the **authoritative Airflow import status**. The preview is rendered in a **read‑only CodeMirror 6 editor with Python syntax highlighting and a left line‑number gutter** (not a plain `<pre>`), reusing the same `CodeMirrorField` that backs the `code`/`json` node fields (`language="python"`, `readOnly`) so the generated DAG is **colorized, gutter‑numbered, selectable, and scrollable**, and is **theme‑aware via `--jp‑*`** (light/dark). Implementation + the one missing piece (a CodeMirror *highlight style*) are in §8.2.
 - **SAVED** — lists `.afdag` documents in the workspace (via Contents API) to reopen; marks which are deployed.
-- **Tab order** is DAG · NODE · INFO · CODE · SAVED; selecting a node focuses NODE, and INFO sits beside it so "configure" and "understand" are one click apart.
+- **Tab order** is DAG · NODE · INFO · NOTIFY · CODE · SAVED; selecting a node focuses NODE, and INFO sits beside it so "configure" and "understand" are one click apart. **NOTIFY** (§6.8) edits DAG‑level notification callbacks.
 
 **6.1.4 Top bar.** Logo · live `dag_id` · node count · **live error badge** (`✕ N errors`, with text not just color) · **Traditional↔TaskFlow toggle ✅ (§6.3)** — a segmented control that flips the IR's `syntax_style`, persists it, and regenerates the CODE preview / next Deploy · **`≣ Tidy` ✅ (§8.2)** — one‑click auto‑layout (dagre) that re‑positions the task nodes top‑to‑bottom, persists them, and re‑fits the view (disabled when empty; leaves note cards in place) · Undo · **Reset** (revert to last saved IR) · **Save** (writes the `.afdag` via the document context) · **Generate DAG** (server codegen preview) · **Deploy**.
 
@@ -316,19 +316,20 @@ Extends the existing `AirflowPanel`. Requirements (endpoints in Appendix D):
 - A registry entry whose single param is `code` (`widget: code`, CodeMirror 6 reused from JupyterLab). The user's code is emitted **inside** a `@task` function body (TaskFlow) or wrapped as `PythonOperator(python_callable=...)` (Traditional) — **never at module top level**, so a user error can't break the whole file's import.
 - **This is an intentional arbitrary‑code‑execution surface** (the code runs on Airflow workers with their privileges). It is governed by the trust boundary in §9: linted via AST/ruff, parse‑checked in an isolated subprocess, gated by who may deploy, and documented. For the non‑technical majority the code editor is hidden unless a Python/Custom‑`@task` node is selected.
 
-### 6.8 Notifications & alerting (callbacks) (planned 📝)
+### 6.8 Notifications & alerting (callbacks) (DAG‑level shipped ✅ 2026‑06‑22; per‑task 📝)
 
 Airflow's notification channels split in two, and the IR models only one half today:
 - **Operators** (graph nodes) — `EmailOperator`, `SlackAPIPostOperator`/`SlackWebhookOperator`, `DiscordWebhookOperator`, `TelegramOperator`, `OpsgenieCreateAlertOperator`. Each is a *task* ("send a Slack message" as a step), fits the existing node model, and ships in §6.2.2.
 - **Notifiers** (callbacks) — `SmtpNotifier`, `SlackNotifier`, `AppriseNotifier`, `DiscordNotifier`, `TelegramNotifier`, `OpsgenieNotifier`. These attach to **`on_success_callback` / `on_failure_callback` / `on_retry_callback` / `sla_miss_callback`** at the **DAG or task** level — they are **not** nodes and cannot be dropped on the canvas.
 
-**The gap:** the `.afdag` IR (§8.3) is `dag` + `nodes[]` + `edges[]` + `notes[]` — there is **no callback model** — so "email me when this DAG fails" is currently unexpressible. The planned design:
-- **IR:** a new optional **`callbacks`** block — per‑DAG (`ir.dag.callbacks`) and optionally per‑node (`node.callbacks`) — keyed by event (`on_success` / `on_failure` / `on_retry` / `sla_miss`), each value a list of `{ notifier_id, params }` referencing a **notifier registry** entry (a YAML‑per‑notifier mirror of the operator registry: `import`, a `template`, params + `help`, `provider`, `airflow_min_version`). Kept **out of `nodes[]`/`edges[]`** so codegen / cycle‑check / required‑field validation are untouched — the same isolation pattern as `notes[]` (§6.1.7 / §8.3).
-- **Codegen:** render notifier instances and wire them into the `@dag(...)` `on_*_callback` kwargs (DAG‑level) or the `@task(...)` decorator (task‑level). One template family (TaskFlow), consistent with §6.3.
-- **UI:** a **"Notifications" inspector tab** (not a canvas surface) — with nothing selected it edits **DAG‑level** callbacks; with a node selected it offers **task‑level** ones. Each row reads "on `<event>` → send via `<channel>`" with a registry‑driven form (the same RJSF + `help` machinery as the NODE tab). **Microsoft Teams** has no provider → use `AppriseNotifier` (or `HttpOperator`) to a **Power Automate Workflows** webhook (old O365 connector webhooks retire May 2026); **WhatsApp** needs pre‑approved templates (Twilio/Meta) — both ride as notifier/operator `help`.
-- **Gating & trust:** notifiers gate on their `provider` like any op (§6.2.1); a notifier runs provider code in the scheduler/worker — the same trust boundary as operators (§9).
+**The gap** (now closed for DAG‑level callbacks ✅ 2026‑06‑22): the `.afdag` IR (§8.3) had no callback model, so "email me when this DAG fails" was unexpressible. As built:
+- **IR ✅:** a new optional **`callbacks`** block on **`ir.dag.callbacks`**, keyed by event (`on_success` / `on_failure` — the DAG‑level events that still **fire** in Airflow 3; `sla_miss` is excluded because **SLAs were removed in Airflow 3.0** — that kwarg only emits a `DeprecationWarning` and never fires, with "Deadline Alerts" the 3.1+ replacement), each value a list of `{ notifier_id, params }` referencing a **notifier registry** entry. Kept on `dag` (not in `nodes[]`/`edges[]`) so codegen / cycle‑check / required‑field validation are untouched — the same isolation as `notes[]` (§6.1.7 / §8.3); absent on older `.afdag` files. **Deferred 📝:** per‑node `node.callbacks` and the task‑level `on_retry` event (a `@task`‑decorator surface); Deadline Alerts (3.1+) as the SLA replacement.
+- **Notifier registry ✅:** a YAML‑per‑notifier mirror of the operator registry (`jupyterlab_airflow/notifiers/*.yaml` + `load_notifiers`/`notifier_client_view`, with an `AIRFLOW_NOTIFIERS_DIR` override): `import`, a Jinja `template` rendering the notifier *instance*, params + `help`, `provider`, `airflow_min_version`. Starters: **`SmtpNotifier`** (email) + **`SlackNotifier`** (Slack), wheel‑verified. Served by **`GET notifiers`**, provider‑gated like operators.
+- **Codegen ✅:** `_build_callbacks` renders each notifier instance from its template and appends `on_<event>_callback=[…]` to the `@dag(…)` (and Traditional `with DAG(…)`) call; the notifier imports are collected/sorted. An unknown notifier fails codegen with a plain‑language error. Output‑preserving when no callbacks are set.
+- **UI ✅:** a **"Notifications" inspector tab** (DAG · NODE · INFO · **NOTIFY** · CODE · SAVED) — per event, list / add / remove notifiers, each with a registry‑driven RJSF form (the same `help` / `ⓘ`‑bubble machinery as the NODE tab); an unavailable notifier shows a "needs `pip install …`" note. The tab edits **DAG‑level** callbacks (task‑level — with a node selected — is the deferred follow‑up). **Microsoft Teams** / **WhatsApp** ride via `AppriseNotifier` / `HttpOperator` once Apprise is added.
+- **Gating & trust ✅:** the `GET notifiers` payload is availability‑annotated (notifiers gate on their `provider` like any op, §6.2.1) — the palette dims an unavailable channel and the **deploy hard‑gate** (`provider_block_errors`) now scans `dag.callbacks` and **blocks pre‑write** on a missing/too‑old notifier provider, mirroring operators. **Required‑field validation**: a notifier missing a required param (e.g. Slack `text`) feeds the editor error badge so Deploy is blocked, just like a NODE form. A notifier runs provider code in the scheduler/worker — the same trust boundary as operators (§9).
 
-This unblocks the §6.2.2 **P3 notifier** rows. Wireframe **§15.14** (planned).
+Wireframe **§15.14 ✅**. This unblocks the §6.2.2 **P3 notifier** rows — `smtp`/`slack` shipped; Apprise/Discord/Telegram/Opsgenie notifiers are more YAML.
 
 ---
 
@@ -386,11 +387,11 @@ Register a custom file type + document widget so JupyterLab owns open/save/dirty
 
 ### 8.3 The `.afdag` document & IR schema
 
-Versioned IR JSON: `{ schema_version, provenance, syntax_style, dag, nodes[], edges[], notes?[], callbacks?, layout? }`. `node.id` is the stable ReactFlow id; `task_id` is the Airflow id (validated identifier, unique). `op` references a registry id (keeps IR decoupled from operator impl). `position` lives in the IR so layout round‑trips. `provenance` (`afdag_id`, `studio_version`, `ir-hash`) is **also embedded in the generated `.py`** so the manager can tell Studio‑created (editable) from hand‑written (read‑only) DAGs and detect drift. See **Appendix B**.
+Versioned IR JSON: `{ schema_version, provenance, syntax_style, dag, nodes[], edges[], notes?[], layout? }` — where `dag` also carries an optional `callbacks` block (§6.8). `node.id` is the stable ReactFlow id; `task_id` is the Airflow id (validated identifier, unique). `op` references a registry id (keeps IR decoupled from operator impl). `position` lives in the IR so layout round‑trips. `provenance` (`afdag_id`, `studio_version`, `ir-hash`) is **also embedded in the generated `.py`** so the manager can tell Studio‑created (editable) from hand‑written (read‑only) DAGs and detect drift. See **Appendix B**.
 
 **Annotation notes (§6.1.7)** live in an **optional, separate `notes[]` array** — `{ id, text, position, size? }` — deliberately **outside `nodes[]`/`edges[]`** so the executable task graph that codegen and validation read (`ir["nodes"]`/`ir["edges"]`) is unaffected and note cards can never become tasks, edges, or cycle/required‑field errors. The IR/flow mapping merges `notes[]` into ReactFlow `nodes` as `type:'noteNode'` and splits them back out on persist. `notes[]` is absent on older `.afdag` files (back‑compatible: default to `[]`).
 
-**Notification callbacks (§6.8, planned 🔭)** follow the same isolation: an optional **`callbacks`** block (per‑DAG `ir.dag.callbacks` and per‑node `node.callbacks`), keyed by event (`on_success`/`on_failure`/`on_retry`/`sla_miss`) with a list of `{ notifier_id, params }`, kept **outside `nodes[]`/`edges[]`** so the executable task graph is untouched. Codegen wires them into the `@dag`/`@task` `on_*_callback` kwargs; absent on older files (default `{}`).
+**Notification callbacks (§6.8) — DAG‑level ✅:** an optional **`dag.callbacks`** block keyed by event (`on_success`/`on_failure` — `sla_miss` is excluded, SLAs were removed in Airflow 3.0) with a list of `{ notifier_id, params }`, kept **on `dag`** (outside `nodes[]`/`edges[]`) so the executable task graph is untouched — the same isolation as `notes[]`. Codegen renders each notifier from its registry `template` and appends `on_*_callback=[…]` to the `@dag`/`with DAG(…)` call; absent on older files. Per‑node `node.callbacks` (+ task‑level `on_retry`) is the 📝 follow‑up.
 
 ### 8.4 Codegen pipeline & trust boundary
 
@@ -501,7 +502,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 12. **Stop‑run semantics (§6.6).** `PATCH state:"failed"` marks the run failed (not a graceful cancel); confirm this is the desired "stop", and whether to also offer `state:"success"` (force‑complete) — Airflow allows both. Should stopping a run be available for `queued` runs too (not just `running`)?
 13. **Third‑party operator gating (§6.2.2 ¹).** The provider gate reads `/api/v2/providers`, which lists Airflow *providers* — it won't see non‑provider third‑party packages (Great Expectations, OpenMetadata, Twilio) nor confirm an OpenMetadata server‑version match. Extend gating to an "importable in the target?" probe, or just flag `third_party` ops in the palette/INFO with an install note and let `/importErrors` be the verdict?
 14. **SQL connection‑type picker (§6.2.2).** Surface a connection‑type/`conn_id` picker (Trino/Postgres/MySQL/MSSQL) on the existing SQL node — documenting that the matching provider package must be installed — rather than adding per‑DB operator YAMLs (deprecated in Airflow 3)?
-15. **Notifier callback modeling (§6.8).** Per‑DAG only, or per‑task too? And do callbacks live in `ir.dag.callbacks` / `node.callbacks` (recommended — the `notes[]`‑style isolation) or a top‑level `ir.callbacks`? One notifier registry shared with operators, or a separate file set?
+15. ~~**Notifier callback modeling (§6.8).**~~ **Partly resolved 2026‑06‑22:** DAG‑level callbacks ship on **`ir.dag.callbacks`** (the `notes[]`‑style isolation) via a **separate notifier registry** (`notifiers/*.yaml`, not shared with operators). Still open: per‑**task** `node.callbacks` + the task‑level `on_retry` event, and a deploy‑time provider hard‑gate for notifiers.
 16. **Log viewer & structured events (§6.6).** Airflow 3's `/logs` can return structured events (`{timestamp, level, event, logger}`); the server currently flattens them. Pass structured events through (and how much to widen `ITaskLogsRes`), and is live ndjson tailing worth the polling complexity for v1.3?
 
 ## 14. Milestones & acceptance criteria
@@ -519,7 +520,7 @@ Structured per‑request server logs `{user, action, dag_id, airflow_status, lat
 | **M7 — Lifecycle automation** | **Run on deploy:** after register, the server unpauses + triggers a run and the banner reaches *Running* (integration test on `3.0.2` asserts a green run, no manual step); **Stop run** (manager + editor) `PATCH`es a run to `failed` and its tasks terminate; **orphan reconciliation:** deleting a `.afdag` — via the in‑session `fileChanged` signal **and** the server sweep (terminal/`git`/`rm` deletes) — flags, confirms, then removes the `.py` and `DELETE`s the DAG; delete is blocked while a task runs; all three are audited (`{user, action, dag_id, correlation_id}`) |
 | **v1.1** | Traditional backend + working toggle (task‑graph equivalence test) ✅; Tidy layout (dagre) ✅; more operators ✅ (catalogue → 18) |
 | **v1.2** | Git + S3 `DeployTarget`; per‑user identity + audit; asset scheduling |
-| **v1.3** | **P0 + P1 + P2 lakehouse ops ✅** (24 ops, catalogue → 42, wheel‑verified; **live deploy on `3.0.2` is the remaining gate**) + third‑party P3 (§6.2.2); **friendly log viewer ✅** (level colour, attempt selector, search, Copy/Download/Wrap, autoscroll‑to‑first‑error); **`ⓘ` field bubbles ✅** on DAG + NODE (hover/focus/click, `Esc`/blur to dismiss); **Notifications** tab + `callbacks` IR block + notifier registry 📝 (§6.8) |
+| **v1.3** | **P0 + P1 + P2 lakehouse ops ✅** (24 ops, catalogue → 42, wheel‑verified; **live deploy on `3.0.2` is the remaining gate**) + third‑party P3 (§6.2.2); **friendly log viewer ✅** (level colour, attempt selector, search, Copy/Download/Wrap, autoscroll‑to‑first‑error); **`ⓘ` field bubbles ✅** on DAG + NODE (hover/focus/click, `Esc`/blur to dismiss); **Notifications (DAG‑level) ✅** — NOTIFY tab + `dag.callbacks` IR + notifier registry (Smtp/Slack) + `on_*_callback` codegen (§6.8); per‑task callbacks 📝 |
 
 ## 15. Wireframes (screen drafts)
 
@@ -827,27 +828,25 @@ Deleting a `.afdag` should delete its deployed DAG (full purge, §6.5.6). Both d
 ```
 ✅ built. Server: `find_orphans` diffs `afdag_id` provenance on deployed managed `.py` files (`SharedVolumeTarget.list()`) against the `afdag_id`s of live `.afdag` files walked from the Contents root (`dags/orphans` handler passes `contents_manager.root_dir`); remediation reuses **`purge_dag`** (file‑first, then `DELETE /dags/{id}`). Only provenance‑matched, Studio‑managed files with an `afdag_id` are eligible (hand‑written / pre‑provenance DAGs untouched, §9). The mirror of §15.12 drift (edited‑but‑present) for the **deleted‑source** case.
 
-### 15.14 Studio editor — Notifications tab (callbacks) 🔭
+### 15.14 Studio editor — Notifications tab (callbacks) ✅ (DAG‑level)
 
-A new inspector tab to attach **notifiers** to DAG/task callbacks (§6.8) — the half of "notifications" that isn't a graph node. *(Studio surface — no reference frame.)*
+The inspector tab to attach **notifiers** to DAG callbacks (§6.8) — the half of "notifications" that isn't a graph node. *(Studio surface — no reference frame.)*
 
 ```
- ┌ DAG NODE INFO CODE SAVED [NOTIFY] ─────────────────────────┐
- │ NOTIFICATIONS — alert when this DAG…   (scope: ◉ DAG ○ task) │
- │ ──────────────────────────────────────────────────────────  │
- │ on FAILURE  →  ✉ Email     ⓘ  [ to: data-eng@… ]      [✕]   │
- │ on FAILURE  →  💬 Slack     ⓘ  [ conn: slack ] [#alerts] [✕]│
- │ on SUCCESS  →  💬 Slack     ⓘ  [ conn: slack ] [#runs ]  [✕]│
- │ on SLA MISS →  📟 Apprise   ⓘ  [ url: …teams… ]        [✕]  │
- │ ＋ Add notification                                          │
- │ ──────────────────────────────────────────────────────────  │
- │ ℹ Notifiers attach to callbacks (on_success / on_failure /   │
- │   on_retry / sla_miss), not the canvas. Channels: Email ·    │
- │   Slack · Discord · Telegram · Opsgenie · Apprise            │
- │   (Teams/WhatsApp via Apprise). §6.8                         │
+ ┌ DAG NODE INFO [NOTIFY] CODE SAVED ─────────────────────────┐
+ │ Alert a channel when this DAG reaches an event. Notifiers   │
+ │ run as Airflow callbacks, not graph tasks.                  │
+ │ On failure — when the DAG run fails ──────────────────────  │
+ │ ┌ Email (SMTP)                                        [✕] ┐ │
+ │ │ TO * ⓘ      [ data-eng@example.com ]                    │ │
+ │ │ SUBJECT ⓘ   [ {{ dag.dag_id }} failed ]                 │ │
+ │ └─────────────────────────────────────────────────────────┘ │
+ │ ＋ Add   [ Email (SMTP) ] [ Slack message ]                  │
+ │ On success — when the DAG run succeeds ───────────────────  │
+ │ No notifications.   ＋ Add  [ Email (SMTP) ] [ Slack… ]      │
  └─────────────────────────────────────────────────────────────┘
 ```
-🔭 planned (§6.8). Needs an IR `callbacks` block (per‑DAG + per‑task, kept out of `nodes[]`/`edges[]` like `notes[]`) + a notifier registry (YAML‑per‑notifier) + codegen wiring into `@dag`/`@task` `on_*_callback`. Unblocks the §6.2.2 P3 notifier rows. The **operator** channels (`EmailOperator`, `SlackAPIPostOperator`, …) ship earlier as palette nodes (§6.2.2).
+✅ built (DAG‑level, §6.8). New **NOTIFY** inspector tab edits `ir.dag.callbacks` (`on_failure`/`on_success` — `sla_miss` is omitted, SLAs were removed in Airflow 3.0); each event lists add/remove notifiers with a registry‑driven RJSF form (per‑field `help`/`ⓘ`). A **notifier registry** (`notifiers/*.yaml` → `GET notifiers`, provider‑gated) ships **`SmtpNotifier`** + **`SlackNotifier`**; codegen wires `on_*_callback=[…]` into the `@dag`/`with DAG(…)` call with the notifier imports. The **operator** channels (`EmailOperator`, `SlackAPIPostOperator`, …) ship as palette nodes (§6.2.2). 🔭 deferred: per‑**task** scope (with a node selected) + `on_retry`, more notifiers (Apprise→Teams/WhatsApp, Discord/Telegram/Opsgenie), and a deploy‑time provider hard‑gate for notifiers.
 
 ---
 

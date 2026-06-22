@@ -7,9 +7,16 @@ import { CodePanel } from './CodePanel';
 import { DagTab } from './DagTab';
 import { InfoTab } from './InfoTab';
 import { NodeTab } from './NodeTab';
+import { NotificationsTab } from './NotificationsTab';
 import { SavedTab } from './SavedTab';
 
-export type InspectorTab = 'dag' | 'node' | 'info' | 'code' | 'saved';
+export type InspectorTab =
+  | 'dag'
+  | 'node'
+  | 'info'
+  | 'notify'
+  | 'code'
+  | 'saved';
 
 export interface IInspectorProps {
   dag: IAfdagIR['dag'];
@@ -32,6 +39,7 @@ const TABS: Array<{ id: InspectorTab; label: string }> = [
   { id: 'dag', label: 'DAG' },
   { id: 'node', label: 'NODE' },
   { id: 'info', label: 'INFO' },
+  { id: 'notify', label: 'NOTIFY' },
   { id: 'code', label: 'CODE' },
   { id: 'saved', label: 'SAVED' }
 ];
@@ -111,6 +119,13 @@ export function Inspector(props: IInspectorProps): JSX.Element {
         <NodeTab node={props.node} onNodeChange={props.onNodeChange} />
       )}
       {tab === 'info' && <InfoTab node={props.node} />}
+      {tab === 'notify' && (
+        <NotificationsTab
+          key={`${props.reloadKey}:${props.dag.dag_id}`}
+          dag={props.dag}
+          onDagChange={props.onDagChange}
+        />
+      )}
       {tab === 'code' && (
         <CodePanel ir={props.ir} clientErrors={props.clientErrors} />
       )}

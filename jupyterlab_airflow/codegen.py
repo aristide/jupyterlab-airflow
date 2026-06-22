@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from jinja2 import Environment, Undefined
 
-from .registry import load_registry
+from .registry import load_notifiers, load_registry
 
 STUDIO_VERSION = "0.1.0"
 
@@ -171,9 +171,10 @@ def _default_args(dag: Dict[str, Any]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-def _dag_args(dag: Dict[str, Any]) -> List[str]:
+def _dag_args(dag: Dict[str, Any], extra: Optional[List[str]] = None) -> List[str]:
     """The shared ``DAG(...)`` keyword args (used by both the TaskFlow ``@dag``
-    decorator and the Traditional ``with DAG(...)`` context)."""
+    decorator and the Traditional ``with DAG(...)`` context). ``extra`` carries
+    the rendered ``on_*_callback=[...]`` notification kwargs (PRD §6.8)."""
     args: List[str] = [f'dag_id={_pyrepr(dag["dag_id"])}']
     if dag.get("description"):
         args.append(f'description={_pyrepr(dag["description"])}')
@@ -188,24 +189,79 @@ def _dag_args(dag: Dict[str, Any]) -> List[str]:
         args.append(f"tags={_pyrepr(list(dag['tags']))}")
     if dag.get("params"):
         args.append(f"params={_pyrepr(dag['params'])}")
+    if extra:
+        args.extend(extra)
     return args
 
 
-def _dag_decorator(dag: Dict[str, Any]) -> str:
-    body = "".join(f"    {arg},\n" for arg in _dag_args(dag))
+def _dag_decorator(dag: Dict[str, Any], callback_args: Optional[List[str]] = None) -> str:
+    body = "".join(f"    {arg},\n" for arg in _dag_args(dag, callback_args))
     return f"@dag(\n{body})"
 
 
-def _dag_context(dag: Dict[str, Any]) -> str:
+def _dag_context(dag: Dict[str, Any], callback_args: Optional[List[str]] = None) -> str:
     """The Traditional ``with DAG(...) as dag:`` line (PRD §6.3)."""
-    body = "".join(f"    {arg},\n" for arg in _dag_args(dag))
+    body = "".join(f"    {arg},\n" for arg in _dag_args(dag, callback_args))
     return f"with DAG(\n{body}) as dag:"
+
+
+# DAG-level callback events ``@dag`` / ``DAG`` accept and that still FIRE in
+# Airflow 3. ``sla_miss_callback`` is excluded: the SLA feature was removed in
+# Airflow 3.0 (the kwarg only emits a DeprecationWarning and never fires;
+# "Deadline Alerts" in 3.1+ is the replacement). ``on_retry`` is task-level — a
+# per-task callbacks surface (§6.8) would add it to the ``@task`` decorator.
+_DAG_CALLBACK_EVENTS = ("on_success", "on_failure")
+
+
+def _build_callbacks(
+    dag: Dict[str, Any],
+    notifiers: Dict[str, Dict[str, Any]],
+    env: Environment,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    """Render the DAG-level ``on_*_callback`` kwargs from ``dag['callbacks']``
+    (PRD §6.8). Each callback entry ``{notifier_id, params}`` is rendered to a
+    notifier instance via that notifier's registry ``template``. Returns the
+    ``on_X_callback=[...]`` arg strings (appended to the ``@dag`` / ``DAG(...)``
+    call) and the notifier defs used (so their imports get collected)."""
+    callbacks = dag.get("callbacks")
+    if not isinstance(callbacks, dict):
+        return [], []
+    args: List[str] = []
+    used: List[Dict[str, Any]] = []
+    for event in _DAG_CALLBACK_EVENTS:
+        entries = callbacks.get(event)
+        if not isinstance(entries, list):
+            continue
+        exprs: List[str] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            notifier = notifiers.get(entry.get("notifier_id"))
+            if not notifier:
+                raise CodegenError(
+                    f"Unknown notifier: {entry.get('notifier_id')!r}"
+                )
+            template = notifier.get("template")
+            if not template:
+                raise CodegenError(f"Notifier {notifier['id']!r} has no template")
+            expr = env.from_string(template).render(
+                params=entry.get("params") or {}
+            ).strip()
+            exprs.append(expr)
+            used.append(notifier)
+        if exprs:
+            args.append(f"{event}_callback=[{', '.join(exprs)}]")
+    return args, used
 
 
 # --------------------------------------------------------------------------- #
 # Imports + body
 # --------------------------------------------------------------------------- #
-def _collect_imports(ops: List[Dict[str, Any]], traditional: bool = False) -> List[str]:
+def _collect_imports(
+    ops: List[Dict[str, Any]],
+    traditional: bool = False,
+    notifiers: Tuple[Dict[str, Any], ...] = (),
+) -> List[str]:
     """datetime + airflow.sdk first, then de-duplicated provider imports.
 
     Traditional uses ``from airflow.sdk import DAG`` and every op's **operator
@@ -216,6 +272,10 @@ def _collect_imports(ops: List[Dict[str, Any]], traditional: bool = False) -> Li
         extra: List[str] = []
         for op in ops:
             line = op.get("import")
+            if line and line not in pinned and line not in extra:
+                extra.append(line)
+        for notifier in notifiers:
+            line = notifier.get("import")
             if line and line not in pinned and line not in extra:
                 extra.append(line)
         return pinned + sorted(extra)
@@ -235,6 +295,10 @@ def _collect_imports(ops: List[Dict[str, Any]], traditional: bool = False) -> Li
         else:
             line = op.get("import_taskflow")
         if line and line not in pinned and line not in covered and line not in extra:
+            extra.append(line)
+    for notifier in notifiers:
+        line = notifier.get("import")
+        if line and line not in pinned and line not in extra:
             extra.append(line)
     return pinned + sorted(extra)
 
@@ -349,6 +413,8 @@ def _render(ir: Dict[str, Any]) -> str:
         raise CodegenError("The graph has a cycle; Airflow rejects cyclic DAGs.")
 
     env = _make_env()
+    notifier_registry = {n["id"]: n for n in load_notifiers()}
+    callback_args, used_notifiers = _build_callbacks(dag, notifier_registry, env)
     used_ops: List[Dict[str, Any]] = []
     definitions: List[str] = []
     instantiations: List[str] = []
@@ -404,7 +470,9 @@ def _render(ir: Dict[str, Any]) -> str:
         f"# airflow-studio: managed  studio={STUDIO_VERSION}  "
         f"{_ir_hash(ir)}  dag_id={dag_id}  afdag_id={afdag_id}  syntax={syntax}"
     )
-    imports = "\n".join(_collect_imports(used_ops, traditional))
+    imports = "\n".join(
+        _collect_imports(used_ops, traditional, tuple(used_notifiers))
+    )
 
     body_sections = ["\n\n".join(definitions)] if definitions else ["    pass"]
     if instantiations:
@@ -415,11 +483,11 @@ def _render(ir: Dict[str, Any]) -> str:
 
     if traditional:
         # `with DAG(...) as dag:` owns the task graph — no decorator or call.
-        code = f"{header}\n{imports}\n\n\n{_dag_context(dag)}\n{body}\n"
+        code = f"{header}\n{imports}\n\n\n{_dag_context(dag, callback_args)}\n{body}\n"
     else:
         code = (
             f"{header}\n{imports}\n\n\n"
-            f"{_dag_decorator(dag)}\n"
+            f"{_dag_decorator(dag, callback_args)}\n"
             f"def {dag_id}():\n{body}\n\n\n"
             f"{dag_id}()\n"
         )

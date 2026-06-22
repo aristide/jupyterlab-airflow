@@ -1,0 +1,22 @@
+id: smtp
+label: Email (SMTP)
+provider: apache-airflow-providers-smtp
+airflow_min_version: '3.0'
+description: >-
+  Emails a notification when the chosen event fires (e.g. the DAG fails). Uses an
+  SMTP Connection. Attach it to a DAG or task event in the Notifications tab.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-smtp/stable/index.html
+example: |
+  to:       data-eng@example.com
+  subject:  'Airflow: {{ dag.dag_id }} failed'
+import: 'from airflow.providers.smtp.notifications.smtp import SmtpNotifier'
+params:
+  - { name: to, label: 'To', type: string, required: true, widget: text,
+      help: 'Recipient email address(es). Separate multiple with a comma.' }
+  - { name: subject, label: 'Subject', type: string, required: false, widget: text,
+      help: 'Email subject; Jinja templating works, e.g. "{{ dag.dag_id }} failed". Defaults to an Airflow-generated subject.' }
+  - { name: from_email, label: 'From', type: string, required: false, widget: text,
+      help: 'Sender address. Defaults to the SMTP connection''s configured sender.' }
+  - { name: smtp_conn_id, label: 'SMTP connection', type: string, required: false, widget: text, default: smtp_default,
+      help: 'The Airflow SMTP Connection. Defaults to "smtp_default".' }
+template: 'SmtpNotifier(to={{ params.to | pyrepr }}{% if params.subject %}, subject={{ params.subject | pyrepr }}{% endif %}{% if params.from_email %}, from_email={{ params.from_email | pyrepr }}{% endif %}{% if params.smtp_conn_id %}, smtp_conn_id={{ params.smtp_conn_id | pyrepr }}{% endif %})'

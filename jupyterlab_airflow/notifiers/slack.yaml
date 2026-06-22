@@ -1,0 +1,21 @@
+id: slack
+label: Slack message
+provider: apache-airflow-providers-slack
+airflow_min_version: '3.0'
+description: >-
+  Posts a Slack message when the chosen event fires (e.g. the DAG fails). Uses a
+  Slack API (bot token) Connection. Attach it to a DAG or task event in the
+  Notifications tab.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-slack/stable/index.html
+example: |
+  text:     ':red_circle: {{ dag.dag_id }} failed'
+  channel:  '#data-alerts'
+import: 'from airflow.providers.slack.notifications.slack import SlackNotifier'
+params:
+  - { name: text, label: 'Message', type: string, required: true, widget: textarea,
+      help: 'The message to post. Supports Slack mrkdwn + Jinja, e.g. ":red_circle: {{ dag.dag_id }} failed".' }
+  - { name: channel, label: 'Channel', type: string, required: false, widget: text,
+      help: 'Channel to post to, e.g. "#data-alerts". Defaults to "#general" — set it to avoid posting there.' }
+  - { name: slack_conn_id, label: 'Slack connection', type: string, required: false, widget: text, default: slack_api_default,
+      help: 'The Airflow Slack API Connection (bot token). Defaults to "slack_api_default".' }
+template: 'SlackNotifier(text={{ params.text | pyrepr }}{% if params.channel %}, channel={{ params.channel | pyrepr }}{% endif %}{% if params.slack_conn_id %}, slack_conn_id={{ params.slack_conn_id | pyrepr }}{% endif %})'

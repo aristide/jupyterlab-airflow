@@ -66,6 +66,7 @@ import {
   validateDagId
 } from '../ir';
 import { AfdagModel } from '../model';
+import { loadNotifiers, validateNotifierParams } from '../notifiers';
 import {
   getOperator,
   getOperators,
@@ -197,6 +198,25 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
           setOpsError(String((error && error.message) || error));
         }
       });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load the notifier registry (PRD §6.8) for the Notifications tab. The ready
+  // flag just re-renders so the tab shows the channels once the module cache
+  // populates; a load failure degrades gracefully (the tab says none are
+  // available) and never tears down the editor.
+  const [notifiersReady, setNotifiersReady] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    loadNotifiers()
+      .then(() => {
+        if (!cancelled) {
+          setNotifiersReady(true);
+        }
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -529,8 +549,20 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     if (hasCycle(taskNodes, edges)) {
       count += 1;
     }
+    // Notification callbacks (PRD §6.8): a notifier missing a required param
+    // (e.g. Slack `text`) blocks deploy too — but only once the notifier
+    // registry has loaded (else don't false-block before it resolves).
+    if (dag.callbacks && notifiersReady) {
+      for (const list of Object.values(dag.callbacks)) {
+        for (const entry of list ?? []) {
+          if (!validateNotifierParams(entry.notifier_id, entry.params).valid) {
+            count += 1;
+          }
+        }
+      }
+    }
     return count;
-  }, [taskNodes, edges]);
+  }, [taskNodes, edges, dag.callbacks, notifiersReady]);
 
   const selected = taskNodes.find(n => n.id === selectedId) ?? null;
 
