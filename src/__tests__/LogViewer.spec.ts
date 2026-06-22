@@ -1,0 +1,31 @@
+import { classifyLine } from '../components/LogViewer';
+
+describe('log line level classification (LogViewer)', () => {
+  it('classifies the level token in an Airflow log line', () => {
+    expect(
+      classifyLine('[2026-06-15T17:25:01+0000] {ti.py:1} INFO - starting')
+    ).toBe('info');
+    expect(
+      classifyLine('[2026-06-15T17:25:02+0000] {ti.py:9} ERROR - boom')
+    ).toBe('error');
+    expect(classifyLine('{x.py:2} WARNING - heads up')).toBe('warning');
+    expect(classifyLine('{x.py:3} CRITICAL - fatal')).toBe('critical');
+    expect(classifyLine('{x.py:4} DEBUG - noise')).toBe('debug');
+  });
+
+  it('treats a Python traceback as an error even without a level token', () => {
+    expect(classifyLine('Traceback (most recent call last):')).toBe('error');
+    expect(classifyLine('  File "/x/dag.py", line 12, in run')).toBe('error');
+    expect(classifyLine('ValueError: bad input')).toBe('error');
+    expect(classifyLine('KeyError: "missing"')).toBe('error');
+  });
+
+  it('falls back to plain for a line with no signal', () => {
+    expect(classifyLine('just some output')).toBe('plain');
+    expect(classifyLine('')).toBe('plain');
+  });
+
+  it('prefers the most severe token (critical over error)', () => {
+    expect(classifyLine('CRITICAL ERROR happened')).toBe('critical');
+  });
+});

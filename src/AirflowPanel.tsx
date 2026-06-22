@@ -13,11 +13,13 @@ import { ManagerApp } from './components/ManagerApp';
 export class AirflowPanel extends ReactWidget {
   private _refresh = new Signal<this, void>(this);
   private _trans: ReturnType<ITranslator['load']>;
+  private _openPath?: (path: string) => void;
 
-  constructor(translator?: ITranslator) {
+  constructor(translator?: ITranslator, openPath?: (path: string) => void) {
     super();
     this.addClass('jp-airflow-panel');
     this._trans = (translator ?? nullTranslator).load('jupyterlab_airflow');
+    this._openPath = openPath;
   }
 
   refresh(): void {
@@ -25,6 +27,12 @@ export class AirflowPanel extends ReactWidget {
   }
 
   render(): JSX.Element {
-    return <ManagerApp trans={this._trans} refreshSignal={this._refresh} />;
+    return (
+      <ManagerApp
+        trans={this._trans}
+        refreshSignal={this._refresh}
+        openPath={this._openPath}
+      />
+    );
   }
 }

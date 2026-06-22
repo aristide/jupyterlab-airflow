@@ -229,4 +229,19 @@ describe('DAG form data', () => {
     const props = schema.properties as Record<string, { type?: string }>;
     expect(props.tags.type).toBe('string');
   });
+
+  it('gives every DAG field help text (the ⓘ info-bubble content, PRD §6.1.3)', () => {
+    const { schema, uiSchema } = dagForm();
+    const props = schema.properties as Record<string, { description?: string }>;
+    // Every field in the form order must carry a non-empty description so the
+    // DescriptionFieldTemplate can render an info bubble for it.
+    const order = uiSchema['ui:order'] as string[];
+    for (const field of order) {
+      expect(typeof props[field].description).toBe('string');
+      expect((props[field].description as string).length).toBeGreaterThan(0);
+    }
+    // A couple of specific ones, to guard the wording source.
+    expect(props.schedule.description).toMatch(/how often/i);
+    expect(props.catchup.description).toMatch(/back-fill/i);
+  });
 });

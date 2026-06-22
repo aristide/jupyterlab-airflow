@@ -15,6 +15,7 @@ import {
   IImportErrorsRes,
   IOperatorDef,
   IOrphansRes,
+  IDagSourceRes,
   IPurgeRes,
   IRenamePreflightRes,
   IRollbackRes,
@@ -154,6 +155,18 @@ export const rollbackDag = (dagId: string): Promise<IApiRes<IRollbackRes>> =>
 // Deployed Studio DAGs whose source `.afdag` was deleted (PRD §6.5.6).
 export const findOrphans = (): Promise<IApiRes<IOrphansRes>> =>
   GET<IOrphansRes>('dags/orphans');
+
+// Resolve a deployed DAG back to its source `.afdag` Contents path for the
+// manager's "Open in Studio to fix" recovery action (PRD §7). `path` is null
+// when the source can't be located (pre-provenance deploy / source deleted).
+export const findDagSource = (opts: {
+  filename?: string;
+  dagId?: string;
+}): Promise<IApiRes<IDagSourceRes>> =>
+  GET<IDagSourceRes>('dags/source', {
+    ...(opts.filename ? { filename: opts.filename } : {}),
+    ...(opts.dagId ? { dag_id: opts.dagId } : {})
+  });
 
 // One DagRun's current state — polled by the editor's run-on-deploy banner.
 export const getDagRun = (

@@ -97,8 +97,8 @@ function commonParamSchema(name: string): RJSFSchema {
 }
 
 function paramSchema(param: IOperatorParam): RJSFSchema {
-  // The registry `help` becomes the JSON-Schema `description`, which RJSF renders
-  // as inline field help (`.field-description`) — contextual learning per field.
+  // The registry `help` becomes the JSON-Schema `description`, rendered by the
+  // custom DescriptionFieldTemplate as a hoverable `ⓘ` info bubble (AfdagForm).
   const base: RJSFSchema = { title: param.label };
   if (param.help) {
     base.description = param.help;
@@ -291,24 +291,68 @@ export function dagForm(): IFormSpec {
         description:
           'Renaming the DAG id is a guided migration — use “Rename DAG id…” in the toolbar.'
       },
-      description: { type: 'string', title: 'description' },
-      schedule: { type: 'string', title: 'schedule' },
-      start_date: { type: 'string', title: 'start_date', format: 'date' },
-      catchup: { type: 'boolean', title: 'catchup' },
-      retries: { type: 'integer', title: 'retries', minimum: 0 },
+      description: {
+        type: 'string',
+        title: 'description',
+        description:
+          'A free-text summary shown next to the DAG in the Airflow UI.'
+      },
+      schedule: {
+        type: 'string',
+        title: 'schedule',
+        description:
+          'How often the DAG runs — a preset like @daily, a cron expression (0 9 * * *), or None for manual / triggered-only.'
+      },
+      start_date: {
+        type: 'string',
+        title: 'start_date',
+        format: 'date',
+        description:
+          'The first date the scheduler considers. A run is created for each schedule interval on or after it.'
+      },
+      catchup: {
+        type: 'boolean',
+        title: 'catchup',
+        description:
+          'When on, Airflow back-fills every missed interval between start_date and now. Default off — most DAGs only run going forward.'
+      },
+      retries: {
+        type: 'integer',
+        title: 'retries',
+        minimum: 0,
+        description:
+          'How many times a failed task is retried (the DAG default; a task can override it in Common settings).'
+      },
       retry_delay_seconds: {
         type: 'integer',
         title: 'retry_delay (seconds)',
-        minimum: 0
+        minimum: 0,
+        description: 'Seconds to wait between retry attempts.'
       },
       tags: {
         type: 'string',
         title: 'tags',
-        description: 'Comma-separated, e.g. studio, etl'
+        description:
+          'Comma-separated labels for grouping/filtering DAGs in the Airflow UI, e.g. studio, etl.'
       },
-      owner: { type: 'string', title: 'owner' },
-      params: { type: 'string', title: 'params (JSON)' },
-      default_args: { type: 'string', title: 'default_args (JSON)' }
+      owner: {
+        type: 'string',
+        title: 'owner',
+        description:
+          'The Airflow owner attributed to every task; shown in the UI and usable as a filter.'
+      },
+      params: {
+        type: 'string',
+        title: 'params (JSON)',
+        description:
+          'DAG-level runtime parameters as a JSON object; surfaced in the Trigger form and referenced as {{ params.x }}.'
+      },
+      default_args: {
+        type: 'string',
+        title: 'default_args (JSON)',
+        description:
+          'Defaults applied to every task as a JSON object (e.g. retries, retry_delay, owner). Per-task Common settings override these.'
+      }
     }
   };
   const uiSchema: UiSchema = {

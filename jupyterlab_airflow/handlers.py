@@ -11,6 +11,7 @@ from .codegen import generate_dag
 from .deploy import (
     deploy_dag,
     find_orphans,
+    find_source_path,
     purge_dag,
     rename_preflight,
     retire_old_dag,
@@ -240,6 +241,24 @@ class OrphansHandler(_AirflowHandler):
         await self.respond(find_orphans, contents_root)
 
 
+class DagSourceHandler(_AirflowHandler):
+    """Resolve a deployed DAG back to its source `.afdag` Contents path so the
+    manager can offer "Open in Studio to fix" on an import error (PRD §7).
+    Returns ``{path}`` (or ``{path: null}`` when the source can't be located)."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        filename = self.get_argument("filename", "") or None
+        dag_id = self.get_argument("dag_id", "") or None
+        contents_root = getattr(self.contents_manager, "root_dir", None)
+        await self.respond(
+            find_source_path,
+            filename=filename,
+            dag_id=dag_id,
+            contents_root=contents_root,
+        )
+
+
 class TaskInstancesHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def get(self):
@@ -361,6 +380,7 @@ def setup_handlers(web_app):
         (_url(base_url, "dags/delete"), DagDeleteHandler),
         (_url(base_url, "dags/rollback"), DagRollbackHandler),
         (_url(base_url, "dags/orphans"), OrphansHandler),
+        (_url(base_url, "dags/source"), DagSourceHandler),
         (_url(base_url, "dags/rename/preflight"), RenamePreflightHandler),
         (_url(base_url, "dags/retire"), DagRetireHandler),
         (_url(base_url, "dagruns"), DagRunsHandler),

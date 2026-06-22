@@ -1,0 +1,51 @@
+id: s3_create_object
+label: S3 create object
+category: Storage
+provider: apache-airflow-providers-amazon
+airflow_min_version: '3.0'
+description: >-
+  Writes an object (a file) to an Amazon S3 bucket — or to MinIO / any
+  S3-compatible store by pointing the AWS Connection's endpoint_url at it. Use it
+  to upload an artifact your pipeline produced (a CSV, a report, a small dataset).
+  The bucket must already exist; credentials come from the AWS Connection.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/operators/s3/s3.html
+example: |
+  s3_bucket:  my-data-lake
+  s3_key:     reports/daily_{{ ds }}.csv
+  data:       date,total\n2026-06-22,42
+import: 'from airflow.providers.amazon.aws.operators.s3 import S3CreateObjectOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: put_s3
+params:
+  - { name: s3_bucket, label: 'Bucket', type: string, required: true, widget: text,
+      help: 'The S3 (or MinIO) bucket to write into, e.g. `my-data-lake`. No s3:// prefix.' }
+  - { name: s3_key, label: 'Key (object path)', type: string, required: true, widget: text,
+      help: 'The object key (path) within the bucket, e.g. `reports/daily_{{ ds }}.csv`. Jinja templating is supported.' }
+  - { name: data, label: 'Data', type: string, required: true, widget: textarea,
+      help: 'The text content to write as the object body. For binary or large files, generate the file in a Python task and upload that instead.' }
+  - { name: replace, label: 'Overwrite if it exists', type: boolean, required: false,
+      help: 'When on, overwrite an object already at this key. Off (the default) fails if the key already exists.' }
+  - { name: aws_conn_id, label: 'AWS connection', type: string, required: false, widget: text, default: aws_default,
+      help: 'The Airflow AWS Connection with the credentials/region (set its endpoint_url for MinIO). Defaults to `aws_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = S3CreateObjectOperator(
+      task_id={{ task_id | pyrepr }},
+      s3_bucket={{ params.s3_bucket | pyrepr }},
+      s3_key={{ params.s3_key | pyrepr }},
+      data={{ params.data | pyrepr }},
+      {% if params.replace %}replace={{ params.replace | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = S3CreateObjectOperator(
+      task_id={{ task_id | pyrepr }},
+      s3_bucket={{ params.s3_bucket | pyrepr }},
+      s3_key={{ params.s3_key | pyrepr }},
+      data={{ params.data | pyrepr }},
+      {% if params.replace %}replace={{ params.replace | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

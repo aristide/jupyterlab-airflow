@@ -1,0 +1,43 @@
+id: sql_table_check
+label: SQL table check
+category: Data Quality
+provider: apache-airflow-providers-common-sql
+airflow_min_version: '3.0'
+description: >-
+  Runs table-level data-quality assertions through a database Connection — row
+  counts, aggregate thresholds, or any custom boolean SQL predicate — and fails
+  the task if a check doesn't hold. Companion to the column check; native to
+  common-sql, so no extra packages.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-common-sql/stable/operators.html
+example: |
+  conn_id: warehouse
+  table:   sales
+  checks:  {"row_count": {"check_statement": "COUNT(*) > 0"}}
+import: 'from airflow.providers.common.sql.operators.sql import SQLTableCheckOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: table_check
+params:
+  - { name: conn_id, label: 'Database connection', type: string, required: true, widget: text,
+      help: 'The Airflow Connection for the database to check.' }
+  - { name: table, label: 'Table', type: string, required: true, widget: text,
+      help: 'The table to check, e.g. `analytics.sales`.' }
+  - { name: checks, label: 'Table checks', type: object, required: true, widget: json,
+      help: 'JSON object of named checks, each with a `check_statement`, e.g. {"row_count": {"check_statement": "COUNT(*) > 0"}}.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SQLTableCheckOperator(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      table={{ params.table | pyrepr }},
+      checks={{ params.checks | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SQLTableCheckOperator(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      table={{ params.table | pyrepr }},
+      checks={{ params.checks | pyrepr }},
+      {{ common | pyargs }}
+  )

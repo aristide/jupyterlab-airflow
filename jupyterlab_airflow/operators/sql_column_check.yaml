@@ -1,0 +1,43 @@
+id: sql_column_check
+label: SQL column check
+category: Data Quality
+provider: apache-airflow-providers-common-sql
+airflow_min_version: '3.0'
+description: >-
+  Runs built-in data-quality checks on a table's columns through a database
+  Connection — assert no nulls, uniqueness, min/max bounds, distinct counts — and
+  fails the task if any check doesn't pass. A no-extra-dependencies alternative to
+  Great Expectations, over any common-sql Connection (Trino, Postgres, MySQL…).
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-common-sql/stable/operators.html
+example: |
+  conn_id: warehouse
+  table:   sales
+  column_mapping: {"amount": {"min": {"greater_than": 0}, "null_check": {"equal_to": 0}}}
+import: 'from airflow.providers.common.sql.operators.sql import SQLColumnCheckOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: col_check
+params:
+  - { name: conn_id, label: 'Database connection', type: string, required: true, widget: text,
+      help: 'The Airflow Connection for the database to check. It selects the database type and holds the credentials.' }
+  - { name: table, label: 'Table', type: string, required: true, widget: text,
+      help: 'The table to check, e.g. `analytics.sales`.' }
+  - { name: column_mapping, label: 'Column checks', type: object, required: true, widget: json,
+      help: 'JSON mapping each column to its checks, e.g. {"amount": {"min": {"greater_than": 0}}}. Check names: null_check, distinct_check, unique_check, min, max.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SQLColumnCheckOperator(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      table={{ params.table | pyrepr }},
+      column_mapping={{ params.column_mapping | pyrepr }},
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SQLColumnCheckOperator(
+      task_id={{ task_id | pyrepr }},
+      conn_id={{ params.conn_id | pyrepr }},
+      table={{ params.table | pyrepr }},
+      column_mapping={{ params.column_mapping | pyrepr }},
+      {{ common | pyargs }}
+  )

@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { IImportError } from '../interfaces';
+import { IExplainedError } from '../importErrors';
 
 export type DeployPhase =
   | 'idle'
@@ -33,6 +34,8 @@ export interface IDeployState {
 
 export interface IDeployBannerProps {
   state: IDeployState;
+  /** Plain-language translation of a failed import + the offending task (§7). */
+  explanation?: IExplainedError;
   onDismiss: () => void;
   onUnpauseTrigger: () => void;
   onStopRun: () => void;
@@ -63,6 +66,7 @@ const MOD: Record<DeployPhase, string> = {
 export function DeployBanner(props: IDeployBannerProps): JSX.Element | null {
   const {
     state,
+    explanation,
     onDismiss,
     onUnpauseTrigger,
     onStopRun,
@@ -193,9 +197,28 @@ export function DeployBanner(props: IDeployBannerProps): JSX.Element | null {
         </span>
       )}
 
+      {state.phase === 'failed' && explanation && (
+        <div className="jp-afdag-deploybanner-explain">
+          <div className="jp-afdag-deploybanner-explain-title">
+            {explanation.title}
+          </div>
+          <div>{explanation.summary}</div>
+          {explanation.nodeTaskId && (
+            <div className="jp-afdag-deploybanner-explain-node">
+              ⚠ Check the <strong>{explanation.nodeTaskId}</strong> task.
+            </div>
+          )}
+          {explanation.hint && (
+            <div className="jp-afdag-deploybanner-explain-hint">
+              {explanation.hint}
+            </div>
+          )}
+        </div>
+      )}
+
       {state.phase === 'failed' && state.importError?.stack_trace && (
         <details className="jp-afdag-deploybanner-trace">
-          <summary>Traceback</summary>
+          <summary>Show technical details</summary>
           <pre>{state.importError.stack_trace}</pre>
         </details>
       )}

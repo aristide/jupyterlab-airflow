@@ -279,35 +279,79 @@ def is_drifted(filename: str, target: Optional[SharedVolumeTarget] = None) -> bo
     return _body_hash(content) != recorded
 
 
-def _live_afdag_ids(contents_root: Optional[str]) -> Tuple[Set[str], bool]:
-    """The ``afdag_id`` of every `.afdag` design file under the Jupyter Contents
-    root — the *source* side of the orphan join (PRD §6.5.6). Hidden/checkpoint
-    dirs are skipped.
+def _afdag_paths(contents_root: Optional[str]) -> Tuple[Dict[str, str], bool]:
+    """Map ``afdag_id`` → Contents-relative path for every `.afdag` design file
+    under the Jupyter Contents root. The *source* side of the orphan join (PRD
+    §6.5.6) and the backing index for :func:`find_source_path` ("Open in Studio
+    to fix", §7). Hidden/checkpoint dirs are skipped; paths use forward slashes.
 
-    Returns ``(ids, degraded)`` where ``degraded`` is True if any `.afdag` could
-    not be read or parsed: such a file's ``afdag_id`` is then unknown, so the
-    caller must NOT classify the deploy it backs as deleted (a corrupt/unreadable
-    source is *present*, not gone) — see :func:`find_orphans`.
+    Returns ``(id→path, degraded)`` where ``degraded`` is True if any `.afdag`
+    could not be read or parsed (its ``afdag_id`` is then unknown). If two files
+    share an ``afdag_id`` (a copied `.afdag`), the first walked wins.
     """
-    ids: Set[str] = set()
+    paths: Dict[str, str] = {}
     degraded = False
     if not contents_root or not os.path.isdir(contents_root):
-        return ids, degraded
+        return paths, degraded
     for dirpath, dirnames, filenames in os.walk(contents_root):
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for name in filenames:
             if not name.endswith(".afdag"):
                 continue
+            full = os.path.join(dirpath, name)
             try:
-                with open(os.path.join(dirpath, name), encoding="utf-8") as fh:
+                with open(full, encoding="utf-8") as fh:
                     ir = json.load(fh)
             except (OSError, ValueError):
                 degraded = True
                 continue
             afdag_id = ((ir or {}).get("provenance") or {}).get("afdag_id")
             if afdag_id:
-                ids.add(str(afdag_id).strip())
-    return ids, degraded
+                key = str(afdag_id).strip()
+                if key not in paths:
+                    rel = os.path.relpath(full, contents_root)
+                    paths[key] = rel.replace(os.sep, "/")
+    return paths, degraded
+
+
+def _live_afdag_ids(contents_root: Optional[str]) -> Tuple[Set[str], bool]:
+    """The ``afdag_id`` of every `.afdag` design file under the Jupyter Contents
+    root — the *source* side of the orphan join (PRD §6.5.6). See
+    :func:`_afdag_paths`; ``degraded`` propagates unchanged.
+    """
+    paths, degraded = _afdag_paths(contents_root)
+    return set(paths.keys()), degraded
+
+
+def find_source_path(
+    filename: Optional[str] = None,
+    dag_id: Optional[str] = None,
+    contents_root: Optional[str] = None,
+    target: Optional[SharedVolumeTarget] = None,
+) -> Dict[str, Any]:
+    """Resolve a deployed Studio DAG back to its source `.afdag` Contents path so
+    the manager can offer "Open in Studio to fix" on an import error (PRD §7).
+
+    Matches the deployed `.py` (by ``filename`` basename, else ``dag_id``) to its
+    ``afdag_id`` provenance, then finds the `.afdag` carrying that id. Returns
+    ``{path}`` (Contents-relative, or ``None`` if the source can't be located —
+    the deploy pre-dates ``afdag_id``, the `.afdag` was deleted, or no managed
+    file matches).
+    """
+    target = target or SharedVolumeTarget()
+    base = os.path.basename(filename) if filename else None
+    afdag_id: Optional[str] = None
+    for entry in target.list():
+        if base is not None and entry.get("filename") == base:
+            afdag_id = entry.get("afdag_id")
+            break
+        if base is None and dag_id and entry.get("dag_id") == dag_id:
+            afdag_id = entry.get("afdag_id")
+            break
+    if not afdag_id:
+        return {"path": None}
+    paths, _ = _afdag_paths(contents_root)
+    return {"path": paths.get(str(afdag_id).strip())}
 
 
 def find_orphans(

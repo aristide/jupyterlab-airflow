@@ -12,6 +12,7 @@ from jupyterlab_airflow.deploy import (
     SharedVolumeTarget,
     deploy_dag,
     find_orphans,
+    find_source_path,
     is_drifted,
     rename_preflight,
     retire_old_dag,
@@ -363,3 +364,53 @@ def test_find_orphans_not_degraded_when_all_readable(tmp_path):
     res = find_orphans(str(root), target)
     assert res["degraded"] is False
     assert res["orphans"] == []
+
+
+def test_find_source_path_resolves_by_filename(tmp_path):
+    # "Open in Studio to fix" (§7): a deployed file -> its source `.afdag` path,
+    # Contents-relative, even when the source lives in a subfolder.
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    (root / "sub").mkdir(parents=True)
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d  afdag_id=FFF\nx=1\n")
+    _write_afdag(root / "sub", "d.afdag", "FFF")
+    res = find_source_path(filename="d.py", contents_root=str(root), target=target)
+    assert res["path"] == "sub/d.afdag"
+
+
+def test_find_source_path_resolves_by_dag_id(tmp_path):
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=mydag  afdag_id=GGG\nx=1\n")
+    _write_afdag(root, "d.afdag", "GGG")
+    res = find_source_path(dag_id="mydag", contents_root=str(root), target=target)
+    assert res["path"] == "d.afdag"
+
+
+def test_find_source_path_none_when_source_deleted(tmp_path):
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d  afdag_id=HHH\nx=1\n")
+    # No matching .afdag under root.
+    res = find_source_path(filename="d.py", contents_root=str(root), target=target)
+    assert res["path"] is None
+
+
+def test_find_source_path_none_for_pre_provenance_deploy(tmp_path):
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    # A managed file with no afdag_id can't be re-associated.
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d\nx=1\n")
+    res = find_source_path(filename="d.py", contents_root=str(root), target=target)
+    assert res["path"] is None

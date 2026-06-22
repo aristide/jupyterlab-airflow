@@ -53,6 +53,7 @@ import {
   setDagRunState,
   triggerDag
 } from '../handler';
+import { explainImportError } from '../importErrors';
 import { IOperatorDef } from '../interfaces';
 import { tidyLayout } from '../layout';
 import {
@@ -349,10 +350,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     );
   }, [setNodes]);
 
-  React.useEffect(
-    () => () => window.clearTimeout(tidyTimerRef.current),
-    []
-  );
+  React.useEffect(() => () => window.clearTimeout(tidyTimerRef.current), []);
 
   // Re-fit the canvas when the Lumino widget is shown or resized.
   React.useEffect(() => {
@@ -564,6 +562,16 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const currentIR = React.useMemo(
     () => flowToIR(nodes, edges, dag, baseRef.current),
     [nodes, edges, dag, syntaxStyle]
+  );
+
+  // Plain-language translation of a failed import (PRD §7), with a best-effort
+  // map back to the offending task using the live IR.
+  const deployExplanation = React.useMemo(
+    () =>
+      deploy.phase === 'failed'
+        ? explainImportError(deploy.importError?.stack_trace, currentIR)
+        : undefined,
+    [deploy.phase, deploy.importError, currentIR]
   );
 
   // Switch the codegen syntax family (PRD §6.3): update the base IR (which
@@ -1278,6 +1286,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         </div>
         <DeployBanner
           state={deploy}
+          explanation={deployExplanation}
           onDismiss={onDismissDeploy}
           onUnpauseTrigger={onUnpauseTrigger}
           onStopRun={() => void onStopRun()}

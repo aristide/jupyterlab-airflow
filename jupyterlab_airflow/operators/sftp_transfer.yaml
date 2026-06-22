@@ -1,0 +1,47 @@
+id: sftp_transfer
+label: SFTP transfer
+category: Ingestion
+provider: apache-airflow-providers-sftp
+airflow_min_version: '3.0'
+description: >-
+  Uploads or downloads a file over SFTP (SSH file transfer) between an Airflow
+  worker and a remote server — the secure way to move files into or out of a
+  landing zone. Pick the direction with "operation". Credentials come from an SSH
+  Connection.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-sftp/stable/operators/sftp.html
+example: |
+  operation:        get
+  remote_filepath:  /incoming/sales_{{ ds }}.csv
+  local_filepath:   /tmp/sales.csv
+import: 'from airflow.providers.sftp.operators.sftp import SFTPOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: sftp
+params:
+  - { name: operation, label: 'Operation (put / get)', type: string, required: true, widget: text, default: put,
+      help: 'Direction of transfer: `put` uploads the local file to the remote server; `get` downloads the remote file to the worker.' }
+  - { name: local_filepath, label: 'Local path', type: string, required: true, widget: text,
+      help: 'Path on the Airflow worker — the source for `put`, the destination for `get`.' }
+  - { name: remote_filepath, label: 'Remote path', type: string, required: true, widget: text,
+      help: 'Path on the SFTP server — the destination for `put`, the source for `get`. Jinja templating is supported.' }
+  - { name: ssh_conn_id, label: 'SSH connection', type: string, required: false, widget: text, default: ssh_default,
+      help: 'The Airflow SSH Connection (host, port, credentials) for the SFTP server. Defaults to `ssh_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SFTPOperator(
+      task_id={{ task_id | pyrepr }},
+      operation={{ params.operation | pyrepr }},
+      local_filepath={{ params.local_filepath | pyrepr }},
+      remote_filepath={{ params.remote_filepath | pyrepr }},
+      {% if params.ssh_conn_id %}ssh_conn_id={{ params.ssh_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SFTPOperator(
+      task_id={{ task_id | pyrepr }},
+      operation={{ params.operation | pyrepr }},
+      local_filepath={{ params.local_filepath | pyrepr }},
+      remote_filepath={{ params.remote_filepath | pyrepr }},
+      {% if params.ssh_conn_id %}ssh_conn_id={{ params.ssh_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

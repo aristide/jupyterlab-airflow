@@ -141,6 +141,71 @@ def test_sensors_declare_the_sensor_common_params():
         assert by_id[op_id]["category"] == "Sensors", op_id
 
 
+def test_v13_lakehouse_p0_ops_present_with_correct_providers():
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    # (id, provider, import-module, category) — verified against the real provider
+    # wheels (amazon 9.30, sftp 5.8, common-sql 2.0, apache-spark 6.1,
+    # papermill 3.13, smtp 3.0, slack 9.10).
+    expected = {
+        "s3_create_object": (
+            "apache-airflow-providers-amazon",
+            "airflow.providers.amazon.aws.operators.s3",
+            "Storage",
+        ),
+        "sftp_transfer": (
+            "apache-airflow-providers-sftp",
+            "airflow.providers.sftp.operators.sftp",
+            "Ingestion",
+        ),
+        "sql_column_check": (
+            "apache-airflow-providers-common-sql",
+            "airflow.providers.common.sql.operators.sql",
+            "Data Quality",
+        ),
+        "sql_table_check": (
+            "apache-airflow-providers-common-sql",
+            "airflow.providers.common.sql.operators.sql",
+            "Data Quality",
+        ),
+        "spark_submit": (
+            "apache-airflow-providers-apache-spark",
+            "airflow.providers.apache.spark.operators.spark_submit",
+            "Compute",
+        ),
+        "papermill": (
+            "apache-airflow-providers-papermill",
+            "airflow.providers.papermill.operators.papermill",
+            "Compute",
+        ),
+        "email": (
+            "apache-airflow-providers-smtp",
+            "airflow.providers.smtp.operators.smtp",
+            "Notifications",
+        ),
+        "slack_post": (
+            "apache-airflow-providers-slack",
+            "airflow.providers.slack.operators.slack",
+            "Notifications",
+        ),
+    }
+    assert set(expected) <= set(by_id)
+    for op_id, (provider, module, category) in expected.items():
+        op = by_id[op_id]
+        assert op["provider"] == provider, op_id
+        assert module in op["import"], op_id
+        assert op["category"] == category, op_id
+        # Operator-style (no TaskFlow-native decorator); gated (non-standard).
+        assert op["taskflow"] == "operator", op_id
+        assert op["provider"] != "apache-airflow-providers-standard", op_id
+        # Never an Airflow-2 import path.
+        assert "airflow.operators." not in op["import"], op_id
+        assert "airflow.sensors." not in op["import"], op_id
+        assert "airflow.decorators" not in op["import"], op_id
+        # Both template families ship (Traditional is still supported, §6.3).
+        assert op["template_taskflow"].strip(), op_id
+        assert op["template_traditional"].strip(), op_id
+
+
 def test_bash_is_airflow3_correct():
     bash = next(op for op in registry.load_registry() if op["id"] == "bash")
     assert "airflow.providers.standard.operators.bash" in bash["import"]

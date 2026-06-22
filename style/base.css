@@ -205,6 +205,42 @@
   font-size: var(--jp-code-font-size);
 }
 
+.jp-airflow-ie-card {
+  border-top: 1px solid var(--jp-error-color1);
+  padding-top: 6px;
+}
+
+.jp-airflow-ie-card:first-of-type {
+  border-top: none;
+}
+
+.jp-airflow-ie-file {
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  color: var(--jp-error-color1);
+  word-break: break-all;
+}
+
+.jp-airflow-ie-title {
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.jp-airflow-ie-summary {
+  margin-top: 2px;
+}
+
+.jp-airflow-ie-hint {
+  margin-top: 3px;
+  opacity: 0.9;
+}
+
+.jp-airflow-ie-trace summary {
+  margin-top: 4px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
 .jp-airflow-badge {
   flex: 0 0 auto;
   display: inline-flex;
@@ -480,16 +516,116 @@
 }
 
 .jp-airflow-logs {
-  width: 640px;
+  width: min(820px, 90vw);
 }
 
-.jp-airflow-logtext {
-  margin: 0;
-  padding: 10px 12px;
+.jp-airflow-logtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-airflow-logerrcount {
+  color: var(--jp-error-color1);
+  font-weight: 400;
+}
+
+/* Log-viewer toolbar: attempt selector · search · errors-only · wrap/copy/download */
+.jp-airflow-logtoolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-airflow-logtry,
+.jp-airflow-logchk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-airflow-logsearch {
+  flex: 1;
+  min-width: 120px;
+  padding: 2px 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background: var(--jp-input-active-background, var(--jp-layout-color0));
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-airflow-logbody {
   overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
+  padding: 8px 0;
   font-family: var(--jp-code-font-family);
   font-size: var(--jp-code-font-size);
+  line-height: 1.4;
+}
+
+.jp-airflow-logstate {
+  padding: 16px 12px;
+  color: var(--jp-ui-font-color2);
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-airflow-logstate.jp-mod-err {
+  color: var(--jp-error-color1);
+}
+
+.jp-airflow-logline {
+  display: flex;
+  gap: 10px;
+  padding: 0 12px;
+  white-space: pre;
   color: var(--jp-content-font-color1);
+}
+
+.jp-airflow-logline:hover {
+  background: var(--jp-layout-color2);
+}
+
+/* Wrap is on by default; the No-wrap toggle adds .jp-mod-nowrap for horizontal
+   scroll on long lines. */
+.jp-airflow-logbody:not(.jp-mod-nowrap) .jp-airflow-logline {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jp-airflow-logln {
+  flex: 0 0 auto;
+  min-width: 2.5em;
+  text-align: right;
+  color: var(--jp-ui-font-color3);
+  user-select: none;
+}
+
+.jp-airflow-logln-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Per-level emphasis. Error/critical also get a left bar (non-color-only). */
+.jp-airflow-log-error,
+.jp-airflow-log-critical {
+  background: var(--jp-error-color3, rgb(255 0 0 / 8%));
+  color: var(--jp-error-color1);
+}
+
+.jp-airflow-logline.jp-mod-err {
+  padding-left: 9px;
+  border-left: 3px solid var(--jp-error-color1);
+}
+
+.jp-airflow-log-warning {
+  color: var(--jp-warn-color1);
+}
+
+.jp-airflow-log-debug {
+  color: var(--jp-ui-font-color3);
 }

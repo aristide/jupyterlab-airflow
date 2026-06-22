@@ -7,6 +7,7 @@ import { createPortal } from 'react-dom';
 import {
   clearTasks,
   deleteDag,
+  findDagSource,
   findOrphans,
   getDagDetails,
   getTaskLogs,
@@ -26,6 +27,8 @@ import {
   IOrphan,
   ITaskInstance
 } from '../interfaces';
+import { explainImportError } from '../importErrors';
+import { ILogViewerData, LogViewer } from './LogViewer';
 import { TriggerDialog } from './TriggerDialog';
 
 type Trans = ReturnType<ITranslator['load']>;
@@ -33,15 +36,12 @@ type Trans = ReturnType<ITranslator['load']>;
 export interface IManagerAppProps {
   trans: Trans;
   refreshSignal: ISignal<unknown, void>;
+  /** Open a `.afdag` source in the Studio editor ("Open in Studio to fix"). */
+  openPath?: (path: string) => void;
 }
 
 type RunMap = Record<string, IDagRun[] | 'loading'>;
 type TaskMap = Record<string, ITaskInstance[] | 'loading'>;
-
-interface ILogsModal {
-  title: string;
-  text: string;
-}
 
 interface IConfirm {
   title: string;
@@ -54,7 +54,7 @@ interface IConfirm {
 const runKey = (dagId: string, runId: string): string => `${dagId}::${runId}`;
 
 export function ManagerApp(props: IManagerAppProps): JSX.Element {
-  const { trans } = props;
+  const { trans, openPath } = props;
   const [dags, setDags] = React.useState<IDag[]>([]);
   const [importErrors, setImportErrors] = React.useState<IImportError[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -69,7 +69,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
 
   const [runs, setRuns] = React.useState<RunMap>({});
   const [tasks, setTasks] = React.useState<TaskMap>({});
-  const [logs, setLogs] = React.useState<ILogsModal | null>(null);
+  const [logs, setLogs] = React.useState<ILogViewerData | null>(null);
   const [confirm, setConfirm] = React.useState<IConfirm | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   // Open trigger-with-conf dialog for a DAG that declares params (PRD §15.10).
@@ -221,20 +221,47 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     }));
   };
 
-  const viewLogs = async (
+  const loadLogs = async (
     dagId: string,
     runId: string,
-    ti: ITaskInstance
+    taskId: string,
+    tryNumber: number,
+    maxTry: number
   ): Promise<void> => {
-    setLogs({ title: `${ti.task_id} — loading…`, text: trans.__('Loading…') });
-    const res = await getTaskLogs(dagId, runId, ti.task_id, ti.try_number || 1);
     setLogs({
-      title: `${ti.task_id} (try ${ti.try_number || 1})`,
-      text:
-        res.status === 'OK'
-          ? res.data?.content || trans.__('(empty)')
-          : (res.error ?? trans.__('Failed to load logs'))
+      dagId,
+      runId,
+      taskId,
+      tryNumber,
+      maxTry,
+      text: null,
+      error: null
     });
+    const res = await getTaskLogs(dagId, runId, taskId, tryNumber);
+    setLogs(prev => {
+      // Ignore a stale response if the user switched task / try meanwhile.
+      if (
+        !prev ||
+        prev.taskId !== taskId ||
+        prev.runId !== runId ||
+        prev.tryNumber !== tryNumber
+      ) {
+        return prev;
+      }
+      if (res.status === 'OK') {
+        return { ...prev, text: res.data?.content ?? '', error: null };
+      }
+      return {
+        ...prev,
+        text: null,
+        error: res.error ?? trans.__('Failed to load logs')
+      };
+    });
+  };
+
+  const viewLogs = (dagId: string, runId: string, ti: ITaskInstance): void => {
+    const maxTry = ti.try_number || 1;
+    void loadLogs(dagId, runId, ti.task_id, maxTry, maxTry);
   };
 
   const clearTask = async (
@@ -339,6 +366,32 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     setOrphans(os => os.filter(o => o.dag_id !== orphan.dag_id));
   };
 
+  // "Open in Studio to fix" (PRD §7): resolve the failed deployed file back to
+  // its source `.afdag` and open it in the editor. The source may be gone (a
+  // pre-provenance deploy, or the design file was deleted) — say so plainly.
+  const openInStudio = async (err: IImportError): Promise<void> => {
+    if (!openPath) {
+      return;
+    }
+    setBusy(trans.__('Locating source…'));
+    const res = await findDagSource({ filename: err.filename });
+    setBusy(null);
+    if (res.status === 'ERR') {
+      setError(res.error ?? 'Failed to locate the DAG source');
+      return;
+    }
+    if (res.data?.path) {
+      openPath(res.data.path);
+    } else {
+      setError(
+        trans.__(
+          "Couldn't find the .afdag source for %1 — it may have been deleted or deployed before source tracking.",
+          basename(err.filename)
+        )
+      );
+    }
+  };
+
   return (
     <div className="jp-airflow-root">
       <div className="jp-airflow-header">
@@ -371,12 +424,38 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
             {importErrors.length})
           </button>
           {showErrors &&
-            importErrors.map((err, i) => (
-              <details key={err.import_error_id ?? i} className="jp-airflow-ie">
-                <summary>{basename(err.filename)}</summary>
-                <pre>{err.stack_trace ?? trans.__('(no details)')}</pre>
-              </details>
-            ))}
+            importErrors.map((err, i) => {
+              const explained = explainImportError(err.stack_trace);
+              return (
+                <div
+                  key={err.import_error_id ?? i}
+                  className="jp-airflow-ie jp-airflow-ie-card"
+                >
+                  <div className="jp-airflow-ie-file">
+                    {basename(err.filename)}
+                  </div>
+                  <div className="jp-airflow-ie-title">{explained.title}</div>
+                  <div className="jp-airflow-ie-summary">
+                    {explained.summary}
+                  </div>
+                  {explained.hint && (
+                    <div className="jp-airflow-ie-hint">{explained.hint}</div>
+                  )}
+                  {openPath && (
+                    <button
+                      className="jp-airflow-linkbtn"
+                      onClick={() => void openInStudio(err)}
+                    >
+                      {trans.__('Open in Studio to fix')}
+                    </button>
+                  )}
+                  <details className="jp-airflow-ie-trace">
+                    <summary>{trans.__('Show technical details')}</summary>
+                    <pre>{err.stack_trace ?? trans.__('(no details)')}</pre>
+                  </details>
+                </div>
+              );
+            })}
         </div>
       )}
 
@@ -452,18 +531,14 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
 
       {logs && (
         <Overlay onClose={() => setLogs(null)}>
-          <div className="jp-airflow-modal jp-airflow-logs">
-            <div className="jp-airflow-modal-head">
-              <span>{logs.title}</span>
-              <button
-                className="jp-airflow-iconbtn"
-                onClick={() => setLogs(null)}
-              >
-                ✕
-              </button>
-            </div>
-            <pre className="jp-airflow-logtext">{logs.text}</pre>
-          </div>
+          <LogViewer
+            data={logs}
+            trans={trans}
+            onSelectTry={t =>
+              void loadLogs(logs.dagId, logs.runId, logs.taskId, t, logs.maxTry)
+            }
+            onClose={() => setLogs(null)}
+          />
         </Overlay>
       )}
 
@@ -678,6 +753,21 @@ function Overlay(props: {
   children: React.ReactNode;
   onClose: () => void;
 }): JSX.Element {
+  const innerRef = React.useRef<HTMLDivElement>(null);
+  const onCloseRef = React.useRef(props.onClose);
+  onCloseRef.current = props.onClose;
+  // Escape closes any overlay (logs / trigger / confirm); focus the modal on
+  // open so keyboard users land inside it.
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    innerRef.current?.focus();
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   // Portal to <body> so the fixed-position backdrop covers the whole window.
   // Rendered inside the left sidebar it gets trapped by the panel's containing
   // block (lumino widgets establish one via transform/contain), which clips the
@@ -685,6 +775,8 @@ function Overlay(props: {
   return createPortal(
     <div className="jp-airflow-overlay" onClick={props.onClose}>
       <div
+        ref={innerRef}
+        tabIndex={-1}
         className="jp-airflow-overlay-inner"
         onClick={e => e.stopPropagation()}
       >

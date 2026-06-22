@@ -1,0 +1,47 @@
+id: email
+label: Send email
+category: Notifications
+provider: apache-airflow-providers-smtp
+airflow_min_version: '3.0'
+description: >-
+  Sends an email as a task — e.g. "the report is ready" with a link, or a summary
+  at the end of a pipeline. In Airflow 3 EmailOperator lives in the smtp provider;
+  the SMTP server comes from an SMTP Connection. (To alert only on failure, use a
+  notifier on the DAG instead — that's a callback, not a task.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-smtp/stable/operators/email.html
+example: |
+  to:            data-eng@example.com
+  subject:       Daily load finished — {{ ds }}
+  html_content:  <p>The daily load completed successfully.</p>
+import: 'from airflow.providers.smtp.operators.smtp import EmailOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: email
+params:
+  - { name: to, label: 'To', type: string, required: true, widget: text,
+      help: 'Recipient email address, e.g. `data-eng@example.com`.' }
+  - { name: subject, label: 'Subject', type: string, required: true, widget: text,
+      help: 'The email subject line. Jinja templating is supported, e.g. `Load finished — {{ ds }}`.' }
+  - { name: html_content, label: 'Body (HTML)', type: string, required: true, widget: textarea,
+      help: 'The email body as HTML, e.g. `<p>The daily load completed.</p>`.' }
+  - { name: conn_id, label: 'SMTP connection', type: string, required: false, widget: text, default: smtp_default,
+      help: 'The Airflow SMTP Connection (server, port, credentials). Defaults to `smtp_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = EmailOperator(
+      task_id={{ task_id | pyrepr }},
+      to={{ params.to | pyrepr }},
+      subject={{ params.subject | pyrepr }},
+      html_content={{ params.html_content | pyrepr }},
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = EmailOperator(
+      task_id={{ task_id | pyrepr }},
+      to={{ params.to | pyrepr }},
+      subject={{ params.subject | pyrepr }},
+      html_content={{ params.html_content | pyrepr }},
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

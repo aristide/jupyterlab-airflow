@@ -1,0 +1,42 @@
+id: slack_post
+label: Slack message
+category: Notifications
+provider: apache-airflow-providers-slack
+airflow_min_version: '3.0'
+description: >-
+  Posts a message to a Slack channel as a task — e.g. announce that a pipeline
+  finished, or share a number. Uses a Slack API (bot token) Connection. (To alert
+  only on failure, attach a Slack notifier to the DAG instead — that's a callback,
+  not a task node.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-slack/stable/operators/slack_api.html
+example: |
+  channel:  '#data-alerts'
+  text:     ':white_check_mark: Daily load finished for {{ ds }}'
+import: 'from airflow.providers.slack.operators.slack import SlackAPIPostOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: slack
+params:
+  - { name: text, label: 'Message', type: string, required: true, widget: textarea,
+      help: 'The message to post. Supports Slack mrkdwn and emoji, e.g. `:tada: done for {{ ds }}`.' }
+  - { name: channel, label: 'Channel', type: string, required: false, widget: text,
+      help: 'The channel to post to, e.g. `#data-alerts` (or a channel ID). Defaults to the one set on the Connection/token.' }
+  - { name: slack_conn_id, label: 'Slack connection', type: string, required: false, widget: text, default: slack_api_default,
+      help: 'The Airflow Slack API Connection holding the bot token. Defaults to `slack_api_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SlackAPIPostOperator(
+      task_id={{ task_id | pyrepr }},
+      text={{ params.text | pyrepr }},
+      {% if params.channel %}channel={{ params.channel | pyrepr }},{% endif %}
+      {% if params.slack_conn_id %}slack_conn_id={{ params.slack_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SlackAPIPostOperator(
+      task_id={{ task_id | pyrepr }},
+      text={{ params.text | pyrepr }},
+      {% if params.channel %}channel={{ params.channel | pyrepr }},{% endif %}
+      {% if params.slack_conn_id %}slack_conn_id={{ params.slack_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

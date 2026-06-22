@@ -279,6 +279,82 @@ def test_p2_cloud_k8s_ops_render_airflow3():
     assert "airflow.operators." not in code and "airflow.sensors." not in code
 
 
+def test_v13_lakehouse_p0_ops_render_airflow3():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "s3_create_object", "task_id": "put",
+             "params": {"s3_bucket": "lake", "s3_key": "out/x.csv", "data": "a,b\n1,2"}},
+            {"id": "b", "op": "sftp_transfer", "task_id": "sftp",
+             "params": {"operation": "get", "local_filepath": "/tmp/x",
+                        "remote_filepath": "/r/x"}},
+            {"id": "c", "op": "sql_column_check", "task_id": "col",
+             "params": {"conn_id": "wh", "table": "sales",
+                        "column_mapping": {"amount": {"min": {"greater_than": 0}}}}},
+            {"id": "d", "op": "sql_table_check", "task_id": "tbl",
+             "params": {"conn_id": "wh", "table": "sales",
+                        "checks": {"row_count": {"check_statement": "COUNT(*) > 0"}}}},
+            {"id": "e", "op": "spark_submit", "task_id": "spark",
+             "params": {"application": "/opt/j.py",
+                        "application_args": ["--date", "{{ ds }}"]}},
+            {"id": "f", "op": "papermill", "task_id": "nb",
+             "params": {"input_nb": "/n/in.ipynb", "output_nb": "/n/out.ipynb"}},
+            {"id": "g", "op": "email", "task_id": "mail",
+             "params": {"to": "a@b.com", "subject": "S", "html_content": "<p>ok</p>"}},
+            {"id": "h", "op": "slack_post", "task_id": "slack",
+             "params": {"text": "done"}},
+        ],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    compile(code, "<gen>", "exec")
+
+    assert "put = S3CreateObjectOperator(" in code and "s3_bucket='lake'" in code
+    assert "sftp = SFTPOperator(" in code and "operation='get'" in code
+    assert "col = SQLColumnCheckOperator(" in code and "column_mapping=" in code
+    assert "tbl = SQLTableCheckOperator(" in code and "checks=" in code
+    assert "spark = SparkSubmitOperator(" in code and "application='/opt/j.py'" in code
+    assert "nb = PapermillOperator(" in code and "input_nb='/n/in.ipynb'" in code
+    assert "mail = EmailOperator(" in code and "subject='S'" in code
+    assert "slack = SlackAPIPostOperator(" in code and "text='done'" in code
+
+    for imp in (
+        "from airflow.providers.amazon.aws.operators.s3 import S3CreateObjectOperator",
+        "from airflow.providers.sftp.operators.sftp import SFTPOperator",
+        "from airflow.providers.common.sql.operators.sql import SQLColumnCheckOperator",
+        "from airflow.providers.common.sql.operators.sql import SQLTableCheckOperator",
+        "from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator",
+        "from airflow.providers.papermill.operators.papermill import PapermillOperator",
+        "from airflow.providers.smtp.operators.smtp import EmailOperator",
+        "from airflow.providers.slack.operators.slack import SlackAPIPostOperator",
+    ):
+        assert imp in code, imp
+    # Airflow-3 paths only.
+    assert "airflow.operators." not in code
+    assert "airflow.decorators" not in code
+    # Slack with only `text` set: its optional `channel` kwarg is omitted cleanly.
+    assert "channel=" not in code
+
+
+def test_v13_optional_param_omitted_leaves_no_blank():
+    # spark_submit with only the required `application` set: the omitted optionals
+    # (application_args / name / conn_id) must not leave a stray blank line inside
+    # the constructor call (operator blocks are blank-stripped at render time).
+    ir = _ir(
+        nodes=[{"id": "n", "op": "spark_submit", "task_id": "job",
+                "params": {"application": "/opt/j.py"}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    block = re.search(r"job = SparkSubmitOperator\(.*?\n {4}\)", res["code"], re.S)
+    assert block, res["code"]
+    assert "\n\n" not in block.group(0)
+    assert "application='/opt/j.py'" in res["code"]
+
+
 def test_operator_block_drops_blank_for_omitted_middle_optional():
     # KubernetesPodOperator with image + env_vars set but the optionals BETWEEN
     # them (name/namespace/cmds/arguments) omitted must not leave a stray blank

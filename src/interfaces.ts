@@ -225,6 +225,12 @@ export interface IImportErrorsRes {
   total_entries: number;
 }
 
+// Source `.afdag` Contents path for a deployed DAG (PRD §7, "Open in Studio to
+// fix"). `path` is null when the source can't be located.
+export interface IDagSourceRes {
+  path: string | null;
+}
+
 // One observation of a deploy's tri-state (PRD §6.5.4).
 export interface IDeployStatusRes {
   state: 'registered' | 'failed' | 'processing';

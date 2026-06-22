@@ -1,0 +1,47 @@
+id: spark_submit
+label: Spark submit
+category: Compute
+provider: apache-airflow-providers-apache-spark
+airflow_min_version: '3.0'
+description: >-
+  Submits a Spark application (a .py / .jar) to a cluster via spark-submit — the
+  workhorse for heavy lakehouse compute (Spark + Iceberg). Needs a Spark
+  Connection and a reachable cluster; spark-submit must be available to the
+  worker. Like a container job, this runs your code with the worker's privileges.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/operators.html
+example: |
+  application:       /opt/jobs/transform.py
+  application_args:  ["--date", "{{ ds }}"]
+  conn_id:           spark_default
+import: 'from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: spark
+params:
+  - { name: application, label: 'Application (path)', type: string, required: true, widget: text,
+      help: 'Path to the Spark job to run — a .py or .jar reachable from the worker, e.g. `/opt/jobs/transform.py`.' }
+  - { name: application_args, label: 'Application args', type: array, required: false, widget: json,
+      help: 'JSON array of command-line arguments passed to the application, e.g. ["--date", "{{ ds }}"].' }
+  - { name: name, label: 'Spark app name', type: string, required: false, widget: text,
+      help: 'A name for the Spark application (shown in the Spark UI). Optional.' }
+  - { name: conn_id, label: 'Spark connection', type: string, required: false, widget: text, default: spark_default,
+      help: 'The Airflow Spark Connection (master URL, deploy mode). Defaults to `spark_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SparkSubmitOperator(
+      task_id={{ task_id | pyrepr }},
+      application={{ params.application | pyrepr }},
+      {% if params.application_args %}application_args={{ params.application_args | pyrepr }},{% endif %}
+      {% if params.name %}name={{ params.name | pyrepr }},{% endif %}
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SparkSubmitOperator(
+      task_id={{ task_id | pyrepr }},
+      application={{ params.application | pyrepr }},
+      {% if params.application_args %}application_args={{ params.application_args | pyrepr }},{% endif %}
+      {% if params.name %}name={{ params.name | pyrepr }},{% endif %}
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

@@ -51,7 +51,12 @@ const managerPlugin: JupyterFrontEndPlugin<void> = {
         );
     }
 
-    const panel = new AirflowPanel(translator ?? undefined);
+    // "Open in Studio to fix" (PRD §7): open a resolved `.afdag` source in the
+    // Studio editor factory. The editor plugin (autoStart) registers FACTORY.
+    const openPath = (path: string): void =>
+      void app.commands.execute('docmanager:open', { path, factory: FACTORY });
+
+    const panel = new AirflowPanel(translator ?? undefined, openPath);
     panel.id = 'jp-airflow-panel';
     panel.title.icon = airflowIcon;
     panel.title.caption = trans.__('Apache Airflow');

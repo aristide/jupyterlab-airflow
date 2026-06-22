@@ -1,0 +1,47 @@
+id: papermill
+label: Papermill notebook
+category: Compute
+provider: apache-airflow-providers-papermill
+airflow_min_version: '3.0'
+description: >-
+  Executes a Jupyter notebook (.ipynb) end-to-end with Papermill, optionally
+  injecting parameters, and writes the executed copy to an output path — the way
+  to run notebook-based ETL or analysis as a scheduled task. The output notebook
+  is itself a dated artifact you can keep.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-papermill/stable/operators.html
+example: |
+  input_nb:   /notebooks/etl.ipynb
+  output_nb:  /outputs/etl_{{ ds }}.ipynb
+  parameters: {"run_date": "{{ ds }}"}
+import: 'from airflow.providers.papermill.operators.papermill import PapermillOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: notebook
+params:
+  - { name: input_nb, label: 'Input notebook', type: string, required: true, widget: text,
+      help: 'Path to the source .ipynb to execute, e.g. `/notebooks/etl.ipynb`.' }
+  - { name: output_nb, label: 'Output notebook', type: string, required: true, widget: text,
+      help: 'Where to write the executed copy, e.g. `/outputs/etl_{{ ds }}.ipynb`. Jinja templating is supported.' }
+  - { name: parameters, label: 'Parameters', type: object, required: false, widget: json,
+      help: 'JSON object injected into the notebook''s parameters cell, e.g. {"run_date": "{{ ds }}"}.' }
+  - { name: kernel_name, label: 'Kernel name', type: string, required: false, widget: text,
+      help: 'Override the Jupyter kernel to run the notebook with (e.g. `python3`). Leave blank to use the notebook''s own kernel.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = PapermillOperator(
+      task_id={{ task_id | pyrepr }},
+      input_nb={{ params.input_nb | pyrepr }},
+      output_nb={{ params.output_nb | pyrepr }},
+      {% if params.parameters %}parameters={{ params.parameters | pyrepr }},{% endif %}
+      {% if params.kernel_name %}kernel_name={{ params.kernel_name | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = PapermillOperator(
+      task_id={{ task_id | pyrepr }},
+      input_nb={{ params.input_nb | pyrepr }},
+      output_nb={{ params.output_nb | pyrepr }},
+      {% if params.parameters %}parameters={{ params.parameters | pyrepr }},{% endif %}
+      {% if params.kernel_name %}kernel_name={{ params.kernel_name | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

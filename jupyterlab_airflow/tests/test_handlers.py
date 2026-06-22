@@ -266,6 +266,26 @@ async def test_dag_rollback_endpoint(jp_fetch, tmp_path, monkeypatch):
     assert (tmp_path / "demo.py").read_text().endswith("x = 1\n")
 
 
+async def test_dag_source_endpoint(jp_fetch, tmp_path, monkeypatch):
+    # "Open in Studio to fix" wiring (§7): the route resolves a deployed file to
+    # its source path. No matching .afdag under the test server root -> null.
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    from jupyterlab_airflow.deploy import MANAGED_PREFIX, SharedVolumeTarget
+
+    SharedVolumeTarget(str(tmp_path)).write(
+        "demo.py", f"{MANAGED_PREFIX}  dag_id=demo  afdag_id=ZZZ\nx = 1\n"
+    )
+    response = await jp_fetch(
+        "jupyterlab-airflow",
+        "dags",
+        "source",
+        params={"filename": "demo.py"},
+    )
+    assert response.code == 200
+    data = json.loads(response.body)["data"]
+    assert data["path"] is None
+
+
 async def test_trigger_endpoint(jp_fetch):
     response = await jp_fetch(
         "jupyterlab-airflow",
