@@ -1,0 +1,42 @@
+id: slack_webhook
+label: Slack webhook message
+category: Notifications
+provider: apache-airflow-providers-slack
+airflow_min_version: '3.0'
+description: >-
+  Posts a message to Slack via an incoming webhook — a simpler-auth alternative
+  to the Slack API operator (no bot scopes; the webhook URL targets one channel).
+  Uses a Slack Incoming Webhook Connection. (To alert only on failure, attach a
+  Slack notifier to the DAG instead — that's a callback, not a task node.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-slack/stable/operators/slack_webhook.html
+example: |
+  slack_webhook_conn_id:  slack_default
+  message:                ':white_check_mark: Daily load finished for {{ ds }}'
+import: 'from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: slack
+params:
+  - { name: slack_webhook_conn_id, label: 'Slack webhook connection', type: string, required: true, widget: text,
+      help: 'The Airflow Slack Incoming Webhook Connection holding the webhook URL, e.g. `slack_default`.' }
+  - { name: message, label: 'Message', type: string, required: true, widget: textarea,
+      help: 'The message to post. Supports Slack mrkdwn and emoji, e.g. `:tada: done for {{ ds }}`.' }
+  - { name: channel, label: 'Channel', type: string, required: false, widget: text,
+      help: 'Usually leave blank — the channel is fixed by the webhook URL. Standard Slack Incoming Webhooks IGNORE this field; only legacy custom-integration webhooks honour it.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SlackWebhookOperator(
+      task_id={{ task_id | pyrepr }},
+      slack_webhook_conn_id={{ params.slack_webhook_conn_id | pyrepr }},
+      message={{ params.message | pyrepr }},
+      {% if params.channel %}channel={{ params.channel | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SlackWebhookOperator(
+      task_id={{ task_id | pyrepr }},
+      slack_webhook_conn_id={{ params.slack_webhook_conn_id | pyrepr }},
+      message={{ params.message | pyrepr }},
+      {% if params.channel %}channel={{ params.channel | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

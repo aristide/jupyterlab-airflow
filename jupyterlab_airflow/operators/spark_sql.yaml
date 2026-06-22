@@ -1,0 +1,42 @@
+id: spark_sql
+label: Spark SQL
+category: Compute
+provider: apache-airflow-providers-apache-spark
+airflow_min_version: '3.0'
+description: >-
+  Runs a Spark SQL statement through the spark-sql CLI — transform tables in the
+  lakehouse (Spark + Iceberg) without writing a full Spark app. Needs a Spark
+  Connection and spark-sql available to the worker; runs your SQL with the
+  worker's privileges.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-apache-spark/stable/operators.html
+example: |
+  conn_id: spark_sql_default
+  sql:     INSERT INTO curated.sales SELECT * FROM staging.sales WHERE day = '{{ ds }}'
+import: 'from airflow.providers.apache.spark.operators.spark_sql import SparkSqlOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: spark_sql
+params:
+  - { name: sql, label: 'SQL', type: string, required: true, widget: textarea,
+      help: 'The Spark SQL to run (a statement or a path to a .sql file). Jinja templating is supported, e.g. `WHERE day = ''{{ ds }}''`.' }
+  - { name: conn_id, label: 'Spark connection', type: string, required: false, widget: text, default: spark_sql_default,
+      help: 'The Airflow Spark Connection. Defaults to `spark_sql_default`.' }
+  - { name: master, label: 'Master', type: string, required: false, widget: text,
+      help: 'Override the Spark master URL (e.g. `yarn`, `local[*]`). Leave blank to use the Connection''s host/port.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SparkSqlOperator(
+      task_id={{ task_id | pyrepr }},
+      sql={{ params.sql | pyrepr }},
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {% if params.master %}master={{ params.master | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SparkSqlOperator(
+      task_id={{ task_id | pyrepr }},
+      sql={{ params.sql | pyrepr }},
+      {% if params.conn_id %}conn_id={{ params.conn_id | pyrepr }},{% endif %}
+      {% if params.master %}master={{ params.master | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

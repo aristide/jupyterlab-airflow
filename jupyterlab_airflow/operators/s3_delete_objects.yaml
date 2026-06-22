@@ -1,0 +1,47 @@
+id: s3_delete_objects
+label: S3 delete objects
+category: Storage
+provider: apache-airflow-providers-amazon
+airflow_min_version: '3.0'
+description: >-
+  Deletes objects from an S3 (or MinIO) bucket — by an explicit list of keys, or
+  by a prefix. DESTRUCTIVE and irreversible: a prefix deletes EVERY object under
+  it. Double-check the bucket and keys/prefix before deploying. You must set Keys
+  OR Prefix (exactly one) — with neither, the DAG won't load. Works against MinIO
+  via the AWS Connection's endpoint_url.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/operators/s3/s3.html
+example: |
+  bucket:  my-data-lake
+  prefix:  tmp/{{ ds }}/
+import: 'from airflow.providers.amazon.aws.operators.s3 import S3DeleteObjectsOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: delete_s3
+params:
+  - { name: bucket, label: 'Bucket', type: string, required: true, widget: text,
+      help: 'The S3 (or MinIO) bucket to delete from, e.g. `my-data-lake`.' }
+  - { name: keys, label: 'Keys (JSON list)', type: array, required: false, widget: json,
+      help: 'JSON array of exact object keys to delete, e.g. ["tmp/a.csv", "tmp/b.csv"]. Use this OR Prefix, not both.' }
+  - { name: prefix, label: 'Prefix', type: string, required: false, widget: text,
+      help: 'Delete EVERY object under this prefix, e.g. `tmp/{{ ds }}/`. Destructive — there is no undo. Use this OR Keys.' }
+  - { name: aws_conn_id, label: 'AWS connection', type: string, required: false, widget: text, default: aws_default,
+      help: 'The Airflow AWS Connection (set its endpoint_url for MinIO). Defaults to `aws_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = S3DeleteObjectsOperator(
+      task_id={{ task_id | pyrepr }},
+      bucket={{ params.bucket | pyrepr }},
+      {% if params.get('keys') %}keys={{ params.get('keys') | pyrepr }},{% endif %}
+      {% if params.prefix %}prefix={{ params.prefix | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = S3DeleteObjectsOperator(
+      task_id={{ task_id | pyrepr }},
+      bucket={{ params.bucket | pyrepr }},
+      {% if params.get('keys') %}keys={{ params.get('keys') | pyrepr }},{% endif %}
+      {% if params.prefix %}prefix={{ params.prefix | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

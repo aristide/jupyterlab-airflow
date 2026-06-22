@@ -355,6 +355,88 @@ def test_v13_optional_param_omitted_leaves_no_blank():
     assert "application='/opt/j.py'" in res["code"]
 
 
+def test_v13_lakehouse_p1_ops_render_airflow3():
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "s3_copy_object", "task_id": "copy",
+             "params": {"source_bucket_key": "s/k", "dest_bucket_key": "d/k"}},
+            {"id": "b", "op": "s3_list", "task_id": "ls",
+             "params": {"bucket": "lake", "prefix": "in/"}},
+            {"id": "c", "op": "s3_delete_objects", "task_id": "wipe",
+             "params": {"bucket": "lake", "keys": ["a.csv", "b.csv"]}},
+            {"id": "d", "op": "sftp_sensor", "task_id": "wait",
+             "params": {"path": "/in/", "file_pattern": "*.csv"}},
+            {"id": "e", "op": "sftp_to_s3", "task_id": "land",
+             "params": {"sftp_path": "/in/x", "s3_bucket": "lake", "s3_key": "raw/x"}},
+            {"id": "f", "op": "spark_sql", "task_id": "run_sql",
+             "params": {"sql": "SELECT 1"}},
+            {"id": "g", "op": "slack_webhook", "task_id": "notify",
+             "params": {"slack_webhook_conn_id": "slack_default", "message": "done"}},
+        ],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    compile(code, "<gen>", "exec")
+
+    assert "copy = S3CopyObjectOperator(" in code and "dest_bucket_key='d/k'" in code
+    assert "ls = S3ListOperator(" in code and "bucket='lake'" in code
+    # The `keys` param must emit the user's list — NOT collide with dict.keys
+    # (Jinja `params.keys` resolves to the method, so the template uses
+    # `params['keys']`). This asserts the real value lands.
+    assert "wipe = S3DeleteObjectsOperator(" in code
+    assert "keys=['a.csv', 'b.csv']" in code
+    assert "built-in method" not in code
+    assert "wait = SFTPSensor(" in code and "file_pattern='*.csv'" in code
+    assert "land = SFTPToS3Operator(" in code and "sftp_path='/in/x'" in code
+    assert "run_sql = SparkSqlOperator(" in code and "sql='SELECT 1'" in code
+    assert (
+        "notify = SlackWebhookOperator(" in code
+        and "slack_webhook_conn_id='slack_default'" in code
+    )
+
+    for imp in (
+        "from airflow.providers.amazon.aws.operators.s3 import S3CopyObjectOperator",
+        "from airflow.providers.amazon.aws.operators.s3 import S3ListOperator",
+        "from airflow.providers.amazon.aws.operators.s3 import S3DeleteObjectsOperator",
+        "from airflow.providers.sftp.sensors.sftp import SFTPSensor",
+        "from airflow.providers.amazon.aws.transfers.sftp_to_s3 import SFTPToS3Operator",
+        "from airflow.providers.apache.spark.operators.spark_sql import SparkSqlOperator",
+        "from airflow.providers.slack.operators.slack_webhook import SlackWebhookOperator",
+    ):
+        assert imp in code, imp
+    assert "airflow.operators." not in code
+    assert "airflow.decorators" not in code
+
+
+def test_s3_delete_objects_keys_param_avoids_dict_method_collision():
+    # The param named `keys` collides with dict.keys in Jinja: `params['keys']`
+    # falls back to the bound METHOD when the key is ABSENT, so a legitimate
+    # prefix-only delete used to emit `keys=<built-in method ...>` (invalid
+    # Python). The template uses `params.get('keys')`; verify BOTH the keys path
+    # and the prefix-only path render valid Python with the right kwarg.
+    def code_for(params):
+        ir = _ir(
+            nodes=[{"id": "n", "op": "s3_delete_objects", "task_id": "wipe",
+                    "params": params}],
+            edges=[],
+        )
+        res = generate_dag(ir)
+        assert res["valid"], res["errors"]
+        assert "built-in method" not in res["code"]
+        return res["code"]
+
+    c_keys = code_for({"bucket": "b", "keys": ["a.csv", "b.csv"]})
+    assert "keys=['a.csv', 'b.csv']" in c_keys
+    assert "prefix=" not in c_keys
+
+    c_prefix = code_for({"bucket": "b", "prefix": "tmp/"})
+    assert "prefix='tmp/'" in c_prefix
+    assert "keys=" not in c_prefix
+
+
 def test_operator_block_drops_blank_for_omitted_middle_optional():
     # KubernetesPodOperator with image + env_vars set but the optionals BETWEEN
     # them (name/namespace/cmds/arguments) omitted must not leave a stray blank

@@ -1,0 +1,51 @@
+id: sftp_to_s3
+label: SFTP → S3 transfer
+category: Ingestion
+provider: apache-airflow-providers-amazon
+airflow_min_version: '3.0'
+description: >-
+  Moves a file from an SFTP server straight into S3 (or MinIO) in one step — the
+  common "land an external feed in the lakehouse" task. Needs an SSH Connection
+  for the source and an AWS Connection for the destination. (This transfer ships
+  in the amazon provider, not sftp.)
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/transfer/sftp_to_s3.html
+example: |
+  sftp_path:  /incoming/sales_{{ ds }}.csv
+  s3_bucket:  my-data-lake
+  s3_key:     raw/sales_{{ ds }}.csv
+import: 'from airflow.providers.amazon.aws.transfers.sftp_to_s3 import SFTPToS3Operator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: sftp_to_s3
+params:
+  - { name: sftp_path, label: 'SFTP path', type: string, required: true, widget: text,
+      help: 'The file path on the SFTP server to fetch, e.g. `/incoming/sales_{{ ds }}.csv`.' }
+  - { name: s3_bucket, label: 'S3 bucket', type: string, required: true, widget: text,
+      help: 'The destination S3 (or MinIO) bucket, e.g. `my-data-lake`.' }
+  - { name: s3_key, label: 'S3 key', type: string, required: true, widget: text,
+      help: 'The destination object key, e.g. `raw/sales_{{ ds }}.csv`.' }
+  - { name: sftp_conn_id, label: 'SSH connection', type: string, required: false, widget: text, default: ssh_default,
+      help: 'The Airflow SSH Connection for the SFTP server. Defaults to `ssh_default`.' }
+  - { name: aws_conn_id, label: 'AWS connection', type: string, required: false, widget: text, default: aws_default,
+      help: 'The Airflow AWS Connection for the destination (set its endpoint_url for MinIO). Defaults to `aws_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = SFTPToS3Operator(
+      task_id={{ task_id | pyrepr }},
+      sftp_path={{ params.sftp_path | pyrepr }},
+      s3_bucket={{ params.s3_bucket | pyrepr }},
+      s3_key={{ params.s3_key | pyrepr }},
+      {% if params.sftp_conn_id %}sftp_conn_id={{ params.sftp_conn_id | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SFTPToS3Operator(
+      task_id={{ task_id | pyrepr }},
+      sftp_path={{ params.sftp_path | pyrepr }},
+      s3_bucket={{ params.s3_bucket | pyrepr }},
+      s3_key={{ params.s3_key | pyrepr }},
+      {% if params.sftp_conn_id %}sftp_conn_id={{ params.sftp_conn_id | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

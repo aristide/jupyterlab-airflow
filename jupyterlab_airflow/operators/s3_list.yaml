@@ -1,0 +1,42 @@
+id: s3_list
+label: S3 list objects
+category: Storage
+provider: apache-airflow-providers-amazon
+airflow_min_version: '3.0'
+description: >-
+  Lists the object keys under a bucket/prefix in S3 (or MinIO) and pushes the
+  list to XCom, so a downstream task can fan out over the files (e.g. process
+  each new drop). Read-only. Works against MinIO via the AWS Connection's
+  endpoint_url.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/operators/s3/s3.html
+example: |
+  bucket:  my-data-lake
+  prefix:  incoming/{{ ds }}/
+import: 'from airflow.providers.amazon.aws.operators.s3 import S3ListOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: list_s3
+params:
+  - { name: bucket, label: 'Bucket', type: string, required: true, widget: text,
+      help: 'The S3 (or MinIO) bucket to list, e.g. `my-data-lake`.' }
+  - { name: prefix, label: 'Prefix', type: string, required: false, widget: text,
+      help: 'Only list keys under this prefix, e.g. `incoming/{{ ds }}/`. Leave blank to list the whole bucket.' }
+  - { name: aws_conn_id, label: 'AWS connection', type: string, required: false, widget: text, default: aws_default,
+      help: 'The Airflow AWS Connection (set its endpoint_url for MinIO). Defaults to `aws_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = S3ListOperator(
+      task_id={{ task_id | pyrepr }},
+      bucket={{ params.bucket | pyrepr }},
+      {% if params.prefix %}prefix={{ params.prefix | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = S3ListOperator(
+      task_id={{ task_id | pyrepr }},
+      bucket={{ params.bucket | pyrepr }},
+      {% if params.prefix %}prefix={{ params.prefix | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

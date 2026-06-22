@@ -206,6 +206,66 @@ def test_v13_lakehouse_p0_ops_present_with_correct_providers():
         assert op["template_traditional"].strip(), op_id
 
 
+def test_v13_lakehouse_p1_ops_present_with_correct_providers():
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    # (id, provider, import-module, category) — verified against the real wheels
+    # (amazon 9.30, sftp 5.8, apache-spark 6.1, slack 9.10). Note: SFTPToS3Operator
+    # lives in the AMAZON provider's transfers, not sftp.
+    expected = {
+        "s3_copy_object": (
+            "apache-airflow-providers-amazon",
+            "airflow.providers.amazon.aws.operators.s3",
+            "Storage",
+        ),
+        "s3_list": (
+            "apache-airflow-providers-amazon",
+            "airflow.providers.amazon.aws.operators.s3",
+            "Storage",
+        ),
+        "s3_delete_objects": (
+            "apache-airflow-providers-amazon",
+            "airflow.providers.amazon.aws.operators.s3",
+            "Storage",
+        ),
+        "sftp_sensor": (
+            "apache-airflow-providers-sftp",
+            "airflow.providers.sftp.sensors.sftp",
+            "Sensors",
+        ),
+        "sftp_to_s3": (
+            "apache-airflow-providers-amazon",
+            "airflow.providers.amazon.aws.transfers.sftp_to_s3",
+            "Ingestion",
+        ),
+        "spark_sql": (
+            "apache-airflow-providers-apache-spark",
+            "airflow.providers.apache.spark.operators.spark_sql",
+            "Compute",
+        ),
+        "slack_webhook": (
+            "apache-airflow-providers-slack",
+            "airflow.providers.slack.operators.slack_webhook",
+            "Notifications",
+        ),
+    }
+    assert set(expected) <= set(by_id)
+    for op_id, (provider, module, category) in expected.items():
+        op = by_id[op_id]
+        assert op["provider"] == provider, op_id
+        assert module in op["import"], op_id
+        assert op["category"] == category, op_id
+        assert op["taskflow"] == "operator", op_id
+        assert op["provider"] != "apache-airflow-providers-standard", op_id
+        assert "airflow.operators." not in op["import"], op_id
+        assert "airflow.sensors." not in op["import"], op_id
+        assert op["template_taskflow"].strip(), op_id
+        assert op["template_traditional"].strip(), op_id
+    # The SFTP sensor lives in Sensors with the full sensor common_params.
+    assert {"mode", "poke_interval", "timeout"} <= set(
+        by_id["sftp_sensor"]["common_params"]
+    )
+
+
 def test_bash_is_airflow3_correct():
     bash = next(op for op in registry.load_registry() if op["id"] == "bash")
     assert "airflow.providers.standard.operators.bash" in bash["import"]

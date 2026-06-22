@@ -1,0 +1,41 @@
+id: sftp_sensor
+label: SFTP sensor
+category: Sensors
+provider: apache-airflow-providers-sftp
+airflow_min_version: '3.0'
+description: >-
+  Waits for a file to appear on an SFTP server before the run continues — hold a
+  pipeline until an upstream system drops a file in a remote folder. Credentials
+  come from an SSH Connection. The companion to the SFTP transfer operator.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-sftp/stable/sensors/sftp_sensor.html
+example: |
+  path:          /incoming/
+  file_pattern:  sales_*.csv
+import: 'from airflow.providers.sftp.sensors.sftp import SFTPSensor'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: wait_sftp
+params:
+  - { name: path, label: 'Remote path', type: string, required: true, widget: text,
+      help: 'The remote file path to wait for, or a directory when using a File pattern, e.g. `/incoming/`.' }
+  - { name: file_pattern, label: 'File pattern', type: string, required: false, widget: text,
+      help: 'Optional glob to match inside the path, e.g. `sales_*.csv`. Leave blank to wait for the exact path.' }
+  - { name: sftp_conn_id, label: 'SSH connection', type: string, required: false, widget: text, default: sftp_default,
+      help: 'The Airflow SSH/SFTP Connection for the server. Defaults to `sftp_default`.' }
+common_params: [retries, retry_delay, depends_on_past, mode, poke_interval, timeout]
+template_traditional: |
+  {{ task_id }} = SFTPSensor(
+      task_id={{ task_id | pyrepr }},
+      path={{ params.path | pyrepr }},
+      {% if params.file_pattern %}file_pattern={{ params.file_pattern | pyrepr }},{% endif %}
+      {% if params.sftp_conn_id %}sftp_conn_id={{ params.sftp_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = SFTPSensor(
+      task_id={{ task_id | pyrepr }},
+      path={{ params.path | pyrepr }},
+      {% if params.file_pattern %}file_pattern={{ params.file_pattern | pyrepr }},{% endif %}
+      {% if params.sftp_conn_id %}sftp_conn_id={{ params.sftp_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )

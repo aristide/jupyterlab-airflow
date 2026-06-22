@@ -1,0 +1,52 @@
+id: s3_copy_object
+label: S3 copy object
+category: Storage
+provider: apache-airflow-providers-amazon
+airflow_min_version: '3.0'
+description: >-
+  Copies an object from one S3 (or MinIO) location to another — promote a file
+  between buckets/prefixes (e.g. staging → curated) without downloading it. Works
+  against MinIO by pointing the AWS Connection's endpoint_url at it; both buckets
+  must exist.
+docs_url: https://airflow.apache.org/docs/apache-airflow-providers-amazon/stable/operators/s3/s3.html
+example: |
+  source_bucket_name:  staging
+  source_bucket_key:   incoming/sales_{{ ds }}.csv
+  dest_bucket_name:    curated
+  dest_bucket_key:     sales/sales_{{ ds }}.csv
+import: 'from airflow.providers.amazon.aws.operators.s3 import S3CopyObjectOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: copy_s3
+params:
+  - { name: source_bucket_key, label: 'Source key', type: string, required: true, widget: text,
+      help: 'The object key to copy from. Either a plain key (with Source bucket set) or a full `s3://bucket/key`.' }
+  - { name: dest_bucket_key, label: 'Destination key', type: string, required: true, widget: text,
+      help: 'The object key to copy to, e.g. `sales/sales_{{ ds }}.csv`. Either a plain key (with Destination bucket set) or a full `s3://bucket/key`.' }
+  - { name: source_bucket_name, label: 'Source bucket', type: string, required: false, widget: text,
+      help: 'The bucket to copy from. Leave blank if the Source key is a full `s3://bucket/key`.' }
+  - { name: dest_bucket_name, label: 'Destination bucket', type: string, required: false, widget: text,
+      help: 'The bucket to copy to. Leave blank if the Destination key is a full `s3://bucket/key`.' }
+  - { name: aws_conn_id, label: 'AWS connection', type: string, required: false, widget: text, default: aws_default,
+      help: 'The Airflow AWS Connection (set its endpoint_url for MinIO). Defaults to `aws_default`.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  {{ task_id }} = S3CopyObjectOperator(
+      task_id={{ task_id | pyrepr }},
+      source_bucket_key={{ params.source_bucket_key | pyrepr }},
+      dest_bucket_key={{ params.dest_bucket_key | pyrepr }},
+      {% if params.source_bucket_name %}source_bucket_name={{ params.source_bucket_name | pyrepr }},{% endif %}
+      {% if params.dest_bucket_name %}dest_bucket_name={{ params.dest_bucket_name | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  {{ task_id }} = S3CopyObjectOperator(
+      task_id={{ task_id | pyrepr }},
+      source_bucket_key={{ params.source_bucket_key | pyrepr }},
+      dest_bucket_key={{ params.dest_bucket_key | pyrepr }},
+      {% if params.source_bucket_name %}source_bucket_name={{ params.source_bucket_name | pyrepr }},{% endif %}
+      {% if params.dest_bucket_name %}dest_bucket_name={{ params.dest_bucket_name | pyrepr }},{% endif %}
+      {% if params.aws_conn_id %}aws_conn_id={{ params.aws_conn_id | pyrepr }},{% endif %}
+      {{ common | pyargs }}
+  )
