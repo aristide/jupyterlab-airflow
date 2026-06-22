@@ -308,7 +308,7 @@ export function dagForm(): IFormSpec {
         title: 'start_date',
         format: 'date',
         description:
-          'The first date the scheduler considers. A run is created for each schedule interval on or after it.'
+          'The first date the scheduler considers; runs are never created before it. With catchup off (the default) only the most recent interval runs; with catchup on, every interval since this date is back-filled.'
       },
       catchup: {
         type: 'boolean',

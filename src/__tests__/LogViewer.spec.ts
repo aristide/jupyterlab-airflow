@@ -28,4 +28,20 @@ describe('log line level classification (LogViewer)', () => {
   it('prefers the most severe token (critical over error)', () => {
     expect(classifyLine('CRITICAL ERROR happened')).toBe('critical');
   });
+
+  it('matches the level in its Airflow position, not anywhere in the message', () => {
+    // A benign INFO line that merely mentions ERROR/CRITICAL must stay info —
+    // else it is painted red and steals the autoscroll-to-first-error target.
+    expect(
+      classifyLine(
+        '[2026-06-15T17:25:01+0000] {ti.py:1} INFO - retrying after ERROR threshold'
+      )
+    ).toBe('info');
+    expect(classifyLine('{ti.py:1} INFO - 0 ERROR rows')).toBe('info');
+    expect(classifyLine('{ti.py:1} INFO - no CRITICAL issues found')).toBe(
+      'info'
+    );
+    // A bare leading level token still classifies (and ignores trailing words).
+    expect(classifyLine('INFO - configured log_level=ERROR')).toBe('info');
+  });
 });

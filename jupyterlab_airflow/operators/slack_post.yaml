@@ -20,7 +20,7 @@ params:
   - { name: text, label: 'Message', type: string, required: true, widget: textarea,
       help: 'The message to post. Supports Slack mrkdwn and emoji, e.g. `:tada: done for {{ ds }}`.' }
   - { name: channel, label: 'Channel', type: string, required: false, widget: text,
-      help: 'The channel to post to, e.g. `#data-alerts` (or a channel ID). Defaults to the one set on the Connection/token.' }
+      help: 'The channel to post to, e.g. `#data-alerts` (or a channel ID). If left blank the operator posts to `#general` — set this explicitly to avoid alerting the wrong channel.' }
   - { name: slack_conn_id, label: 'Slack connection', type: string, required: false, widget: text, default: slack_api_default,
       help: 'The Airflow Slack API Connection holding the bot token. Defaults to `slack_api_default`.' }
 common_params: [retries, retry_delay, depends_on_past]

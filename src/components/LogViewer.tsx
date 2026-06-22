@@ -38,29 +38,36 @@ const PROBLEM: ReadonlySet<Level> = new Set<Level>([
   'warning'
 ]);
 
+const LEVEL_TOKEN: Record<string, Level> = {
+  CRITICAL: 'critical',
+  FATAL: 'critical',
+  ERROR: 'error',
+  WARNING: 'warning',
+  WARN: 'warning',
+  INFO: 'info',
+  DEBUG: 'debug'
+};
+
 // Best-effort per-line level classification from the line text — robust to
-// Airflow's log formatting without depending on a structured-event API. A
-// Python traceback (no level token) is treated as an error so it stands out.
+// Airflow's log formatting without a structured-event API. Airflow formats a
+// line as `[ts] {file:lineno} LEVEL - message`, so match the level token *in
+// its position* (right after the `{file}` marker, or at the start of a bare
+// line) — NOT anywhere in the line. Matching anywhere would upgrade a benign
+// INFO line that merely mentions "ERROR" and, worse, mis-target the
+// autoscroll-to-first-error. A Python traceback (no level token) → error.
 export function classifyLine(line: string): Level {
-  if (/\b(?:CRITICAL|FATAL)\b/.test(line)) {
-    return 'critical';
+  const m =
+    /\}\s+(CRITICAL|FATAL|ERROR|WARNING|WARN|INFO|DEBUG)\b/.exec(line) ??
+    /^\s*(CRITICAL|FATAL|ERROR|WARNING|WARN|INFO|DEBUG)\b/.exec(line);
+  if (m) {
+    return LEVEL_TOKEN[m[1]];
   }
   if (
-    /\bERROR\b/.test(line) ||
     /^\s*Traceback \(most recent call last\)/.test(line) ||
     /^\s*File ".*", line \d+/.test(line) ||
     /^\w*(?:Error|Exception):/.test(line)
   ) {
     return 'error';
-  }
-  if (/\b(?:WARNING|WARN)\b/.test(line)) {
-    return 'warning';
-  }
-  if (/\bINFO\b/.test(line)) {
-    return 'info';
-  }
-  if (/\bDEBUG\b/.test(line)) {
-    return 'debug';
   }
   return 'plain';
 }
@@ -76,6 +83,7 @@ export function LogViewer(props: ILogViewerProps): JSX.Element {
   const [search, setSearch] = React.useState('');
   const [errorsOnly, setErrorsOnly] = React.useState(false);
   const [wrap, setWrap] = React.useState(true);
+  const [copied, setCopied] = React.useState<'' | 'ok' | 'fail'>('');
   const bodyRef = React.useRef<HTMLDivElement>(null);
 
   const lines = React.useMemo(() => {
@@ -118,8 +126,30 @@ export function LogViewer(props: ILogViewerProps): JSX.Element {
     }
   }, [data.text]);
 
-  const copy = (): void => {
-    void navigator.clipboard?.writeText(data.text ?? '');
+  const copy = async (): Promise<void> => {
+    const text = data.text ?? '';
+    let ok = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } else {
+        // Non-secure context (plain HTTP, a realistic dev/JupyterHub setup) has
+        // no async Clipboard API — fall back to a hidden textarea + execCommand.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch {
+      ok = false;
+    }
+    setCopied(ok ? 'ok' : 'fail');
+    window.setTimeout(() => setCopied(''), 1500);
   };
 
   const download = (): void => {
@@ -194,10 +224,14 @@ export function LogViewer(props: ILogViewerProps): JSX.Element {
         </button>
         <button
           className="jp-airflow-linkbtn"
-          onClick={copy}
+          onClick={() => void copy()}
           disabled={data.text === null}
         >
-          {trans.__('Copy')}
+          {copied === 'ok'
+            ? trans.__('Copied')
+            : copied === 'fail'
+              ? trans.__('Copy failed')
+              : trans.__('Copy')}
         </button>
         <button
           className="jp-airflow-linkbtn"

@@ -239,9 +239,10 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     });
     const res = await getTaskLogs(dagId, runId, taskId, tryNumber);
     setLogs(prev => {
-      // Ignore a stale response if the user switched task / try meanwhile.
+      // Ignore a stale response if the user switched DAG / task / try meanwhile.
       if (
         !prev ||
+        prev.dagId !== dagId ||
         prev.taskId !== taskId ||
         prev.runId !== runId ||
         prev.tryNumber !== tryNumber
@@ -756,16 +757,44 @@ function Overlay(props: {
   const innerRef = React.useRef<HTMLDivElement>(null);
   const onCloseRef = React.useRef(props.onClose);
   onCloseRef.current = props.onClose;
-  // Escape closes any overlay (logs / trigger / confirm); focus the modal on
-  // open so keyboard users land inside it.
+  // Escape closes the overlay (logs / trigger / confirm), and focus moves into
+  // the dialog on open so keyboard users land inside it.
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        onCloseRef.current();
+      if (event.key !== 'Escape' || event.defaultPrevented) {
+        return;
       }
+      // Don't hijack Escape while the user is editing a field — its native
+      // gesture (e.g. clear the log search box) should win, not close the modal.
+      const el = document.activeElement;
+      const tag = el?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        (el instanceof HTMLElement && el.isContentEditable)
+      ) {
+        return;
+      }
+      onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
-    innerRef.current?.focus();
+    // The inner wrapper is `display:contents` (no box → not focusable), so focus
+    // the actual modal element instead. tabindex=-1 makes it programmatically
+    // focusable without a :focus-visible ring; Escape then closes it (focus is
+    // on the box, not an input).
+    const modal =
+      innerRef.current?.querySelector<HTMLElement>('.jp-airflow-modal');
+    if (modal) {
+      if (!modal.hasAttribute('tabindex')) {
+        modal.setAttribute('tabindex', '-1');
+      }
+      modal.focus();
+    } else {
+      innerRef.current
+        ?.querySelector<HTMLElement>('button, input, select, textarea')
+        ?.focus();
+    }
     return () => document.removeEventListener('keydown', onKey);
   }, []);
   // Portal to <body> so the fixed-position backdrop covers the whole window.

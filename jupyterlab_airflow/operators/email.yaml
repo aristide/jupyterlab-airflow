@@ -19,7 +19,7 @@ taskflow: operator
 task_id_prefix: email
 params:
   - { name: to, label: 'To', type: string, required: true, widget: text,
-      help: 'Recipient email address, e.g. `data-eng@example.com`.' }
+      help: 'Recipient email address(es). Separate multiple with a comma or semicolon, e.g. `data-eng@example.com, oncall@example.com`.' }
   - { name: subject, label: 'Subject', type: string, required: true, widget: text,
       help: 'The email subject line. Jinja templating is supported, e.g. `Load finished — {{ ds }}`.' }
   - { name: html_content, label: 'Body (HTML)', type: string, required: true, widget: textarea,
