@@ -768,6 +768,21 @@
   font-size: var(--jp-ui-font-size0);
 }
 
+/* Per-task callbacks section inside the NODE tab (PRD §6.8): a divider sets it
+   apart from the operator form above, mirroring the "Common settings" fieldset. */
+.jp-afdag-node-callbacks {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--jp-border-color1);
+}
+
+.jp-afdag-node-section-title {
+  margin: 0 0 8px;
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+}
+
 /* CodeMirror host (code/json fields + read-only preview) */
 .jp-afdag-cm {
   border: 1px solid var(--jp-border-color2);

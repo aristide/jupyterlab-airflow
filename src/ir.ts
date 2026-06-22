@@ -31,6 +31,22 @@ export interface IAfdagCallbacks {
   on_failure?: IAfdagCallbackEntry[];
 }
 
+/** Per-task callbacks (PRD §6.8): notifiers to run when THIS task reaches an
+ * event. Adds the task-only `on_retry` event the DAG level can't express; all
+ * three fire in Airflow 3. Stored on the node so it travels with the task. */
+export interface IAfdagTaskCallbacks {
+  on_success?: IAfdagCallbackEntry[];
+  on_failure?: IAfdagCallbackEntry[];
+  on_retry?: IAfdagCallbackEntry[];
+}
+
+/** The structural shape shared by `IAfdagCallbacks` (DAG) and
+ * `IAfdagTaskCallbacks` (per-task): a callbacks block keyed by event id. Lets the
+ * shared callbacks editor work over either scope without knowing the events. */
+export type AfdagCallbacksValue = Partial<
+  Record<string, IAfdagCallbackEntry[]>
+>;
+
 export interface IAfdagDagConfig {
   dag_id: string;
   description?: string;
@@ -56,6 +72,8 @@ export interface IAfdagNode {
    * retries/retry_delay/depends_on_past, and for sensors mode/poke_interval/
    * timeout. Only explicitly-set values are stored. Absent on older `.afdag`. */
   common?: Record<string, unknown>;
+  /** Per-task notification callbacks (PRD §6.8); absent on older `.afdag`. */
+  callbacks?: IAfdagTaskCallbacks;
   code?: string | null;
   position?: { x: number; y: number };
 }

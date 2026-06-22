@@ -57,6 +57,8 @@ import { explainImportError } from '../importErrors';
 import { IOperatorDef } from '../interfaces';
 import { tidyLayout } from '../layout';
 import {
+  AfdagCallbacksValue,
+  IAfdagCallbackEntry,
   IAfdagIR,
   SyntaxStyle,
   createEmptyIR,
@@ -551,12 +553,24 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     }
     // Notification callbacks (PRD §6.8): a notifier missing a required param
     // (e.g. Slack `text`) blocks deploy too — but only once the notifier
-    // registry has loaded (else don't false-block before it resolves).
-    if (dag.callbacks && notifiersReady) {
-      for (const list of Object.values(dag.callbacks)) {
-        for (const entry of list ?? []) {
-          if (!validateNotifierParams(entry.notifier_id, entry.params).valid) {
-            count += 1;
+    // registry has loaded (else don't false-block before it resolves). Both the
+    // DAG-level (`dag.callbacks`) and per-task (`node.callbacks`) surfaces count.
+    if (notifiersReady) {
+      const blocks = [
+        dag.callbacks,
+        ...taskNodes.map(n => n.data.callbacks)
+      ] as Array<AfdagCallbacksValue | undefined>;
+      for (const callbacks of blocks) {
+        if (!callbacks) {
+          continue;
+        }
+        for (const list of Object.values(callbacks)) {
+          for (const entry of (list as IAfdagCallbackEntry[]) ?? []) {
+            if (
+              !validateNotifierParams(entry.notifier_id, entry.params).valid
+            ) {
+              count += 1;
+            }
           }
         }
       }

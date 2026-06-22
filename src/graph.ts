@@ -1,7 +1,7 @@
 import { MarkerType } from '@xyflow/react';
 import type { Edge, Node } from '@xyflow/react';
 
-import { IAfdagIR, IAfdagNode, IAfdagNote } from './ir';
+import { IAfdagIR, IAfdagNode, IAfdagNote, IAfdagTaskCallbacks } from './ir';
 
 // Bidirectional mapping between the `.afdag` IR and ReactFlow's nodes/edges,
 // plus instant (client-side) cycle detection for the live error badge.
@@ -26,6 +26,8 @@ export interface IAfdagNodeData {
   params: Record<string, unknown>;
   /** Per-task common settings (PRD §6.1.3); see `IAfdagNode.common`. */
   common?: Record<string, unknown>;
+  /** Per-task notification callbacks (PRD §6.8); see `IAfdagNode.callbacks`. */
+  callbacks?: IAfdagTaskCallbacks;
   [key: string]: unknown;
 }
 
@@ -48,7 +50,8 @@ export function irToFlow(ir: IAfdagIR): {
       op: node.op,
       task_id: node.task_id,
       params: node.params ?? {},
-      common: node.common ?? {}
+      common: node.common ?? {},
+      callbacks: node.callbacks
     }
   }));
   const noteNodes: AfdagFlowNode[] = (ir.notes ?? []).map(note => ({
@@ -68,6 +71,29 @@ export function irToFlow(ir: IAfdagIR): {
     markerEnd: { type: MarkerType.ArrowClosed }
   }));
   return { nodes: taskNodes.concat(noteNodes), edges };
+}
+
+/** Drop empty event arrays from a per-task callbacks block, returning undefined
+ * when nothing remains — so the IR (and the deployed `.py`) stays clean and a
+ * node without callbacks omits the field entirely (back-compatible). */
+function pruneCallbacks(
+  callbacks: IAfdagTaskCallbacks | undefined
+): IAfdagTaskCallbacks | undefined {
+  if (!callbacks) {
+    return undefined;
+  }
+  const out: IAfdagTaskCallbacks = {};
+  let any = false;
+  for (const event of Object.keys(callbacks) as Array<
+    keyof IAfdagTaskCallbacks
+  >) {
+    const list = callbacks[event];
+    if (list && list.length > 0) {
+      out[event] = list;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
 }
 
 export function flowToIR(
@@ -95,6 +121,12 @@ export function flowToIR(
       const common = node.data.common;
       if (common && Object.keys(common).length > 0) {
         irNode.common = common;
+      }
+      // Persist per-task callbacks only when an event actually carries an entry
+      // (an empty event array is omitted, like `common` — back-compatible).
+      const callbacks = pruneCallbacks(node.data.callbacks);
+      if (callbacks) {
+        irNode.callbacks = callbacks;
       }
       return irNode;
     });

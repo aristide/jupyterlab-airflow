@@ -855,6 +855,132 @@ def test_no_callbacks_emits_no_callback_or_notifier_import():
     assert "notifications" not in code
 
 
+def test_node_callbacks_render_on_task_taskflow():
+    # PRD §6.8 per-task callbacks: node['callbacks'] renders on_*_callback kwargs
+    # on the TASK itself (not the DAG). For a native @task op they ride the
+    # decorator; the task-only `on_retry` event is supported. The notifier imports
+    # are collected just like the DAG-level callbacks.
+    ir = _ir(
+        nodes=[
+            {"id": "n1", "op": "bash", "task_id": "extract",
+             "params": {"bash_command": "echo hi"},
+             "callbacks": {
+                 "on_failure": [
+                     {"notifier_id": "slack", "params": {"text": "down"}}],
+                 "on_retry": [
+                     {"notifier_id": "smtp",
+                      "params": {"to": "a@b.com", "subject": "retry"}}],
+             }},
+        ],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    # on_success absent, so on_failure then on_retry (the event order).
+    assert (
+        "@task.bash(task_id='extract', "
+        "on_failure_callback=[SlackNotifier(text='down')], "
+        "on_retry_callback=[SmtpNotifier(to='a@b.com', subject='retry')])"
+    ) in code
+    assert (
+        "from airflow.providers.slack.notifications.slack import SlackNotifier"
+        in code
+    )
+    assert (
+        "from airflow.providers.smtp.notifications.smtp import SmtpNotifier"
+        in code
+    )
+
+
+def test_node_callbacks_render_on_operator_and_coexist_with_common():
+    # An operator-style node carries the callback kwargs in its constructor call,
+    # AFTER the declared per-task common params (retries/...), in BOTH families.
+    cb = {"on_success": [{"notifier_id": "slack", "params": {"text": "ok"}}]}
+    for syntax in ("taskflow", "traditional"):
+        ir = _ir(
+            nodes=[{"id": "n", "op": "email", "task_id": "notify",
+                    "params": {"to": "a@b.com", "subject": "s",
+                               "html_content": "<p>hi</p>"},
+                    "common": {"retries": 2},
+                    "callbacks": cb}],
+            edges=[],
+        )
+        ir["syntax_style"] = syntax
+        res = generate_dag(ir)
+        assert res["valid"], (syntax, res["errors"])
+        code = res["code"]
+        ast.parse(code)
+        call = re.search(
+            r"notify = EmailOperator\(.*?\n {4}\)", code, re.S
+        ).group(0)
+        assert "retries=2" in call
+        assert "on_success_callback=[SlackNotifier(text='ok')]" in call
+        # common params come before the callback kwarg (merge order).
+        assert call.index("retries=2") < call.index("on_success_callback=")
+
+
+def test_unknown_node_notifier_is_rejected():
+    ir = _ir(
+        nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo"},
+                "callbacks": {
+                    "on_retry": [{"notifier_id": "nope", "params": {}}]}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert not res["valid"]
+    assert any("notifier" in err.lower() for err in res["errors"])
+
+
+def test_node_callbacks_event_order_follows_fixed_tuple():
+    # Determinism (R7): the emitted order is on_success, on_failure, on_retry —
+    # the fixed `_TASK_CALLBACK_EVENTS` tuple, NOT the IR dict's insertion order.
+    # Seed the events scrambled and assert the rendered kwargs come out sorted (so
+    # a refactor to iterate `callbacks.items()` would fail here).
+    ir = _ir(
+        nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo"},
+                "callbacks": {
+                    "on_retry": [{"notifier_id": "slack", "params": {"text": "r"}}],
+                    "on_success": [{"notifier_id": "slack", "params": {"text": "s"}}],
+                    "on_failure": [{"notifier_id": "slack", "params": {"text": "f"}}],
+                }}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    order = re.findall(r"on_(success|failure|retry)_callback", code)
+    assert order == ["success", "failure", "retry"]
+
+
+def test_node_callbacks_render_on_native_op_traditional():
+    # A native @task op (bash) in TRADITIONAL mode renders as an operator CALL
+    # (BashOperator(...)), so its per-task callbacks ride the constructor — the
+    # native-op Traditional path the operator-style test doesn't cover.
+    ir = _ir(
+        nodes=[{"id": "n", "op": "bash", "task_id": "extract",
+                "params": {"bash_command": "echo hi"},
+                "callbacks": {
+                    "on_failure": [
+                        {"notifier_id": "slack", "params": {"text": "down"}}]}}],
+        edges=[],
+    )
+    ir["syntax_style"] = "traditional"
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    call = re.search(
+        r"extract = BashOperator\(.*?\n {4}\)", code, re.S
+    ).group(0)
+    assert "on_failure_callback=[SlackNotifier(text='down')]" in call
+    assert (
+        "from airflow.providers.slack.notifications.slack import SlackNotifier"
+        in code
+    )
+
+
 def test_cycle_is_rejected():
     ir = _ir(
         nodes=[

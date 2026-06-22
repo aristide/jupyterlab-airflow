@@ -208,9 +208,43 @@ def _dag_context(dag: Dict[str, Any], callback_args: Optional[List[str]] = None)
 # DAG-level callback events ``@dag`` / ``DAG`` accept and that still FIRE in
 # Airflow 3. ``sla_miss_callback`` is excluded: the SLA feature was removed in
 # Airflow 3.0 (the kwarg only emits a DeprecationWarning and never fires;
-# "Deadline Alerts" in 3.1+ is the replacement). ``on_retry`` is task-level — a
-# per-task callbacks surface (§6.8) would add it to the ``@task`` decorator.
+# "Deadline Alerts" in 3.1+ is the replacement).
 _DAG_CALLBACK_EVENTS = ("on_success", "on_failure")
+
+# Per-task callback events the operator (and the ``@task`` decorator, which
+# forwards them) accept and that FIRE in Airflow 3 (PRD §6.8). ``on_retry`` is
+# the task-only event the DAG level can't express. (``on_execute`` /
+# ``on_skipped`` also fire but are deliberately not surfaced — execute is noisy
+# and skipped is niche; both can be added later without an IR change.)
+_TASK_CALLBACK_EVENTS = ("on_success", "on_failure", "on_retry")
+
+
+def _render_callback_entries(
+    entries: List[Dict[str, Any]],
+    notifiers: Dict[str, Dict[str, Any]],
+    env: Environment,
+    used: List[Dict[str, Any]],
+) -> List[str]:
+    """Render a list of ``{notifier_id, params}`` callback entries to notifier
+    instance expressions via each notifier's registry ``template``, appending the
+    notifier defs used to ``used`` (so their imports get collected). Shared by the
+    DAG-level (``_build_callbacks``) and per-task (``_node_callbacks``) paths."""
+    exprs: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        notifier = notifiers.get(entry.get("notifier_id"))
+        if not notifier:
+            raise CodegenError(f"Unknown notifier: {entry.get('notifier_id')!r}")
+        template = notifier.get("template")
+        if not template:
+            raise CodegenError(f"Notifier {notifier['id']!r} has no template")
+        expr = env.from_string(template).render(
+            params=entry.get("params") or {}
+        ).strip()
+        exprs.append(expr)
+        used.append(notifier)
+    return exprs
 
 
 def _build_callbacks(
@@ -232,26 +266,35 @@ def _build_callbacks(
         entries = callbacks.get(event)
         if not isinstance(entries, list):
             continue
-        exprs: List[str] = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            notifier = notifiers.get(entry.get("notifier_id"))
-            if not notifier:
-                raise CodegenError(
-                    f"Unknown notifier: {entry.get('notifier_id')!r}"
-                )
-            template = notifier.get("template")
-            if not template:
-                raise CodegenError(f"Notifier {notifier['id']!r} has no template")
-            expr = env.from_string(template).render(
-                params=entry.get("params") or {}
-            ).strip()
-            exprs.append(expr)
-            used.append(notifier)
+        exprs = _render_callback_entries(entries, notifiers, env, used)
         if exprs:
             args.append(f"{event}_callback=[{', '.join(exprs)}]")
     return args, used
+
+
+def _node_callbacks(
+    node: Dict[str, Any],
+    notifiers: Dict[str, Dict[str, Any]],
+    env: Environment,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Render per-task ``on_*_callback`` kwargs from ``node['callbacks']`` (PRD
+    §6.8). Returns a mapping ``{on_X_callback: <list-literal expr>}`` (merged into
+    the node's trailing ``common`` kwargs, so it rides the same ``{{ common }}``
+    slot every operator template already has — TaskFlow ``@task`` forwards these
+    to the underlying operator) and the notifier defs used (for imports)."""
+    callbacks = node.get("callbacks")
+    if not isinstance(callbacks, dict):
+        return {}, []
+    kwargs: Dict[str, Any] = {}
+    used: List[Dict[str, Any]] = []
+    for event in _TASK_CALLBACK_EVENTS:
+        entries = callbacks.get(event)
+        if not isinstance(entries, list):
+            continue
+        exprs = _render_callback_entries(entries, notifiers, env, used)
+        if exprs:
+            kwargs[f"{event}_callback"] = _Raw(f"[{', '.join(exprs)}]")
+    return kwargs, used
 
 
 # --------------------------------------------------------------------------- #
@@ -415,6 +458,7 @@ def _render(ir: Dict[str, Any]) -> str:
     env = _make_env()
     notifier_registry = {n["id"]: n for n in load_notifiers()}
     callback_args, used_notifiers = _build_callbacks(dag, notifier_registry, env)
+    used_notifiers = list(used_notifiers)  # also grows with per-task notifiers
     used_ops: List[Dict[str, Any]] = []
     definitions: List[str] = []
     instantiations: List[str] = []
@@ -428,10 +472,19 @@ def _render(ir: Dict[str, Any]) -> str:
         template = op.get(template_key)
         if not template:
             raise CodegenError(f"Operator {op['id']!r} has no {family} template")
+        # Per-task callbacks (PRD §6.8) ride the operator's trailing-kwargs slot:
+        # merge the rendered `on_*_callback=[...]` exprs into `common` (after the
+        # declared common params) so every template's `{{ common | pyargs }}`
+        # emits them — into the `@task(...)` decorator for native ops, into the
+        # operator call otherwise. No per-operator template edits needed.
+        node_cb_kwargs, node_cb_notifiers = _node_callbacks(
+            node, notifier_registry, env
+        )
+        used_notifiers.extend(node_cb_notifiers)
         rendered = env.from_string(template).render(
             task_id=node["task_id"],
             params=node.get("params") or {},
-            common=_node_common(node, op),
+            common={**_node_common(node, op), **node_cb_kwargs},
         )
         is_operator = op.get("taskflow", "native") == "operator"
         if not _has_code_param(op):

@@ -137,6 +137,22 @@ def test_provider_block_errors_gates_notifier_callbacks():
     assert providers.provider_block_errors(ir, None) == []
 
 
+def test_provider_block_errors_gates_per_task_notifier_callbacks():
+    # A per-task callback (node.callbacks, PRD §6.8) on an uninstalled provider is
+    # gated pre-write too — not only DAG-level callbacks.
+    ir = {
+        "dag": {},
+        "nodes": [
+            {"op": "bash", "callbacks": {
+                "on_retry": [{"notifier_id": "slack", "params": {"text": "x"}}]}},
+        ],
+    }
+    errors = providers.provider_block_errors(ir, INDEX)
+    assert len(errors) == 1
+    assert "Notifier" in errors[0] and "providers-slack" in errors[0]
+    assert providers.provider_block_errors(ir, None) == []
+
+
 class _FakeClient:
     def __init__(self, providers_payload=None, version_payload=None, fail=False):
         self._providers = providers_payload

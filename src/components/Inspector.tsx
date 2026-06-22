@@ -116,7 +116,11 @@ export function Inspector(props: IInspectorProps): JSX.Element {
         />
       )}
       {tab === 'node' && (
-        <NodeTab node={props.node} onNodeChange={props.onNodeChange} />
+        <NodeTab
+          node={props.node}
+          reloadKey={props.reloadKey}
+          onNodeChange={props.onNodeChange}
+        />
       )}
       {tab === 'info' && <InfoTab node={props.node} />}
       {tab === 'notify' && (

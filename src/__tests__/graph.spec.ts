@@ -58,6 +58,23 @@ describe('irToFlow / flowToIR mapping', () => {
     expect('common' in back.nodes[1]).toBe(false);
   });
 
+  it('round-trips per-task callbacks, pruning empty event arrays', () => {
+    const ir = makeIR();
+    ir.nodes[0].callbacks = {
+      on_failure: [{ notifier_id: 'slack', params: { text: 'down' } }],
+      on_retry: [] // empty -> must not survive the round-trip
+    };
+    const { nodes, edges } = irToFlow(ir);
+    expect(nodes[0].data.callbacks).toEqual(ir.nodes[0].callbacks);
+    const back = flowToIR(nodes, edges, ir.dag, ir);
+    expect(back.nodes[0].callbacks).toEqual({
+      on_failure: [{ notifier_id: 'slack', params: { text: 'down' } }]
+    });
+    // The empty event array is dropped, and a node with no callbacks omits it.
+    expect(back.nodes[0].callbacks?.on_retry).toBeUndefined();
+    expect('callbacks' in back.nodes[1]).toBe(false);
+  });
+
   it('flowToIR strips edges to {source,target} and rounds positions', () => {
     const ir = makeIR();
     const { nodes, edges } = irToFlow(ir);

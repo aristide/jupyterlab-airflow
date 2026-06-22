@@ -223,10 +223,13 @@ def provider_block_errors(
 
     # Notifier callbacks (PRD §6.8) gate on their provider too — otherwise a DAG
     # with a Slack/SMTP notifier on an uninstalled provider would write and then
-    # fail at import instead of being blocked pre-write.
+    # fail at import instead of being blocked pre-write. Both the DAG-level
+    # (`dag.callbacks`) and per-task (`node.callbacks`) surfaces are scanned.
     notifiers = {n["id"]: n for n in load_notifiers()}
-    callbacks = (ir.get("dag") or {}).get("callbacks")
-    if isinstance(callbacks, dict):
+
+    def _scan_callbacks(callbacks: Any) -> None:
+        if not isinstance(callbacks, dict):
+            return
         for entries in callbacks.values():
             if not isinstance(entries, list):
                 continue
@@ -236,4 +239,8 @@ def provider_block_errors(
                 notifier = notifiers.get(entry.get("notifier_id"))
                 if notifier is not None:
                     _check("Notifier", "notifier:" + notifier["id"], notifier)
+
+    _scan_callbacks((ir.get("dag") or {}).get("callbacks"))
+    for node in ir.get("nodes") or []:
+        _scan_callbacks(node.get("callbacks"))
     return errors
