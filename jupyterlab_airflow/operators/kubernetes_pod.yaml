@@ -12,7 +12,13 @@ description: >-
   images you trust. PREREQUISITES Studio can't check: your Airflow needs a
   reachable Kubernetes cluster and a K8s-capable executor (or an in-cluster /
   Kubernetes Connection); without them the pod won't launch even though the
-  operator is installed.
+  operator is installed. ADVANCED: scheduling (node selector / labels /
+  annotations), identity (service account, priority class), and a pod security
+  context are dedicated fields below. For volumes, secrets, affinity, tolerations,
+  init containers, or container CPU/memory requests & limits, supply a base pod
+  manifest via "Pod template (dict)" (a JSON pod spec Airflow merges with these
+  fields — no Python or k8s imports needed) or "Pod template file" (a YAML path
+  in your dags bundle).
 docs_url: https://airflow.apache.org/docs/apache-airflow-providers-cncf-kubernetes/stable/operators.html
 example: |
   image:      python:3.12-slim
@@ -39,6 +45,22 @@ params:
       help: 'What to do with the pod when the task ends: delete_pod (default), delete_succeeded_pod, or keep_pod.' }
   - { name: kubernetes_conn_id, label: 'Kubernetes connection', type: string, required: false, widget: text,
       help: 'The Airflow Kubernetes Connection to reach the cluster. Leave blank to use in-cluster config or the executor''s default.' }
+  - { name: node_selector, label: 'Node selector', type: object, required: false, widget: json,
+      help: 'Schedule the pod only onto nodes carrying these labels, as a JSON object of label→value, e.g. {"disktype": "ssd"}.' }
+  - { name: labels, label: 'Pod labels', type: object, required: false, widget: json,
+      help: 'Labels to attach to the pod, as a JSON object, e.g. {"team": "data", "env": "prod"}.' }
+  - { name: annotations, label: 'Pod annotations', type: object, required: false, widget: json,
+      help: 'Annotations to attach to the pod, as a JSON object.' }
+  - { name: service_account_name, label: 'Service account', type: string, required: false, widget: text,
+      help: 'The Kubernetes ServiceAccount the pod runs as (for RBAC / cloud workload identity). Defaults to the namespace''s default service account.' }
+  - { name: priority_class_name, label: 'Priority class', type: string, required: false, widget: text,
+      help: 'Name of a Kubernetes PriorityClass to set on the pod (affects scheduling and preemption).' }
+  - { name: security_context, label: 'Pod security context', type: object, required: false, widget: json,
+      help: 'Pod-level security context as a JSON object, e.g. {"runAsUser": 1000, "fsGroup": 2000}.' }
+  - { name: pod_template_file, label: 'Pod template file', type: string, required: false, widget: text,
+      help: 'Path to a pod-template YAML file (in your dags bundle) used as the base pod; the fields above are merged on top. Use it for volumes, affinity, init containers, and other settings without dedicated fields. Pick this OR Pod template (dict) — if both are set the file wins and the dict is ignored.' }
+  - { name: pod_template_dict, label: 'Pod template (dict)', type: object, required: false, widget: json,
+      help: 'A full or partial pod manifest as a JSON object, used as the base pod (Airflow deserializes and merges it with the fields above). This is how you add volumes, secrets, affinity, tolerations, or container resource requests/limits without writing Python. Put container settings on the first container (the operator merges by position, so name it "base" to match), e.g. {"spec": {"containers": [{"name": "base", "resources": {"limits": {"memory": "1Gi"}}}]}}. Ignored if Pod template file is also set.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
   {{ task_id }} = KubernetesPodOperator(
@@ -51,6 +73,14 @@ template_traditional: |
       {% if params.env_vars %}env_vars={{ params.env_vars | pyrepr }},{% endif %}
       {% if params.on_finish_action %}on_finish_action={{ params.on_finish_action | pyrepr }},{% endif %}
       {% if params.kubernetes_conn_id %}kubernetes_conn_id={{ params.kubernetes_conn_id | pyrepr }},{% endif %}
+      {% if params.node_selector %}node_selector={{ params.node_selector | pyrepr }},{% endif %}
+      {% if params.labels %}labels={{ params.labels | pyrepr }},{% endif %}
+      {% if params.annotations %}annotations={{ params.annotations | pyrepr }},{% endif %}
+      {% if params.service_account_name %}service_account_name={{ params.service_account_name | pyrepr }},{% endif %}
+      {% if params.priority_class_name %}priority_class_name={{ params.priority_class_name | pyrepr }},{% endif %}
+      {% if params.security_context %}security_context={{ params.security_context | pyrepr }},{% endif %}
+      {% if params.pod_template_file %}pod_template_file={{ params.pod_template_file | pyrepr }},{% endif %}
+      {% if params.pod_template_dict %}pod_template_dict={{ params.pod_template_dict | pyrepr }},{% endif %}
       {{ common | pyargs }}
   )
 template_taskflow: |
@@ -64,5 +94,13 @@ template_taskflow: |
       {% if params.env_vars %}env_vars={{ params.env_vars | pyrepr }},{% endif %}
       {% if params.on_finish_action %}on_finish_action={{ params.on_finish_action | pyrepr }},{% endif %}
       {% if params.kubernetes_conn_id %}kubernetes_conn_id={{ params.kubernetes_conn_id | pyrepr }},{% endif %}
+      {% if params.node_selector %}node_selector={{ params.node_selector | pyrepr }},{% endif %}
+      {% if params.labels %}labels={{ params.labels | pyrepr }},{% endif %}
+      {% if params.annotations %}annotations={{ params.annotations | pyrepr }},{% endif %}
+      {% if params.service_account_name %}service_account_name={{ params.service_account_name | pyrepr }},{% endif %}
+      {% if params.priority_class_name %}priority_class_name={{ params.priority_class_name | pyrepr }},{% endif %}
+      {% if params.security_context %}security_context={{ params.security_context | pyrepr }},{% endif %}
+      {% if params.pod_template_file %}pod_template_file={{ params.pod_template_file | pyrepr }},{% endif %}
+      {% if params.pod_template_dict %}pod_template_dict={{ params.pod_template_dict | pyrepr }},{% endif %}
       {{ common | pyargs }}
   )

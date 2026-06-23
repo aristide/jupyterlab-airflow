@@ -279,6 +279,43 @@ def test_p2_cloud_k8s_ops_render_airflow3():
     assert "airflow.operators." not in code and "airflow.sensors." not in code
 
 
+def test_kubernetes_pod_advanced_params_render():
+    # The v1.2 advanced KPO surface: dedicated dict/string fields + the declarative
+    # pod-template escape hatch all render as plain kwargs (dict literals / strings),
+    # with the omitted middles blank-stripped (KPO has no code param). No k8s import
+    # is needed — pod_template_dict is a raw manifest Airflow deserializes.
+    ir = _ir(
+        nodes=[{"id": "a", "op": "kubernetes_pod", "task_id": "pod",
+                "params": {
+                    "image": "python:3.12-slim",
+                    "node_selector": {"disktype": "ssd"},
+                    "labels": {"team": "data"},
+                    "service_account_name": "etl-sa",
+                    "security_context": {"runAsUser": 1000, "fsGroup": 2000},
+                    "pod_template_dict": {"spec": {"containers": [
+                        {"name": "base", "resources": {"limits": {"memory": "1Gi"}}}]}},
+                }}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    compile(code, "<gen>", "exec")
+
+    assert "node_selector={'disktype': 'ssd'}" in code
+    assert "labels={'team': 'data'}" in code
+    assert "service_account_name='etl-sa'" in code
+    assert "security_context={'runAsUser': 1000, 'fsGroup': 2000}" in code
+    assert "resources" in code and "'memory': '1Gi'" in code  # pod_template_dict literal
+    # No k8s typed-object construction / import: the declarative dict path needs none.
+    assert "k8s." not in code
+    assert "from kubernetes" not in code
+    # Omitted optionals leave no stray blank line in the constructor call.
+    block = re.search(r"pod = KubernetesPodOperator\(.*?\n {4}\)", code, re.S)
+    assert block and "\n\n" not in block.group(0), code
+
+
 def test_v13_lakehouse_p0_ops_render_airflow3():
     ir = _ir(
         nodes=[

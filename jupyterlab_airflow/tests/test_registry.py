@@ -107,6 +107,33 @@ def test_p2_cloud_k8s_ops_present_with_correct_providers():
     assert "operators.kubernetes_pod" not in by_id["kubernetes_pod"]["import"]
 
 
+def test_kubernetes_pod_advanced_params():
+    # The v1.2 advanced KPO surface (verified against cncf-kubernetes 10.18.0):
+    # plain scheduling/identity/security fields + the declarative pod-template
+    # escape hatch for volumes/secrets/affinity/resources. No code params, no
+    # extra imports — all dict (json) or string (text).
+    kpo = {op["id"]: op for op in registry.load_registry()}["kubernetes_pod"]
+    params = {p["name"]: p for p in kpo["params"]}
+    expected_widget = {
+        "node_selector": "json",
+        "labels": "json",
+        "annotations": "json",
+        "service_account_name": "text",
+        "priority_class_name": "text",
+        "security_context": "json",
+        "pod_template_file": "text",
+        "pod_template_dict": "json",
+    }
+    assert set(expected_widget) <= set(params)
+    for name, widget in expected_widget.items():
+        assert params[name].get("widget") == widget, name
+        assert not params[name].get("required"), name  # all advanced params optional
+        assert params[name].get("help"), name
+    # No code-widget param was introduced (KPO stays a pure kwarg operator, so the
+    # render-time blank-strip still applies).
+    assert all(p.get("widget") != "code" for p in kpo["params"])
+
+
 def test_sensors_are_airflow3_standard_provider():
     by_id = {op["id"]: op for op in registry.load_registry()}
     expected = {
