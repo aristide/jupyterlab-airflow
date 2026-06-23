@@ -510,6 +510,112 @@ def test_v13_lakehouse_p2_ops_render_airflow3():
     assert "airflow.decorators" not in code
 
 
+def test_v13_p3_third_party_ops_render_airflow3():
+    # GE (GXValidateCheckpointOperator) + OpenMetadata (OpenMetadataLineageOperator)
+    # are code-first: a user callable body is wrapped in a function and referenced
+    # from the operator call. Verified against airflow-provider-great-expectations
+    # 1.0.0 + openmetadata-ingestion 1.13.0.0.
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "great_expectations", "task_id": "gx",
+             "params": {"configure": "return ctx.checkpoints.add(cp)",
+                        "context_type": "ephemeral",
+                        "batch_parameters": {"year": "2019"}}},
+            {"id": "b", "op": "openmetadata_lineage", "task_id": "lineage",
+             "params": {"server_config": "return conn", "service_name": "svc",
+                        "only_keep_dag_lineage": True, "max_status": 20}},
+        ],
+        edges=[{"source": "a", "target": "b"}],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    compile(code, "<gen>", "exec")
+
+    # GE: the callable is wrapped in a function and passed (NOT called).
+    assert "def configure_checkpoint_gx(context):" in code
+    assert "gx = GXValidateCheckpointOperator(" in code
+    assert "configure_checkpoint=configure_checkpoint_gx," in code
+    assert "context_type='ephemeral'" in code
+    assert "batch_parameters={'year': '2019'}" in code
+    # OpenMetadata: the connection builder is CALLED to yield the object.
+    assert "def server_config_lineage():" in code
+    assert "lineage = OpenMetadataLineageOperator(" in code
+    assert "server_config=server_config_lineage()," in code
+    assert "service_name='svc'" in code
+    # Boolean / int kwargs render as Python literals, not quoted strings.
+    assert "only_keep_dag_lineage=True" in code
+    assert "max_status=20" in code
+
+    for imp in (
+        "from great_expectations_provider.operators.validate_checkpoint "
+        "import GXValidateCheckpointOperator",
+        "from airflow_provider_openmetadata.lineage.operator "
+        "import OpenMetadataLineageOperator",
+    ):
+        assert imp in code, imp
+    # Third-party imports are NOT apache-namespaced provider paths.
+    assert "airflow.providers." not in code
+    assert "airflow.operators." not in code
+
+
+def test_v13_p3_third_party_omitted_optional_no_stray_blank():
+    # GE has a `code` param, so the operator-block blank-strip is skipped (it must
+    # preserve the user body). The optional kwargs therefore use Jinja whitespace
+    # trimming so an omitted EARLIER optional (batch_parameters) before a present
+    # LATER one (conn_id) leaves no stray blank line inside the call.
+    ir = _ir(
+        nodes=[{"id": "a", "op": "great_expectations", "task_id": "gx",
+                "params": {"configure": "return ctx", "context_type": "cloud",
+                           "conn_id": "gx_cloud"}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    block = re.search(r"gx = GXValidateCheckpointOperator\(.*?\n {4}\)", code, re.S)
+    assert block, code
+    assert "\n\n" not in block.group(0), block.group(0)
+    assert "conn_id='gx_cloud'" in code
+
+    # And the user-authored callable body's own blank lines ARE preserved.
+    ir2 = _ir(
+        nodes=[{"id": "a", "op": "great_expectations", "task_id": "gx",
+                "params": {"configure": "x = 1\n\nreturn x", "context_type": "ephemeral"}}],
+        edges=[],
+    )
+    code2 = generate_dag(ir2)["code"]
+    assert "x = 1\n\n        return x" in code2
+
+
+def test_v13_p3_optional_defaulted_params_are_guarded():
+    # Regression for the adversarial-review findings: an optional param that has a
+    # registry `default` must be OMITTED when the user leaves it blank (so the
+    # operator's own default applies) — not emitted as None/'' or silently dropped.
+    # GE context_type: a blank/absent field omits the kwarg (no `context_type=None`).
+    for params in ({"configure": "return ctx"}, {"configure": "return ctx", "context_type": ""}):
+        code = generate_dag(_ir(
+            nodes=[{"id": "a", "op": "great_expectations", "task_id": "gx", "params": params}],
+            edges=[])).get("code", "")
+        assert "context_type=None" not in code and "context_type=''" not in code, params
+        block = re.search(r"gx = GXValidateCheckpointOperator\(.*?\n {4}\)", code, re.S)
+        assert block and "context_type=" not in block.group(0), params
+    # OpenMetadata max_status: an explicit 0 is HONORED (falsy-zero must not be
+    # dropped), while an absent field omits the kwarg (operator default 10 applies).
+    code0 = generate_dag(_ir(
+        nodes=[{"id": "a", "op": "openmetadata_lineage", "task_id": "lin",
+                "params": {"server_config": "return c", "service_name": "s", "max_status": 0}}],
+        edges=[]))["code"]
+    assert "max_status=0," in code0
+    code_absent = generate_dag(_ir(
+        nodes=[{"id": "a", "op": "openmetadata_lineage", "task_id": "lin",
+                "params": {"server_config": "return c", "service_name": "s"}}],
+        edges=[]))["code"]
+    block = re.search(r"lin = OpenMetadataLineageOperator\(.*?\n {4}\)", code_absent, re.S)
+    assert block and "max_status=" not in block.group(0)
+
+
 def test_operator_block_drops_blank_for_omitted_middle_optional():
     # KubernetesPodOperator with image + env_vars set but the optionals BETWEEN
     # them (name/namespace/cmds/arguments) omitted must not leave a stray blank

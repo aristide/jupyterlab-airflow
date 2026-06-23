@@ -338,6 +338,54 @@ def test_v13_lakehouse_p2_ops_present_with_correct_providers():
         ), sid
 
 
+def test_v13_lakehouse_p3_third_party_ops():
+    by_id = {op["id"]: op for op in registry.load_registry()}
+    # (id, provider, import-module, category, version) — verified against the real
+    # wheels: airflow-provider-great-expectations 1.0.0 (GXValidateCheckpointOperator
+    # — the legacy GreatExpectationsOperator was removed) and openmetadata-ingestion
+    # 1.13.0.0 (OpenMetadataLineageOperator).
+    expected = {
+        "great_expectations": (
+            "airflow-provider-great-expectations",
+            "great_expectations_provider.operators.validate_checkpoint",
+            "Data Quality",
+            "1.0.0",
+        ),
+        "openmetadata_lineage": (
+            "openmetadata-ingestion",
+            "airflow_provider_openmetadata.lineage.operator",
+            "Governance",
+            "1.13.0.0",
+        ),
+    }
+    assert set(expected) <= set(by_id)
+    for op_id, (provider, module, category, version) in expected.items():
+        op = by_id[op_id]
+        assert op["provider"] == provider, op_id
+        assert module in op["import"], op_id
+        assert op["category"] == category, op_id
+        assert op["taskflow"] == "operator", op_id
+        # Off the constraints file -> flagged third_party with its own pin.
+        assert op["third_party"] is True, op_id
+        assert str(op["version"]) == version, op_id
+        # Never an Airflow-2 / apache-namespaced import path.
+        assert "airflow.operators." not in op["import"], op_id
+        assert "airflow.providers." not in op["import"], op_id
+        # A code-first node: it embeds a user-authored Python callable body.
+        assert any(p.get("widget") == "code" for p in op["params"]), op_id
+        assert op["template_taskflow"].strip(), op_id
+        assert op["template_traditional"].strip(), op_id
+
+    # client_view ships the gating fields (thirdParty/version) but withholds the
+    # codegen-only import/template, exactly like every other op.
+    cv = {e["id"]: e for e in registry.client_view()}
+    for op_id, (_, _, _, version) in expected.items():
+        e = cv[op_id]
+        assert e["thirdParty"] is True, op_id
+        assert str(e["version"]) == version, op_id
+        assert "import" not in e and "template_taskflow" not in e, op_id
+
+
 def test_notifier_registry_loads_and_hides_codegen_fields():
     # PRD §6.8: notifiers are a parallel registry (callbacks counterpart). They
     # ship an import + a Jinja `template` (server-side) + a provider, and

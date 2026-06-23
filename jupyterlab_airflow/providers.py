@@ -122,14 +122,25 @@ def availability(
     provider: Optional[str],
     airflow_min_version: Any,
     index: Optional[Dict[str, Any]],
+    third_party: bool = False,
 ) -> str:
-    """``available`` | ``missing-provider`` | ``version-too-old`` | ``unknown``.
+    """``available`` | ``missing-provider`` | ``version-too-old`` | ``unknown`` |
+    ``third-party``.
 
-    ``unknown`` when the target couldn't be read (``index is None``) — the op is
-    still shown and never blocked. The version check (target Airflow vs the op's
-    ``airflow_min_version``) takes precedence, then the provider check; the
-    standard provider is always available.
+    A ``third_party`` op (off the Airflow constraints file — Great Expectations,
+    OpenMetadata; PRD §6.2.2 ¹ / §13 Q13) is **always** ``third-party``: it is
+    shown with a pinned-install note but never blocked, because
+    ``/api/v2/providers`` is not an authoritative install signal for such packages
+    in general (some don't register as providers at all, and it can never confirm
+    OpenMetadata's *server*-version match) — ``/importErrors`` is the verdict.
+
+    Otherwise: ``unknown`` when the target couldn't be read (``index is None``) —
+    the op is still shown and never blocked. The version check (target Airflow vs
+    the op's ``airflow_min_version``) takes precedence, then the provider check;
+    the standard provider is always available.
     """
+    if third_party:
+        return "third-party"
     if index is None:
         return "unknown"
     target_version = index.get("airflow_version")
@@ -146,21 +157,31 @@ def availability(
     return "available"
 
 
-def pip_install_hint(provider: str) -> str:
+def pip_install_hint(provider: str, version: Any = None) -> str:
+    """``pip install <provider>``, version-pinned when given. Third-party
+    (off-constraints) ops pin their own version (PRD §6.2.2 ¹)."""
+    if version:
+        return f"pip install {provider}=={version}"
     return f"pip install {provider}"
 
 
 def annotate_view(
     entries: List[Dict[str, Any]], index: Optional[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
-    """Add ``availability`` (and a ``pipInstall`` hint for a missing provider) to
-    each ``client_view()`` palette entry. Mutates and returns ``entries``."""
+    """Add ``availability`` (and a ``pipInstall`` hint for a missing provider or a
+    third-party op) to each ``client_view()`` palette entry. Mutates and returns
+    ``entries``."""
     for entry in entries:
         provider = entry.get("provider", "")
-        avail = availability(provider, entry.get("airflowMinVersion"), index)
+        third_party = bool(entry.get("thirdParty"))
+        avail = availability(
+            provider, entry.get("airflowMinVersion"), index, third_party=third_party
+        )
         entry["availability"] = avail
         if avail == "missing-provider" and not is_standard(provider):
             entry["pipInstall"] = pip_install_hint(provider)
+        elif avail == "third-party" and provider:
+            entry["pipInstall"] = pip_install_hint(provider, entry.get("version"))
     return entries
 
 
@@ -196,6 +217,11 @@ def provider_block_errors(
 
     def _check(kind: str, key: str, defn: Dict[str, Any]) -> None:
         if key in seen:
+            return
+        if defn.get("third_party"):
+            # Off-constraints (§13 Q13): never hard-block — the provider list is
+            # not an authoritative install signal for these. /importErrors (with
+            # the §7 friendly recovery) is the deploy-time verdict.
             return
         provider = defn.get("provider", "")
         avail = availability(provider, defn.get("airflow_min_version"), index)

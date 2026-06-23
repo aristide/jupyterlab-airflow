@@ -24,12 +24,26 @@ function isUnavailable(op: IOperatorDef): boolean {
   );
 }
 
+// A third-party op (off the Airflow constraints file — PRD §6.2.2 ¹ / §13 Q13).
+// Shown normally (never dimmed, never gate-blocked) but flagged with an info
+// glyph + a pinned-install hint; `/importErrors` is the deploy verdict.
+function isThirdParty(op: IOperatorDef): boolean {
+  return op.availability === 'third-party';
+}
+
 function unavailableHint(op: IOperatorDef): string {
   if (op.availability === 'version-too-old') {
     return `Needs Airflow ${op.airflowMinVersion ?? ''}+ — your Airflow is older. You can still add it to learn the shape.`;
   }
   const pip = op.pipInstall ?? `pip install ${op.provider ?? ''}`;
   return `Requires ${op.provider ?? 'a provider'} in your Airflow — ${pip}. You can still add it; deploy will block until it's installed.`;
+}
+
+function thirdPartyHint(op: IOperatorDef): string {
+  const pip =
+    op.pipInstall ??
+    `pip install ${op.provider ?? ''}${op.version ? `==${op.version}` : ''}`;
+  return `Third-party package, off the Airflow constraints file — install it separately: ${pip}. Deploy isn't blocked; if it's missing you'll get a clear import error.`;
 }
 
 /**
@@ -110,6 +124,12 @@ export function Palette(props: IPaletteProps): JSX.Element {
           <div className="jp-afdag-palette-cat">{category}</div>
           {items.map(op => {
             const unavailable = isUnavailable(op);
+            const thirdParty = isThirdParty(op);
+            const title = unavailable
+              ? unavailableHint(op)
+              : thirdParty
+                ? thirdPartyHint(op)
+                : `Add ${op.label}`;
             return (
               <button
                 key={op.id}
@@ -118,7 +138,7 @@ export function Palette(props: IPaletteProps): JSX.Element {
                     ? 'jp-afdag-palette-item jp-mod-unavailable'
                     : 'jp-afdag-palette-item'
                 }
-                title={unavailable ? unavailableHint(op) : `Add ${op.label}`}
+                title={title}
                 onClick={() => onAdd(op.id)}
               >
                 <span className="jp-afdag-palette-item-label">{op.label}</span>
@@ -126,6 +146,14 @@ export function Palette(props: IPaletteProps): JSX.Element {
                   <span
                     className="jp-afdag-palette-item-warn"
                     aria-label="not available in your Airflow"
+                  >
+                    ⓘ
+                  </span>
+                )}
+                {thirdParty && (
+                  <span
+                    className="jp-afdag-palette-item-info"
+                    aria-label="third-party package, install separately"
                   >
                     ⓘ
                   </span>

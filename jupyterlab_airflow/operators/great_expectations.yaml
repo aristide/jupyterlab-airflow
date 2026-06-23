@@ -1,0 +1,87 @@
+id: great_expectations
+label: Great Expectations checkpoint
+category: Data Quality
+provider: airflow-provider-great-expectations
+third_party: true
+version: 1.0.0
+airflow_min_version: '3.0'
+description: >-
+  Validates data with Great Expectations (GX 1.0) by running a Checkpoint, and
+  fails the task if the expectations don't hold. This is an ADVANCED, code-first
+  node: you write a small Python function that builds and returns a GX Checkpoint
+  from the GX context (data source → batch → expectation suite → checkpoint). For
+  simple row-count / column assertions, prefer the native SQL column/table checks
+  (no third-party install). Third-party package, off the Airflow constraints file
+  — install airflow-provider-great-expectations separately and pin it; if it's
+  missing the deploy surfaces a clear import error.
+docs_url: https://great-expectations.github.io/airflow-provider-great-expectations/
+example: |
+  # `context` is a GX AbstractDataContext. Return a Checkpoint.
+  import great_expectations.expectations as gxe
+  from great_expectations import Checkpoint, ExpectationSuite, ValidationDefinition
+
+  batch_definition = (
+      context.data_sources.add_pandas_filesystem(name="src", base_directory="/data")
+      .add_csv_asset("asset")
+      .add_batch_definition_monthly(name="bd", regex=r"sales_(?P<year>\d{4})-(?P<month>\d{2}).csv")
+  )
+  suite = context.suites.add(ExpectationSuite(
+      name="suite",
+      expectations=[gxe.ExpectColumnValuesToNotBeNull(column="id")],
+  ))
+  validation = context.validation_definitions.add(
+      ValidationDefinition(name="vd", data=batch_definition, suite=suite)
+  )
+  return context.checkpoints.add(
+      Checkpoint(name="cp", validation_definitions=[validation], actions=[])
+  )
+import: 'from great_expectations_provider.operators.validate_checkpoint import GXValidateCheckpointOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: gx_validate
+params:
+  - { name: configure, label: 'Configure checkpoint (Python)', type: string, required: true, widget: code,
+      help: 'The body of a function that takes a GX context and returns a Checkpoint to run. Build the data source, batch definition, expectation suite, and validation definition, then return context.checkpoints.add(Checkpoint(...)).' }
+  - { name: context_type, label: 'Context type', type: string, required: false, widget: text, default: ephemeral,
+      help: 'Which GX context to use: "ephemeral" (in-memory, the default) or "cloud" (GX Cloud — needs a connection below). "file" needs an extra file-context callable and is not supported here.' }
+  - { name: batch_parameters, label: 'Batch parameters', type: object, required: false, widget: json,
+      help: 'Optional JSON object passed to the batch definition at run time, e.g. {"year": "2019", "month": "01"}.' }
+  - { name: conn_id, label: 'GX Cloud connection', type: string, required: false, widget: text,
+      help: 'Optional Airflow Connection id for GX Cloud (only when context type is "cloud").' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  def configure_checkpoint_{{ task_id }}(context):
+  {{ params.configure | indent(4, true) }}
+
+  {{ task_id }} = GXValidateCheckpointOperator(
+      task_id={{ task_id | pyrepr }},
+      configure_checkpoint=configure_checkpoint_{{ task_id }},
+      {%- if params.context_type %}
+      context_type={{ params.context_type | pyrepr }},
+      {%- endif %}
+      {%- if params.batch_parameters %}
+      batch_parameters={{ params.batch_parameters | pyrepr }},
+      {%- endif %}
+      {%- if params.conn_id %}
+      conn_id={{ params.conn_id | pyrepr }},
+      {%- endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  def configure_checkpoint_{{ task_id }}(context):
+  {{ params.configure | indent(4, true) }}
+
+  {{ task_id }} = GXValidateCheckpointOperator(
+      task_id={{ task_id | pyrepr }},
+      configure_checkpoint=configure_checkpoint_{{ task_id }},
+      {%- if params.context_type %}
+      context_type={{ params.context_type | pyrepr }},
+      {%- endif %}
+      {%- if params.batch_parameters %}
+      batch_parameters={{ params.batch_parameters | pyrepr }},
+      {%- endif %}
+      {%- if params.conn_id %}
+      conn_id={{ params.conn_id | pyrepr }},
+      {%- endif %}
+      {{ common | pyargs }}
+  )

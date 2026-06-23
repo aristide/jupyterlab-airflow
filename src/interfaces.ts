@@ -156,14 +156,22 @@ export interface IOperatorDef {
   example?: string;
   provider?: string;
   airflowMinVersion?: string;
+  /** Off the Airflow constraints file (Great Expectations / OpenMetadata; PRD
+   * §6.2.2 ¹ / §13 Q13). Such ops are shown with a pinned-install note but never
+   * gate-blocked — `/importErrors` is the deploy verdict. */
+  thirdParty?: boolean;
+  /** The third-party package's own version pin (used in the install hint). */
+  version?: string;
   // Provider-availability against the *target* Airflow (PRD §6.2.1). `unknown`
-  // when the target couldn't be read — the op is still shown and never blocked.
+  // when the target couldn't be read; `third-party` for off-constraints ops —
+  // both are still shown and never blocked.
   availability?:
     | 'available'
     | 'missing-provider'
     | 'version-too-old'
-    | 'unknown';
-  /** `pip install …` hint; present when `availability === 'missing-provider'`. */
+    | 'unknown'
+    | 'third-party';
+  /** `pip install …` hint; present for `missing-provider` or `third-party`. */
   pipInstall?: string;
 }
 
@@ -182,11 +190,14 @@ export interface INotifierDef {
   example?: string;
   provider?: string;
   airflowMinVersion?: string;
+  thirdParty?: boolean;
+  version?: string;
   availability?:
     | 'available'
     | 'missing-provider'
     | 'version-too-old'
-    | 'unknown';
+    | 'unknown'
+    | 'third-party';
   pipInstall?: string;
 }
 

@@ -29,15 +29,20 @@ BUNDLED_DIR = Path(__file__).parent / "operators"
 # server-side (they only matter to codegen).
 _CLIENT_PARAM_FIELDS = ("name", "label", "type", "default", "widget", "required", "help")
 
-# Operator-level documentation fields shipped to the client for the INFO tab.
-# Data-only (never executed); mapped to camelCase TS keys. Codegen-only fields
-# (imports, code templates) are still withheld.
+# Operator-level documentation + gating fields shipped to the client for the
+# INFO tab and provider/third-party gating. Data-only (never executed); mapped to
+# camelCase TS keys. Codegen-only fields (imports, code templates) are withheld.
+# ``third_party`` flags an off-constraints package (PRD §6.2.2 ¹ / §13 Q13) and
+# ``version`` is its own pin (the install hint pins it; the provider gate won't
+# hard-block such ops).
 _CLIENT_DOC_FIELDS = (
     ("description", "description"),
     ("docs_url", "docsUrl"),
     ("example", "example"),
     ("provider", "provider"),
     ("airflow_min_version", "airflowMinVersion"),
+    ("third_party", "thirdParty"),
+    ("version", "version"),
 )
 
 # Cache: signature (paths + mtimes) -> parsed operator list. A change to any

@@ -83,6 +83,64 @@ def test_annotate_view_unknown_when_target_down():
     assert "pipInstall" not in out[0]
 
 
+def test_availability_third_party_never_blocks(tmp_path):
+    # A third-party (off-constraints) op is always `third-party` — independent of
+    # whether the package happens to be in the index, and even when the target is
+    # unreachable (PRD §6.2.2 ¹ / §13 Q13). It is shown but never gate-blocked.
+    assert (
+        providers.availability("airflow-provider-great-expectations", "3.0",
+                               INDEX, third_party=True)
+        == "third-party"
+    )
+    assert (
+        providers.availability("openmetadata-ingestion", "9.9",
+                               None, third_party=True)
+        == "third-party"
+    )
+    # The version pin rides the install hint.
+    assert (
+        providers.pip_install_hint("openmetadata-ingestion", "1.13.0.0")
+        == "pip install openmetadata-ingestion==1.13.0.0"
+    )
+
+
+def test_annotate_view_third_party_pins_version():
+    entries = [
+        {"id": "ge", "provider": "airflow-provider-great-expectations",
+         "thirdParty": True, "version": "1.0.0", "airflowMinVersion": "3.0"},
+    ]
+    # Even with the target reachable and the package NOT in it, a third-party op
+    # is `third-party` (not `missing-provider`) with a version-pinned hint.
+    out = providers.annotate_view(entries, INDEX)[0]
+    assert out["availability"] == "third-party"
+    assert out["pipInstall"] == (
+        "pip install airflow-provider-great-expectations==1.0.0"
+    )
+
+
+def test_provider_block_errors_skips_third_party(tmp_path, monkeypatch):
+    # A third-party op (off-constraints) is NOT hard-blocked even when its package
+    # is absent from the target; a normal missing-provider op alongside it still
+    # is (so the skip is surgical). /importErrors is the third-party verdict.
+    (tmp_path / "tp.yaml").write_text(
+        "id: tp\nlabel: GX checkpoint\ncategory: Data Quality\n"
+        "provider: airflow-provider-great-expectations\nthird_party: true\n"
+        "version: '1.0.0'\nairflow_min_version: '3.0'\n"
+    )
+    (tmp_path / "snow.yaml").write_text(
+        "id: snow\nlabel: Snowflake query\ncategory: SQL\n"
+        "provider: apache-airflow-providers-snowflake\nairflow_min_version: '3.0'\n"
+    )
+    monkeypatch.setenv("AIRFLOW_OPERATORS_DIR", str(tmp_path))
+    registry.load_registry(force=True)
+
+    ir = {"nodes": [{"op": "tp"}, {"op": "snow"}]}
+    errors = providers.provider_block_errors(ir, INDEX)
+    assert len(errors) == 1  # only the normal missing provider blocks
+    assert "apache-airflow-providers-snowflake" in errors[0]
+    assert all("great-expectations" not in e for e in errors)
+
+
 def test_provider_block_errors(tmp_path, monkeypatch):
     # A synthetic op on a provider the target lacks.
     (tmp_path / "snow.yaml").write_text(

@@ -87,6 +87,18 @@ function OperatorInfo(props: { def: IOperatorDef }): JSX.Element {
           older.
         </div>
       )}
+      {def.availability === 'third-party' && (
+        <div className="jp-afdag-info-thirdparty">
+          ⓘ Third-party package — off the Airflow constraints file, so install
+          it separately:{' '}
+          {def.pipInstall ??
+            `pip install ${def.provider ?? ''}${
+              def.version ? `==${def.version}` : ''
+            }`}
+          . Deploy isn't blocked; if it's missing you'll get a clear import
+          error.
+        </div>
+      )}
       <ParamList title="Required inputs" params={required} />
       <ParamList title="Optional inputs" params={optional} />
       {def.example && (

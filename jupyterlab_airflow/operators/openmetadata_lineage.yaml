@@ -1,0 +1,79 @@
+id: openmetadata_lineage
+label: OpenMetadata lineage
+category: Governance
+provider: openmetadata-ingestion
+third_party: true
+version: 1.13.0.0
+airflow_min_version: '3.0'
+description: >-
+  Pushes this DAG's lineage and run status to an OpenMetadata server. It reads
+  the inlets/outlets declared on the DAG's tasks and records them as lineage. This
+  is an ADVANCED, code-first node: you write a small Python function that builds
+  and returns an OpenMetadataConnection (host, auth provider, JWT) for your server,
+  and you give the pipeline service name registered in OpenMetadata. Third-party
+  package, off the Airflow constraints file — and its version must match your
+  OpenMetadata SERVER version, not Airflow's. Install openmetadata-ingestion
+  separately and pin it to your server's version; if it's missing or mismatched
+  the deploy surfaces a clear import error.
+docs_url: https://docs.open-metadata.org/latest/connectors/pipeline/airflow/lineage-operator
+example: |
+  # Build and return an OpenMetadataConnection for your server.
+  from metadata.generated.schema.entity.services.connections.metadata.openMetadataConnection import (
+      OpenMetadataConnection,
+      AuthProvider,
+  )
+  from metadata.generated.schema.security.client.openMetadataJWTClientConfig import (
+      OpenMetadataJWTClientConfig,
+  )
+
+  return OpenMetadataConnection(
+      hostPort="http://localhost:8585/api",
+      authProvider=AuthProvider.openmetadata,
+      securityConfig=OpenMetadataJWTClientConfig(jwtToken="<token>"),
+  )
+import: 'from airflow_provider_openmetadata.lineage.operator import OpenMetadataLineageOperator'
+handles: { in: true, out: true }
+taskflow: operator
+task_id_prefix: om_lineage
+params:
+  - { name: server_config, label: 'Server connection (Python)', type: string, required: true, widget: code,
+      help: 'The body of a function that returns an OpenMetadataConnection for your server (hostPort, authProvider, and the JWT security config). Imported and constructed at parse time.' }
+  - { name: service_name, label: 'Pipeline service name', type: string, required: true, widget: text,
+      help: 'The name of the Airflow pipeline service registered in OpenMetadata that this DAG belongs to.' }
+  - { name: only_keep_dag_lineage, label: 'Only keep DAG lineage', type: boolean, required: false,
+      help: 'When on, remove any lineage in OpenMetadata for this DAG that is not part of its tasks'' inlets/outlets. Default off.' }
+  - { name: max_status, label: 'Max run statuses', type: integer, required: false, widget: text, default: 10,
+      help: 'How many recent pipeline run statuses to keep in OpenMetadata. Default 10.' }
+common_params: [retries, retry_delay, depends_on_past]
+template_traditional: |
+  def server_config_{{ task_id }}():
+  {{ params.server_config | indent(4, true) }}
+
+  {{ task_id }} = OpenMetadataLineageOperator(
+      task_id={{ task_id | pyrepr }},
+      server_config=server_config_{{ task_id }}(),
+      service_name={{ params.service_name | pyrepr }},
+      {%- if params.only_keep_dag_lineage %}
+      only_keep_dag_lineage={{ params.only_keep_dag_lineage | pyrepr }},
+      {%- endif %}
+      {%- if params.get('max_status') is not none %}
+      max_status={{ params.max_status | pyrepr }},
+      {%- endif %}
+      {{ common | pyargs }}
+  )
+template_taskflow: |
+  def server_config_{{ task_id }}():
+  {{ params.server_config | indent(4, true) }}
+
+  {{ task_id }} = OpenMetadataLineageOperator(
+      task_id={{ task_id | pyrepr }},
+      server_config=server_config_{{ task_id }}(),
+      service_name={{ params.service_name | pyrepr }},
+      {%- if params.only_keep_dag_lineage %}
+      only_keep_dag_lineage={{ params.only_keep_dag_lineage | pyrepr }},
+      {%- endif %}
+      {%- if params.get('max_status') is not none %}
+      max_status={{ params.max_status | pyrepr }},
+      {%- endif %}
+      {{ common | pyargs }}
+  )

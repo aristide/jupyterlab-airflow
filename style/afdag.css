@@ -387,6 +387,14 @@
   font-size: var(--jp-ui-font-size0);
 }
 
+/* Third-party op (off the constraints file): a neutral info glyph + tooltip;
+   the item is NOT dimmed (it's deployable — never gate-blocked, §13 Q13). */
+.jp-afdag-palette-item-info {
+  flex: 0 0 auto;
+  color: var(--jp-brand-color1, var(--jp-ui-font-color2));
+  font-size: var(--jp-ui-font-size0);
+}
+
 /* Canvas */
 .jp-afdag-canvas {
   position: relative;
@@ -1072,6 +1080,18 @@
   border: 1px solid var(--jp-warn-color1, var(--jp-border-color1));
   border-radius: 3px;
   background: var(--jp-warn-color3, var(--jp-layout-color2));
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+/* Third-party (off-constraints) note: informational (brand-tinted), not a
+   warning — the op deploys, it just needs a separate pinned install (§13 Q13). */
+.jp-afdag-info-thirdparty {
+  margin: 0 0 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--jp-brand-color1, var(--jp-border-color1));
+  border-radius: 3px;
+  background: var(--jp-brand-color3, var(--jp-layout-color2));
   color: var(--jp-ui-font-color1);
   font-size: var(--jp-ui-font-size0);
 }
