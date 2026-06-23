@@ -414,3 +414,183 @@ def test_find_source_path_none_for_pre_provenance_deploy(tmp_path):
     target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d\nx=1\n")
     res = find_source_path(filename="d.py", contents_root=str(root), target=target)
     assert res["path"] is None
+
+
+# --------------------------------------------------------------------------- #
+# GitDeployTarget (PRD §6.5.1 / §8.7) — verified against a real local git repo.
+# --------------------------------------------------------------------------- #
+import subprocess  # noqa: E402
+
+from jupyterlab_airflow.deploy import (  # noqa: E402
+    GitDeployTarget,
+    get_deploy_target,
+    purge_dag,
+)
+
+MANAGED = "# airflow-studio: managed  dag_id=demo  afdag_id=abc\nprint('v1')\n"
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+
+
+def _init_repo(path, bare=False):
+    args = ["git", "init", "-b", "main"] + (["--bare"] if bare else []) + [str(path)]
+    subprocess.run(args, capture_output=True)
+    if not bare:
+        _git(path, "-c", "user.email=t@t", "-c", "user.name=t",
+             "commit", "--allow-empty", "-m", "init")
+    return path
+
+
+def _git_target(tmp_path, **kw):
+    repo = _init_repo(tmp_path / "repo")
+    return GitDeployTarget(repo=str(repo), subdir="dags", branch="main", **kw)
+
+
+def test_git_target_commits_writes_with_provenance(tmp_path):
+    t = _git_target(tmp_path)
+    path = t.write("demo.py", MANAGED)
+    assert os.path.isfile(path)
+    assert t.exists("demo.py") and "print('v1')" in t.read("demo.py")
+    # Committed: the last commit is the deploy, and HEAD has the file content.
+    log = _git(tmp_path / "repo", "log", "--oneline").stdout
+    assert "airflow-studio: deploy demo.py" in log.splitlines()[0]
+    assert "print('v1')" in _git(tmp_path / "repo", "show", "HEAD:dags/demo.py").stdout
+    # list() reads the working tree like the shared volume.
+    listed = t.list()
+    assert listed == [{"filename": "demo.py", "dag_id": "demo", "afdag_id": "abc"}]
+
+
+def test_git_target_pushes_when_remote_configured(tmp_path):
+    bare = _init_repo(tmp_path / "remote.git", bare=True)
+    repo = _init_repo(tmp_path / "repo")
+    _git(repo, "remote", "add", "origin", str(bare))
+    _git(repo, "push", "origin", "main")
+    t = GitDeployTarget(repo=str(repo), subdir="dags", branch="main", remote="origin")
+    t.write("demo.py", MANAGED)
+    # The deploy commit reached the bare remote.
+    assert "deploy demo.py" in _git(bare, "log", "--oneline").stdout.splitlines()[0]
+
+
+def test_git_target_backup_untracked_and_rollback_commits(tmp_path):
+    t = _git_target(tmp_path)
+    t.write("demo.py", MANAGED)
+    t.write("demo.py", MANAGED.replace("v1", "v2"))
+    assert t.has_backup("demo.py")
+    # The backup is NOT committed (only the .py is tracked).
+    tracked = _git(tmp_path / "repo", "ls-files", "dags/").stdout.split()
+    assert "dags/demo.py" in tracked and "dags/demo.py.bak" not in tracked
+    # Rollback restores v1 and commits it.
+    assert rollback_dag("demo", target=t)["rolled_back"]
+    assert "print('v1')" in t.read("demo.py")
+    assert "roll back demo.py" in _git(tmp_path / "repo", "log", "--oneline").stdout.splitlines()[0]
+
+
+def test_git_target_delete_commits_removal(tmp_path):
+    t = _git_target(tmp_path)
+    t.write("demo.py", MANAGED)
+    t.delete("demo.py")
+    assert not t.exists("demo.py")
+    log = _git(tmp_path / "repo", "log", "--oneline").stdout
+    assert "undeploy demo.py" in log.splitlines()[0]
+    # Gone from HEAD.
+    assert _git(tmp_path / "repo", "show", "HEAD:dags/demo.py").returncode != 0
+
+
+def test_git_target_requires_a_repo(tmp_path):
+    t = GitDeployTarget(repo="", subdir="dags")
+    with pytest.raises(DeployError, match="AIRFLOW_GIT_DAGS_REPO"):
+        t.write("demo.py", MANAGED)
+
+
+def test_git_target_rejects_non_git_dir(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    t = GitDeployTarget(repo=str(plain), subdir="dags")
+    with pytest.raises(DeployError, match="not a git repository"):
+        t.write("demo.py", MANAGED)
+
+
+def test_git_target_inherits_collision_safety(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "dags").mkdir()
+    (repo / "dags" / "hand.py").write_text("print('hand-written')\n")
+    t = GitDeployTarget(repo=str(repo), subdir="dags")
+    with pytest.raises(DeployError, match="not a Studio-managed"):
+        t.write("hand.py", MANAGED)
+
+
+def test_get_deploy_target_factory(monkeypatch, tmp_path):
+    monkeypatch.delenv("AIRFLOW_DEPLOY_TARGET", raising=False)
+    assert type(get_deploy_target()).__name__ == "SharedVolumeTarget"
+    monkeypatch.setenv("AIRFLOW_DEPLOY_TARGET", "git")
+    monkeypatch.setenv("AIRFLOW_GIT_DAGS_REPO", str(tmp_path / "repo"))
+    assert type(get_deploy_target()).__name__ == "GitDeployTarget"
+
+
+def test_deploy_dag_through_git_target(tmp_path):
+    # End-to-end: deploy_dag validates then writes+commits via an injected git target.
+    t = _git_target(tmp_path)
+    res = deploy_dag(_ir("gitdag"), target=t)
+    assert res["deployed"], res["errors"]
+    assert t.exists("gitdag.py")
+    assert "deploy gitdag.py" in _git(tmp_path / "repo", "log", "--oneline").stdout.splitlines()[0]
+
+
+# --- Regression tests for the GitDeployTarget adversarial-review findings ----- #
+def test_git_target_refuses_wrong_branch(tmp_path):
+    # HIGH: a commit on the current branch + push HEAD:<branch> would silently
+    # cross-wire branches. The target must refuse when HEAD != the configured
+    # branch (no file written, no commit) rather than diverge the bundle branch.
+    repo = _init_repo(tmp_path / "repo")
+    _git(repo, "checkout", "-b", "feature")
+    t = GitDeployTarget(repo=str(repo), subdir="dags", branch="main")
+    with pytest.raises(DeployError, match="configured for branch 'main'"):
+        t.write("demo.py", MANAGED)
+    assert not (repo / "dags" / "demo.py").exists()  # nothing leaked onto feature
+
+
+def test_git_target_commit_is_path_scoped(tmp_path):
+    # HIGH (security): `git commit` with no pathspec sweeps the WHOLE index. A
+    # deploy must commit only its own files, never unrelated/secret pre-staged work.
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "secret.env").write_text("API_KEY=supersecret\n")
+    _git(repo, "add", "secret.env")  # unrelated, pre-staged
+    t = GitDeployTarget(repo=str(repo), subdir="dags", branch="main")
+    t.write("demo.py", MANAGED)
+    touched = _git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert "dags/demo.py" in touched and "secret.env" not in touched, touched
+    # The secret is left staged (untouched), not committed.
+    assert _git(repo, "diff", "--cached", "--name-only").stdout.strip() == "secret.env"
+
+
+def test_git_target_push_failure_rolls_back_commit(tmp_path):
+    # HIGH: a rejected push must not leave the repo ahead/divergent, and retries
+    # must not stack commits.
+    bare = _init_repo(tmp_path / "remote.git", bare=True)
+    repo = _init_repo(tmp_path / "repo")
+    _git(repo, "remote", "add", "origin", str(bare))
+    _git(repo, "push", "origin", "main")
+    # Advance the remote from a second clone so our push is non-fast-forward.
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", str(bare), str(clone)], capture_output=True)
+    _git(clone, "-c", "user.email=x@x", "-c", "user.name=x", "commit", "--allow-empty", "-m", "adv")
+    _git(clone, "push", "origin", "main")
+    t = GitDeployTarget(repo=str(repo), subdir="dags", branch="main", remote="origin")
+    before = _git(repo, "rev-list", "--count", "HEAD").stdout.strip()
+    with pytest.raises(DeployError, match="rolled back"):
+        t.write("demo.py", MANAGED)
+    assert _git(repo, "rev-list", "--count", "HEAD").stdout.strip() == before  # rolled back
+    with pytest.raises(DeployError):
+        t.write("demo.py", MANAGED)  # retry
+    assert _git(repo, "rev-list", "--count", "HEAD").stdout.strip() == before  # no stacking
+
+
+def test_git_target_gitignores_backups(tmp_path):
+    # LOW: the rollback .bak must not pollute `git status` (and can never be staged).
+    t = _git_target(tmp_path)
+    t.write("demo.py", MANAGED)
+    t.write("demo.py", MANAGED.replace("v1", "v2"))  # overwrite -> creates a .bak
+    assert "*.bak" in (tmp_path / "repo" / "dags" / ".gitignore").read_text()
+    assert ".bak" not in _git(tmp_path / "repo", "status", "--porcelain").stdout

@@ -19,6 +19,16 @@ by ``.devcontainer/docker-compose.yaml``.
                           ``airflow-dags/`` folder.
     AIRFLOW_OPERATORS_DIR Optional extra directory of operator YAML files that
                           override/extend the bundled registry (``registry.py``).
+
+    Deploy target selection (PRD §6.5.1 / §8.7), read by ``deploy.py``:
+    AIRFLOW_DEPLOY_TARGET "shared_volume" (default) or "git" — which DeployTarget
+                          to write through.
+    AIRFLOW_GIT_DAGS_REPO For the git target: path to the local git working tree
+                          that the Airflow GitDagBundle tracks (required for git).
+    AIRFLOW_GIT_DAGS_SUBDIR  DAG subdir within the repo. Default: dags.
+    AIRFLOW_GIT_DAGS_BRANCH  Branch to push to. Default: main.
+    AIRFLOW_GIT_DAGS_REMOTE  Remote to push to (e.g. origin). Unset → commit-only
+                          (for a repo Airflow reads directly).
 """
 
 import os

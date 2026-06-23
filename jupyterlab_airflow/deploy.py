@@ -239,6 +239,199 @@ class SharedVolumeTarget:
                 fh.write("\n".join(missing) + "\n")
 
 
+class GitDeployTarget(SharedVolumeTarget):
+    """A ``DeployTarget`` that commits generated DAGs to a **git** working tree
+    (PRD §6.5.1 / §8.7) that Airflow tracks via a ``GitDagBundle``.
+
+    Reuses ``SharedVolumeTarget``'s namespacing, atomic write, collision safety
+    (the provenance‑header guard), backup/rollback, and ``.airflowignore`` — each
+    *mutating* op additionally ``git add`` + ``git commit``s the change (and
+    ``git push``es when a remote is configured). The deploy root is the repo's DAG
+    subdir; reads/listing operate on the working tree exactly like the shared
+    volume. Discovery is eventual (Airflow's bundle polls the repo), so the
+    consistency flag stays ``"eventual"`` (drives the verify poll).
+
+    Config (env): ``AIRFLOW_GIT_DAGS_REPO`` (the local git working tree —
+    required), ``AIRFLOW_GIT_DAGS_SUBDIR`` (DAG subdir, default ``dags``),
+    ``AIRFLOW_GIT_DAGS_BRANCH`` (push branch, default ``main``),
+    ``AIRFLOW_GIT_DAGS_REMOTE`` (remote to push to; unset → commit‑only, for a
+    repo Airflow reads directly).
+    """
+
+    consistency = "eventual"
+
+    def __init__(
+        self,
+        repo: Optional[str] = None,
+        subdir: Optional[str] = None,
+        branch: Optional[str] = None,
+        remote: Optional[str] = None,
+    ) -> None:
+        repo = repo if repo is not None else os.environ.get("AIRFLOW_GIT_DAGS_REPO", "")
+        self.repo = os.path.abspath(repo) if repo else ""
+        self.subdir = (
+            subdir if subdir is not None else os.environ.get("AIRFLOW_GIT_DAGS_SUBDIR", "dags")
+        ) or ""
+        self.branch = branch or os.environ.get("AIRFLOW_GIT_DAGS_BRANCH", "main")
+        self.remote = (
+            remote if remote is not None else os.environ.get("AIRFLOW_GIT_DAGS_REMOTE", "")
+        )
+        root = os.path.join(self.repo, self.subdir) if (self.repo and self.subdir) else self.repo
+        # When unconfigured (no repo), point at a non-existent sentinel — never the
+        # cwd — so read-only ops (list/exists) return empty rather than scanning the
+        # server's working dir; mutating ops raise an actionable error via
+        # _ensure_root (which checks self.repo first).
+        super().__init__(root=root or "/nonexistent/airflow-studio-git-unconfigured")
+
+    # Bound every git call so a push to a slow/unreachable remote can't hang the
+    # deploy (these run in the Tornado thread-pool executor).
+    _GIT_TIMEOUT = 60
+
+    def _git(self, *args: str, check: bool = True) -> Tuple[int, str, str]:
+        import subprocess
+
+        try:
+            proc = subprocess.run(
+                ["git", "-C", self.repo, *args],
+                capture_output=True,
+                text=True,
+                timeout=self._GIT_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as err:
+            raise DeployError(
+                f"git {' '.join(args)} timed out after {self._GIT_TIMEOUT}s "
+                "(is the remote reachable?)."
+            ) from err
+        except OSError as err:  # git not installed / not on PATH
+            raise DeployError(f"git is not available: {err}") from err
+        if check and proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise DeployError(f"git {' '.join(args)} failed: {detail}")
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def _ensure_root(self) -> None:
+        if not self.repo:
+            raise DeployError(
+                "Git deploy target: set AIRFLOW_GIT_DAGS_REPO to the git working "
+                "tree that your Airflow GitDagBundle tracks, then restart the server."
+            )
+        code, out, _ = self._git("rev-parse", "--is-inside-work-tree", check=False)
+        if code != 0 or out.strip() != "true":
+            raise DeployError(
+                f"Git deploy target: {self.repo!r} is not a git repository. "
+                "Clone/init it (and check out the bundle branch) first."
+            )
+        # The working tree MUST be on the configured bundle branch, so the commit
+        # lands on (and pushes to) the branch Airflow actually reads. Otherwise a
+        # commit on the current branch + a `push …:branch` would silently diverge
+        # the two. Detached HEAD / a different branch are refused, not cross-wired.
+        code, branch, _ = self._git("symbolic-ref", "--short", "HEAD", check=False)
+        current = branch.strip()
+        if code != 0 or current != self.branch:
+            raise DeployError(
+                f"Git deploy target: the repo {self.repo!r} is on "
+                f"{current or 'a detached HEAD'!r}, but the deploy is configured for "
+                f"branch {self.branch!r}. Check it out "
+                f"(git -C {self.repo} checkout {self.branch}) and redeploy."
+            )
+        super()._ensure_root()
+        self._ensure_gitignore()
+
+    def _ensure_gitignore(self) -> None:
+        """Keep the rollback ``*.bak`` and atomic-write temp files out of git (a
+        belt-and-braces complement to the path-scoped commits below — they would
+        never be committed anyway, but this also keeps ``git status`` clean)."""
+        patterns = ["*.bak", ".afdag-tmp-*"]
+        path = os.path.join(self.root, ".gitignore")
+        existing = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                existing = fh.read()
+        missing = [p for p in patterns if p not in existing.splitlines()]
+        if missing:
+            with open(path, "a", encoding="utf-8") as fh:
+                if existing and not existing.endswith("\n"):
+                    fh.write("\n")
+                fh.write("\n".join(missing) + "\n")
+
+    def _commit(self, message: str, paths: List[str]) -> None:
+        """Commit **exactly** ``paths`` (absolute, within the repo) on the
+        configured branch, then push when a remote is set.
+
+        Both the empty-check and the commit are **pathspec-scoped** so the deploy
+        commit contains only the files it touched — never unrelated/secret changes
+        that happen to be pre-staged in the repo's index. Push is **transactional**:
+        if it is rejected (non-fast-forward / unreachable) the local commit is
+        rolled back (``reset --soft``) so a retry starts clean instead of stacking
+        commits, and an actionable error is raised."""
+        for path in paths:
+            self._git("add", "--", path, check=False)
+        # Empty-check scoped to our paths (a re-deploy of identical content, or a
+        # delete of a never-committed file, stages nothing → no commit).
+        staged, _, _ = self._git("diff", "--cached", "--quiet", "--", *paths, check=False)
+        if staged == 0:
+            return
+        # Commit ONLY our paths (the trailing `-- <paths>` overrides the index for
+        # other files), with a fixed identity so it works without global git config.
+        self._git(
+            "-c",
+            "user.email=airflow-studio@localhost",
+            "-c",
+            "user.name=Airflow Studio",
+            "commit",
+            "-m",
+            message,
+            "--",
+            *paths,
+        )
+        if self.remote:
+            refspec = f"refs/heads/{self.branch}:refs/heads/{self.branch}"
+            code, _, err = self._git("push", self.remote, refspec, check=False)
+            if code != 0:
+                # Undo the local commit so the repo isn't left ahead/divergent and a
+                # retry doesn't stack commits (the file stays staged on disk).
+                self._git("reset", "--soft", "HEAD~1", check=False)
+                raise DeployError(
+                    f"git push to {self.remote}/{self.branch} was rejected, so the "
+                    "local deploy commit was rolled back — fetch/rebase the repo and "
+                    f"redeploy. Details: {(err or '').strip()}"
+                )
+
+    def write(self, filename: str, content: str) -> str:
+        target = super().write(filename, content)
+        paths = [target]
+        for sidecar in (".airflowignore", ".gitignore"):
+            full = os.path.join(self.root, sidecar)
+            if os.path.isfile(full):
+                paths.append(full)
+        self._commit(f"airflow-studio: deploy {filename}", paths)
+        return target
+
+    def delete(self, filename: str) -> None:
+        self._ensure_root()  # refuse a wrong-branch / non-repo delete before mutating
+        target = self.path_for(filename)
+        super().delete(filename)
+        self._commit(f"airflow-studio: undeploy {filename}", [target])
+
+    def restore_backup(self, filename: str) -> bool:
+        self._ensure_root()  # refuse a wrong-branch / non-repo rollback before mutating
+        restored = super().restore_backup(filename)
+        if restored:
+            self._commit(
+                f"airflow-studio: roll back {filename}", [self.path_for(filename)]
+            )
+        return restored
+
+
+def get_deploy_target() -> SharedVolumeTarget:
+    """The configured deploy target (PRD §6.5.1). ``AIRFLOW_DEPLOY_TARGET=git``
+    selects the git‑bundle target; anything else (default) is the shared volume."""
+    kind = os.environ.get("AIRFLOW_DEPLOY_TARGET", "shared_volume").strip().lower()
+    if kind in ("git", "git_bundle", "gitdagbundle"):
+        return GitDeployTarget()
+    return SharedVolumeTarget()
+
+
 def _body_hash(content: str) -> Optional[str]:
     """sha256 of the file body (everything after the header line)."""
     _, sep, body = content.partition("\n")
@@ -263,7 +456,7 @@ def is_drifted(filename: str, target: Optional[SharedVolumeTarget] = None) -> bo
     matches the ``code=`` hash recorded in its provenance header (PRD §6.5.3).
     False when the file is absent, not Studio-managed, or pre-dates the code hash
     (an older deploy → can't tell, so don't false-alarm)."""
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     try:
         if not target.exists(filename):
             return False
@@ -338,7 +531,7 @@ def find_source_path(
     the deploy pre-dates ``afdag_id``, the `.afdag` was deleted, or no managed
     file matches).
     """
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     base = os.path.basename(filename) if filename else None
     afdag_id: Optional[str] = None
     for entry in target.list():
@@ -372,7 +565,7 @@ def find_orphans(
     should suppress the destructive "source deleted" prompt for that sweep rather
     than risk a false positive.
     """
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     live_ids, degraded = _live_afdag_ids(contents_root)
     orphans: List[Dict[str, str]] = []
     for entry in target.list():
@@ -396,7 +589,7 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) 
     Returns ``{deployed, path?, filename?, dag_id, warnings, errors, dagbag}``.
     Does not write when validation fails.
     """
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     dag_id = (ir.get("dag") or {}).get("dag_id", "")
 
     result = validate_dag(ir)
@@ -465,7 +658,7 @@ def rollback_dag(
     via the dag-processor (the editor re-polls the deploy lifecycle). Returns
     ``{dag_id, rolled_back, filename}``; ``rolled_back`` is False when there is no
     backup to restore."""
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     filename = _safe_filename(dag_id)
     rolled_back = target.restore_backup(filename)
     return {"dag_id": dag_id, "rolled_back": rolled_back, "filename": filename}
@@ -477,7 +670,7 @@ def purge_dag(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[
     or a DAG that Airflow hasn't recorded yet (404)."""
     from .client import AirflowError, get_client
 
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     filename = f"{dag_id}.py"
     removed_file = False
     try:
@@ -514,7 +707,7 @@ def rename_preflight(dag_id: str, target: Optional[SharedVolumeTarget] = None) -
     """
     from .client import AirflowError, get_client
 
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     try:
         file_exists = target.exists(f"{dag_id}.py")
     except DeployError:
@@ -564,7 +757,7 @@ def retire_old_dag(
 
     from .client import AirflowError, get_client
 
-    target = target or SharedVolumeTarget()
+    target = target or get_deploy_target()
     filename = f"{dag_id}.py"
     removed_file = False
     try:
