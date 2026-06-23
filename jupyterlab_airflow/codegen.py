@@ -197,6 +197,64 @@ def _default_args(dag: Dict[str, Any]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
+# Schedule strings that are NOT a cron expression, so they can't go inside a
+# CronTriggerTimetable for a combined asset-or-time schedule (`@once` runs once;
+# `None`/blank has no time component). Presets like `@daily` ARE cron (Airflow
+# normalizes them via `cron_presets`), so they combine fine.
+_NON_CRON_SCHEDULES = {"@once", "@continuous", "none", ""}
+
+
+def _build_schedule(dag: Dict[str, Any]) -> Tuple[str, set]:
+    """Build the ``schedule=`` value expression + the import lines it needs.
+
+    Asset scheduling (PRD §6.9): with a non-empty ``schedule_assets`` the DAG is
+    asset-scheduled. ``schedule_asset_mode`` picks ``all`` (run when *every* asset
+    updates — the default, a bare list, which Airflow coerces to ``AssetAll``) vs
+    ``any`` (run when *any* updates → ``AssetAny(...)``). When ``schedule_with_time``
+    is set and there is a combinable cron schedule, the two merge into
+    ``AssetOrTimeSchedule(timetable=CronTriggerTimetable(cron, timezone='UTC'),
+    assets=...)`` (run on the time schedule OR when the assets update); otherwise
+    the asset condition overrides the time schedule. With no assets it is the plain
+    cron/preset string (or ``None``). All class/import paths verified against
+    airflow-core 3.0.2 + task-sdk 1.2.2."""
+    imports: set = set()
+    raw = dag.get("schedule_assets")
+    items = (
+        [str(v).strip() for v in raw if str(v).strip()]
+        if isinstance(raw, list)
+        else []
+    )
+    cron = dag.get("schedule")
+    if not items:
+        return (_pyrepr(cron) if cron else "None", imports)
+
+    imports.add("from airflow.sdk import Asset")
+    asset_exprs = ", ".join(f"Asset({_pyrepr(a)})" for a in items)
+    mode = "any" if str(dag.get("schedule_asset_mode", "all")).strip().lower() == "any" else "all"
+    if mode == "any":
+        imports.add("from airflow.sdk import AssetAny")
+
+    combinable = bool(cron) and str(cron).strip().lower() not in _NON_CRON_SCHEDULES
+    if dag.get("schedule_with_time") and combinable:
+        imports.add("from airflow.timetables.assets import AssetOrTimeSchedule")
+        imports.add("from airflow.timetables.trigger import CronTriggerTimetable")
+        if mode == "any":
+            assets_arg = f"AssetAny({asset_exprs})"
+        else:
+            imports.add("from airflow.sdk import AssetAll")
+            assets_arg = f"AssetAll({asset_exprs})"
+        timetable = f"CronTriggerTimetable({_pyrepr(cron)}, timezone='UTC')"
+        return (
+            f"AssetOrTimeSchedule(timetable={timetable}, assets={assets_arg})",
+            imports,
+        )
+
+    # Asset-only schedule (overrides the time schedule).
+    if mode == "any":
+        return (f"AssetAny({asset_exprs})", imports)
+    return (f"[{asset_exprs}]", imports)
+
+
 def _dag_args(dag: Dict[str, Any], extra: Optional[List[str]] = None) -> List[str]:
     """The shared ``DAG(...)`` keyword args (used by both the TaskFlow ``@dag``
     decorator and the Traditional ``with DAG(...)`` context). ``extra`` carries
@@ -204,14 +262,9 @@ def _dag_args(dag: Dict[str, Any], extra: Optional[List[str]] = None) -> List[st
     args: List[str] = [f'dag_id={_pyrepr(dag["dag_id"])}']
     if dag.get("description"):
         args.append(f'description={_pyrepr(dag["description"])}')
-    # Data-aware (asset) scheduling overrides the cron/preset schedule (PRD §6.9):
-    # `schedule=[Asset('a'), ...]` runs the DAG when those assets update.
-    schedule_assets = _asset_list_expr(dag.get("schedule_assets"))
-    if schedule_assets:
-        args.append(f"schedule={schedule_assets}")
-    else:
-        schedule = dag.get("schedule")
-        args.append(f"schedule={_pyrepr(schedule) if schedule else 'None'}")
+    # Schedule: a plain cron/preset, an asset condition, or a combined
+    # asset-or-time schedule (PRD §6.9). See `_build_schedule`.
+    args.append(f"schedule={_build_schedule(dag)[0]}")
     start_date = _parse_start_date(dag.get("start_date"))
     if start_date:
         args.append(f"start_date={start_date}")
@@ -336,16 +389,20 @@ def _collect_imports(
     ops: List[Dict[str, Any]],
     traditional: bool = False,
     notifiers: Tuple[Dict[str, Any], ...] = (),
-    uses_assets: bool = False,
+    extra_imports: Tuple[str, ...] = (),
 ) -> List[str]:
     """datetime + airflow.sdk first, then de-duplicated provider imports.
 
     Traditional uses ``from airflow.sdk import DAG`` and every op's **operator
     class** import (`import:`); TaskFlow uses ``dag, task`` and a native op's
-    ``import_taskflow`` (operator-style ops still use `import:`). When the DAG uses
-    data-aware scheduling / asset inlets/outlets (PRD §6.9), ``Asset`` is imported
-    from ``airflow.sdk`` too."""
-    asset_import = "from airflow.sdk import Asset"
+    ``import_taskflow`` (operator-style ops still use `import:`). ``extra_imports``
+    carries asset/timetable lines the DAG needs (``Asset``, ``AssetAny``/``AssetAll``,
+    ``AssetOrTimeSchedule``, ``CronTriggerTimetable``) — PRD §6.9."""
+    def _merge_extra(pinned: List[str], extra: List[str]) -> None:
+        for line in extra_imports:
+            if line and line not in pinned and line not in extra:
+                extra.append(line)
+
     if traditional:
         pinned = ["from datetime import datetime, timedelta", "from airflow.sdk import DAG"]
         extra: List[str] = []
@@ -357,8 +414,7 @@ def _collect_imports(
             line = notifier.get("import")
             if line and line not in pinned and line not in extra:
                 extra.append(line)
-        if uses_assets and asset_import not in extra:
-            extra.append(asset_import)
+        _merge_extra(pinned, extra)
         return pinned + sorted(extra)
 
     pinned = ["from datetime import datetime, timedelta", "from airflow.sdk import dag, task"]
@@ -381,8 +437,7 @@ def _collect_imports(
         line = notifier.get("import")
         if line and line not in pinned and line not in extra:
             extra.append(line)
-    if uses_assets and asset_import not in extra:
-        extra.append(asset_import)
+    _merge_extra(pinned, extra)
     return pinned + sorted(extra)
 
 
@@ -569,12 +624,16 @@ def _render(ir: Dict[str, Any]) -> str:
         f"# airflow-studio: managed  studio={STUDIO_VERSION}  "
         f"{_ir_hash(ir)}  dag_id={dag_id}  afdag_id={afdag_id}  syntax={syntax}"
     )
-    uses_assets = bool(_asset_list_expr(dag.get("schedule_assets"))) or any(
-        _asset_list_expr(node.get("inlets")) or _asset_list_expr(node.get("outlets"))
-        for node in nodes
-    )
+    # Asset/timetable imports: those the DAG schedule needs (Asset, AssetAny/All,
+    # AssetOrTimeSchedule, CronTriggerTimetable) plus `Asset` for any per-task
+    # inlets/outlets (PRD §6.9). Collected only when actually used.
+    asset_imports = set(_build_schedule(dag)[1])
+    if any(_node_assets(node) for node in nodes):
+        asset_imports.add("from airflow.sdk import Asset")
     imports = "\n".join(
-        _collect_imports(used_ops, traditional, tuple(used_notifiers), uses_assets)
+        _collect_imports(
+            used_ops, traditional, tuple(used_notifiers), tuple(sorted(asset_imports))
+        )
     )
 
     body_sections = ["\n\n".join(definitions)] if definitions else ["    pass"]

@@ -417,7 +417,21 @@ export function dagForm(): IFormSpec {
         type: 'string',
         title: 'schedule on assets',
         description:
-          'Data-aware scheduling (Airflow 3): comma-separated asset names or URIs (e.g. orders, s3://lake/raw.csv). When set, the DAG runs whenever ALL these assets update and this OVERRIDES the time schedule above. A task produces an asset via its outlets.'
+          'Data-aware scheduling (Airflow 3): comma-separated asset names or URIs (e.g. orders, s3://lake/raw.csv). When set, the DAG runs on these assets (overriding the time schedule above unless “also run on time” is on). A task produces an asset via its outlets.'
+      },
+      schedule_asset_mode: {
+        type: 'string',
+        title: 'assets — match',
+        enum: ['all', 'any'],
+        default: 'all',
+        description:
+          'With multiple assets: “all” runs when every asset updates (AND); “any” runs when any one updates (OR). Only applies when “schedule on assets” is set.'
+      },
+      schedule_with_time: {
+        type: 'boolean',
+        title: 'also run on time',
+        description:
+          'Combine asset + time scheduling: also run on the time schedule above (runs on the cron OR when the assets update). Needs both a “schedule on assets” and a cron/preset schedule; ignored for @once, @continuous, or no schedule.'
       },
       start_date: {
         type: 'string',
@@ -477,6 +491,8 @@ export function dagForm(): IFormSpec {
       'description',
       'schedule',
       'schedule_assets',
+      'schedule_asset_mode',
+      'schedule_with_time',
       'start_date',
       'catchup',
       'retries',
@@ -503,6 +519,8 @@ export function dagToFormData(dag: IAfdagDagConfig): Record<string, unknown> {
     description: dag.description ?? '',
     schedule: dag.schedule ?? 'None',
     schedule_assets: (dag.schedule_assets ?? []).join(', '),
+    schedule_asset_mode: dag.schedule_asset_mode ?? 'all',
+    schedule_with_time: dag.schedule_with_time ?? false,
     start_date: dag.start_date ?? '',
     catchup: dag.catchup ?? false,
     retries: dag.retries ?? 0,
@@ -525,6 +543,8 @@ export function formDataToDag(
     description: String(formData.description ?? ''),
     schedule: schedule === 'None' || schedule === '' ? null : schedule,
     schedule_assets: parseTags(formData.schedule_assets),
+    schedule_asset_mode: formData.schedule_asset_mode === 'any' ? 'any' : 'all',
+    schedule_with_time: Boolean(formData.schedule_with_time),
     start_date: String(formData.start_date ?? ''),
     catchup: Boolean(formData.catchup),
     retries: Number(formData.retries ?? 0),

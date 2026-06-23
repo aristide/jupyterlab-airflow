@@ -52,10 +52,19 @@ export interface IAfdagDagConfig {
   description?: string;
   schedule?: string | null;
   /** Data-aware (asset/dataset) scheduling (Airflow 3, PRD §6.9): when non-empty,
-   * the DAG runs whenever ALL these assets update, and codegen emits
-   * `schedule=[Asset(...)]` instead of the cron/preset `schedule` above. Each
-   * entry is an asset name or URI. Absent on pre-asset `.afdag` files. */
+   * the DAG runs on these assets, and codegen emits an asset-based `schedule=`
+   * instead of the cron/preset `schedule` above. Each entry is an asset name or
+   * URI. Absent on pre-asset `.afdag` files. */
   schedule_assets?: string[];
+  /** How to combine multiple `schedule_assets` (PRD §6.9): `all` (run when every
+   * asset updates — the default → a list / `AssetAll`) or `any` (run when any one
+   * updates → `AssetAny`). Only meaningful with `schedule_assets`. */
+  schedule_asset_mode?: 'all' | 'any';
+  /** Combine asset + time scheduling (PRD §6.9): when true and there is a
+   * combinable cron `schedule`, codegen emits `AssetOrTimeSchedule` (run on the
+   * time schedule OR when the assets update) instead of the assets overriding the
+   * time schedule. Ignored without assets or with an `@once`/empty schedule. */
+  schedule_with_time?: boolean;
   start_date?: string;
   catchup?: boolean;
   retries?: number;

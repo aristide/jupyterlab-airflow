@@ -1259,3 +1259,60 @@ def test_no_assets_means_no_asset_import():
     code2 = generate_dag(ir2)["code"]
     assert "Asset" not in code2 and "outlets=" not in code2
     assert "schedule='@daily'" in code2
+
+
+def test_asset_schedule_any_all_modes():
+    # Advanced asset scheduling (PRD §6.9), verified against airflow-core 3.0.2 +
+    # task-sdk 1.2.2. Default 'all' -> a bare list (Airflow coerces to AssetAll);
+    # 'any' -> AssetAny(...) with the import.
+    all_ir = _ir(nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                         "params": {"bash_command": "echo"}}], edges=[],
+                 schedule_assets=["a", "b"])
+    code = generate_dag(all_ir)["code"]
+    assert "schedule=[Asset('a'), Asset('b')]" in code
+    assert "AssetAny" not in code and "AssetAll" not in code  # list = AND
+
+    any_ir = _ir(nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                         "params": {"bash_command": "echo"}}], edges=[],
+                 schedule_assets=["a", "b"], schedule_asset_mode="any")
+    res = generate_dag(any_ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    assert "schedule=AssetAny(Asset('a'), Asset('b'))" in code
+    assert "from airflow.sdk import AssetAny" in code
+
+
+def test_asset_or_time_schedule_combined():
+    # schedule_with_time + a combinable cron -> AssetOrTimeSchedule(timetable=
+    # CronTriggerTimetable(cron, timezone='UTC'), assets=AssetAll/AssetAny(...)).
+    for mode, cond in (("all", "AssetAll"), ("any", "AssetAny")):
+        ir = _ir(nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                         "params": {"bash_command": "echo"}}], edges=[],
+                 schedule="0 9 * * *", schedule_assets=["orders"],
+                 schedule_asset_mode=mode, schedule_with_time=True)
+        res = generate_dag(ir)
+        assert res["valid"], res["errors"]
+        code = res["code"]
+        compile(code, "<gen>", "exec")
+        assert (
+            "schedule=AssetOrTimeSchedule(timetable="
+            "CronTriggerTimetable('0 9 * * *', timezone='UTC'), "
+            f"assets={cond}(Asset('orders')))" in code
+        )
+        assert "from airflow.timetables.assets import AssetOrTimeSchedule" in code
+        assert "from airflow.timetables.trigger import CronTriggerTimetable" in code
+
+
+def test_asset_or_time_falls_back_when_not_combinable():
+    # @once and no-schedule can't go in a CronTriggerTimetable -> the assets
+    # override the time schedule instead (no AssetOrTimeSchedule), still valid.
+    for sched in ("@once", None):
+        ir = _ir(nodes=[{"id": "n", "op": "bash", "task_id": "t",
+                         "params": {"bash_command": "echo"}}], edges=[],
+                 schedule=sched, schedule_assets=["a"], schedule_with_time=True)
+        res = generate_dag(ir)
+        assert res["valid"], (sched, res["errors"])
+        code = res["code"]
+        assert "schedule=[Asset('a')]" in code
+        assert "AssetOrTimeSchedule" not in code and "CronTriggerTimetable" not in code

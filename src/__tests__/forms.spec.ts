@@ -138,9 +138,13 @@ describe('common params (NODE "Common settings")', () => {
     expect(props.__common__.properties.retries.type).toBe('integer');
     const order = uiSchema['ui:order'] as string[];
     // Common settings come after the params; the Assets section is ordered last.
-    expect(order.indexOf('__common__')).toBeGreaterThan(order.indexOf('mode') - 1);
+    expect(order.indexOf('__common__')).toBeGreaterThan(
+      order.indexOf('mode') - 1
+    );
     expect(order[order.length - 1]).toBe('__assets__');
-    expect(order.indexOf('__common__')).toBeLessThan(order.indexOf('__assets__'));
+    expect(order.indexOf('__common__')).toBeLessThan(
+      order.indexOf('__assets__')
+    );
   });
 
   it('round-trips common values; omits false booleans and blanks', () => {
@@ -223,6 +227,31 @@ describe('asset inlets/outlets (NODE "Assets") + DAG schedule_assets, PRD §6.9'
     // The DAG form exposes the field with a placeholder.
     const { schema } = dagForm();
     expect((schema.properties as any).schedule_assets.type).toBe('string');
+  });
+
+  it('round-trips the asset match mode (all/any) + combine-with-time flag', () => {
+    // Defaults: all / false.
+    const fd = dagToFormData({ dag_id: 'd', schedule_assets: ['a'] });
+    expect(fd.schedule_asset_mode).toBe('all');
+    expect(fd.schedule_with_time).toBe(false);
+    // Round-trip explicit values.
+    const back = formDataToDag({
+      dag_id: 'd',
+      schedule_assets: 'a, b',
+      schedule_asset_mode: 'any',
+      schedule_with_time: true
+    });
+    expect(back.schedule_asset_mode).toBe('any');
+    expect(back.schedule_with_time).toBe(true);
+    // An unknown mode coerces to the safe 'all' default.
+    expect(
+      formDataToDag({ dag_id: 'd', schedule_asset_mode: 'bogus' })
+        .schedule_asset_mode
+    ).toBe('all');
+    // The DAG form exposes an enum select + a boolean.
+    const props = dagForm().schema.properties as any;
+    expect(props.schedule_asset_mode.enum).toEqual(['all', 'any']);
+    expect(props.schedule_with_time.type).toBe('boolean');
   });
 });
 
@@ -308,7 +337,13 @@ describe('notifier form (notifierForm, PRD §6.8)', () => {
     id: 'smtp',
     label: 'Email (SMTP)',
     params: [
-      { name: 'to', label: 'To', required: true, widget: 'text', help: 'Recipient' },
+      {
+        name: 'to',
+        label: 'To',
+        required: true,
+        widget: 'text',
+        help: 'Recipient'
+      },
       { name: 'subject', label: 'Subject', required: false, widget: 'text' }
     ]
   };
