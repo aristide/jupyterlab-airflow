@@ -51,6 +51,11 @@ export interface IAfdagDagConfig {
   dag_id: string;
   description?: string;
   schedule?: string | null;
+  /** Data-aware (asset/dataset) scheduling (Airflow 3, PRD §6.9): when non-empty,
+   * the DAG runs whenever ALL these assets update, and codegen emits
+   * `schedule=[Asset(...)]` instead of the cron/preset `schedule` above. Each
+   * entry is an asset name or URI. Absent on pre-asset `.afdag` files. */
+  schedule_assets?: string[];
   start_date?: string;
   catchup?: boolean;
   retries?: number;
@@ -74,6 +79,13 @@ export interface IAfdagNode {
   common?: Record<string, unknown>;
   /** Per-task notification callbacks (PRD §6.8); absent on older `.afdag`. */
   callbacks?: IAfdagTaskCallbacks;
+  /** Assets this task consumes (`inlets`) / produces (`outlets`) — Airflow 3
+   * data-aware scheduling + lineage (PRD §6.9). On success a task marks its
+   * `outlets` updated, triggering DAGs scheduled on those assets. Each entry is
+   * an asset name or URI; codegen emits `inlets`/`outlets=[Asset(...)]`. Only
+   * non-empty lists are stored; absent on pre-asset `.afdag` files. */
+  inlets?: string[];
+  outlets?: string[];
   code?: string | null;
   position?: { x: number; y: number };
 }

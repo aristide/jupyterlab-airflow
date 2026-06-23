@@ -34,6 +34,12 @@ function isJsonParam(param: IOperatorParam): boolean {
 // IR boundary into `node.common`.
 const COMMON_KEY = '__common__';
 
+// The NODE form holds a task's asset inlets/outlets (PRD §6.9) under this nested
+// object key (rendered as an "Assets (data-aware scheduling)" fieldset, each a
+// comma-separated text field); split back out at the IR boundary into
+// `node.inlets`/`node.outlets`. Every op can produce/consume assets.
+const ASSETS_KEY = '__assets__';
+
 interface ICommonParamDef {
   label: string;
   type: 'integer' | 'boolean' | 'string';
@@ -170,7 +176,34 @@ export function nodeForm(op: IOperatorDef): IFormSpec {
     order.push(COMMON_KEY);
   }
 
+  // Asset inlets/outlets (PRD §6.9): a nested fieldset, ordered last. Every op
+  // can consume (`inlets`) or produce (`outlets`) assets; producing one triggers
+  // any DAG scheduled on it. Comma-separated names/URIs (like `tags`).
+  properties[ASSETS_KEY] = {
+    type: 'object',
+    title: 'Assets (data-aware scheduling)',
+    properties: {
+      inlets: {
+        type: 'string',
+        title: 'inlets (consumes)',
+        description:
+          'Assets this task reads, as comma-separated names or URIs (for lineage), e.g. s3://lake/raw.csv.'
+      },
+      outlets: {
+        type: 'string',
+        title: 'outlets (produces)',
+        description:
+          'Assets this task updates on success, as comma-separated names or URIs. Any DAG scheduled on one of these then runs.'
+      }
+    }
+  };
+  order.push(ASSETS_KEY);
+
   uiSchema['ui:order'] = order;
+  uiSchema[ASSETS_KEY] = {
+    inlets: { 'ui:placeholder': 'orders, s3://lake/raw.csv' },
+    outlets: { 'ui:placeholder': 'curated_orders' }
+  };
   return {
     schema: { type: 'object', properties, required },
     uiSchema
@@ -242,7 +275,8 @@ export function nodeToFormData(
   op: IOperatorDef,
   taskId: string,
   params: Record<string, unknown>,
-  common: Record<string, unknown> = {}
+  common: Record<string, unknown> = {},
+  assets: { inlets?: string[]; outlets?: string[] } = {}
 ): Record<string, unknown> {
   const data: Record<string, unknown> = { task_id: taskId };
   for (const param of op.params) {
@@ -264,6 +298,10 @@ export function nodeToFormData(
     }
     data[COMMON_KEY] = nested;
   }
+  data[ASSETS_KEY] = {
+    inlets: (assets.inlets ?? []).join(', '),
+    outlets: (assets.outlets ?? []).join(', ')
+  };
   return data;
 }
 
@@ -277,6 +315,8 @@ export function formDataToNode(
   task_id: string;
   params: Record<string, unknown>;
   common: Record<string, unknown>;
+  inlets: string[];
+  outlets: string[];
 } {
   const params: Record<string, unknown> = {};
   for (const param of op.params) {
@@ -307,7 +347,17 @@ export function formDataToNode(
     common[name] = value;
   }
 
-  return { task_id: String(formData.task_id ?? ''), params, common };
+  const assets = (formData[ASSETS_KEY] as Record<string, unknown>) ?? {};
+  const inlets = parseTags(assets.inlets);
+  const outlets = parseTags(assets.outlets);
+
+  return {
+    task_id: String(formData.task_id ?? ''),
+    params,
+    common,
+    inlets,
+    outlets
+  };
 }
 
 function parseJsonOr(value: unknown, fallback: unknown): unknown {
@@ -362,6 +412,12 @@ export function dagForm(): IFormSpec {
         title: 'schedule',
         description:
           'How often the DAG runs — a preset like @daily, a cron expression (0 9 * * *), or None for manual / triggered-only.'
+      },
+      schedule_assets: {
+        type: 'string',
+        title: 'schedule on assets',
+        description:
+          'Data-aware scheduling (Airflow 3): comma-separated asset names or URIs (e.g. orders, s3://lake/raw.csv). When set, the DAG runs whenever ALL these assets update and this OVERRIDES the time schedule above. A task produces an asset via its outlets.'
       },
       start_date: {
         type: 'string',
@@ -420,6 +476,7 @@ export function dagForm(): IFormSpec {
       'dag_id',
       'description',
       'schedule',
+      'schedule_assets',
       'start_date',
       'catchup',
       'retries',
@@ -432,6 +489,7 @@ export function dagForm(): IFormSpec {
     dag_id: { 'ui:readonly': true },
     description: { 'ui:widget': 'textarea' },
     schedule: { 'ui:widget': 'schedule' },
+    schedule_assets: { 'ui:placeholder': 'orders, s3://lake/raw.csv' },
     tags: { 'ui:placeholder': 'studio, etl' },
     params: { 'ui:widget': 'json' },
     default_args: { 'ui:widget': 'json' }
@@ -444,6 +502,7 @@ export function dagToFormData(dag: IAfdagDagConfig): Record<string, unknown> {
     dag_id: dag.dag_id,
     description: dag.description ?? '',
     schedule: dag.schedule ?? 'None',
+    schedule_assets: (dag.schedule_assets ?? []).join(', '),
     start_date: dag.start_date ?? '',
     catchup: dag.catchup ?? false,
     retries: dag.retries ?? 0,
@@ -465,6 +524,7 @@ export function formDataToDag(
     dag_id: String(formData.dag_id ?? ''),
     description: String(formData.description ?? ''),
     schedule: schedule === 'None' || schedule === '' ? null : schedule,
+    schedule_assets: parseTags(formData.schedule_assets),
     start_date: String(formData.start_date ?? ''),
     catchup: Boolean(formData.catchup),
     retries: Number(formData.retries ?? 0),

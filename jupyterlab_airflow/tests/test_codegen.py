@@ -1190,3 +1190,72 @@ def test_deterministic_output():
         edges=[],
     )
     assert generate_dag(ir)["code"] == generate_dag(ir)["code"]
+
+
+def test_asset_scheduling_dag_and_task_outlets_inlets():
+    # Airflow 3 data-aware scheduling (PRD §6.9): a DAG scheduled on assets +
+    # tasks that produce (outlets) / consume (inlets) them. Verified against
+    # apache-airflow-task-sdk 1.2.2 (Asset is exported from airflow.sdk; @task and
+    # operators accept inlets/outlets, which ride the trailing-kwargs slot).
+    ir = _ir(
+        nodes=[
+            {"id": "a", "op": "bash", "task_id": "build",
+             "params": {"bash_command": "echo build"},
+             "outlets": ["s3://lake/orders.csv", "curated"]},
+            {"id": "b", "op": "sql", "task_id": "q",
+             "params": {"conn_id": "c", "sql": "SELECT 1"},
+             "inlets": ["s3://lake/orders.csv"]},
+        ],
+        edges=[{"source": "a", "target": "b"}],
+        schedule_assets=["s3://lake/orders.csv", "daily_drop"],
+    )
+    res = generate_dag(ir)
+    assert res["valid"], res["errors"]
+    code = res["code"]
+    ast.parse(code)
+    compile(code, "<gen>", "exec")
+
+    # DAG scheduled on assets (overrides the cron schedule), Asset imported once.
+    assert "schedule=[Asset('s3://lake/orders.csv'), Asset('daily_drop')]" in code
+    assert "schedule='@daily'" not in code  # asset schedule overrides the preset
+    assert "from airflow.sdk import Asset" in code
+    # Native @task outlets and operator inlets both render.
+    assert "outlets=[Asset('s3://lake/orders.csv'), Asset('curated')]" in code
+    assert "inlets=[Asset('s3://lake/orders.csv')]" in code
+
+
+def test_asset_outlets_render_in_both_families():
+    nodes = [{"id": "a", "op": "bash", "task_id": "build",
+              "params": {"bash_command": "echo"}, "outlets": ["orders"]}]
+    tf = generate_dag(_ir(nodes=nodes, edges=[]))
+    assert tf["valid"], tf["errors"]
+    assert "outlets=[Asset('orders')]" in tf["code"]
+    trad = _ir(nodes=nodes, edges=[])
+    trad["syntax_style"] = "traditional"
+    out = generate_dag(trad)
+    assert out["valid"], out["errors"]
+    assert "outlets=[Asset('orders')]" in out["code"]
+    assert "from airflow.sdk import Asset" in out["code"]
+
+
+def test_no_assets_means_no_asset_import():
+    # Regression: a DAG that uses no assets is byte-unchanged (no Asset import,
+    # the cron schedule stays) — older `.afdag` files are unaffected.
+    ir = _ir(
+        nodes=[{"id": "a", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo"}}],
+        edges=[],
+    )
+    code = generate_dag(ir)["code"]
+    assert "Asset" not in code
+    assert "schedule='@daily'" in code
+    # Blank-only asset lists are treated as empty (no Asset import, no kwarg).
+    ir2 = _ir(
+        nodes=[{"id": "a", "op": "bash", "task_id": "t",
+                "params": {"bash_command": "echo"}, "outlets": ["", "  "]}],
+        edges=[],
+        schedule_assets=["  "],
+    )
+    code2 = generate_dag(ir2)["code"]
+    assert "Asset" not in code2 and "outlets=" not in code2
+    assert "schedule='@daily'" in code2

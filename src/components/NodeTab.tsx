@@ -119,14 +119,20 @@ function NodeForm(props: INodeFormProps): JSX.Element {
   const { node, def, onNodeChange } = props;
   const { schema, uiSchema } = React.useMemo(() => nodeForm(def), [def]);
   const [formData, setFormData] = React.useState(() =>
-    nodeToFormData(def, node.data.task_id, node.data.params, node.data.common)
+    nodeToFormData(def, node.data.task_id, node.data.params, node.data.common, {
+      inlets: node.data.inlets,
+      outlets: node.data.outlets
+    })
   );
 
   const handleChange = React.useCallback(
     (next: Record<string, unknown>) => {
       setFormData(next);
-      const { task_id, params, common } = formDataToNode(def, next);
-      onNodeChange(node.id, { task_id, params, common });
+      const { task_id, params, common, inlets, outlets } = formDataToNode(
+        def,
+        next
+      );
+      onNodeChange(node.id, { task_id, params, common, inlets, outlets });
     },
     [def, node.id, onNodeChange]
   );

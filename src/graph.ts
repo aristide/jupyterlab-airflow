@@ -28,6 +28,9 @@ export interface IAfdagNodeData {
   common?: Record<string, unknown>;
   /** Per-task notification callbacks (PRD §6.8); see `IAfdagNode.callbacks`. */
   callbacks?: IAfdagTaskCallbacks;
+  /** Assets this task consumes/produces (PRD §6.9); see `IAfdagNode.inlets`/`outlets`. */
+  inlets?: string[];
+  outlets?: string[];
   [key: string]: unknown;
 }
 
@@ -51,7 +54,9 @@ export function irToFlow(ir: IAfdagIR): {
       task_id: node.task_id,
       params: node.params ?? {},
       common: node.common ?? {},
-      callbacks: node.callbacks
+      callbacks: node.callbacks,
+      inlets: node.inlets,
+      outlets: node.outlets
     }
   }));
   const noteNodes: AfdagFlowNode[] = (ir.notes ?? []).map(note => ({
@@ -127,6 +132,16 @@ export function flowToIR(
       const callbacks = pruneCallbacks(node.data.callbacks);
       if (callbacks) {
         irNode.callbacks = callbacks;
+      }
+      // Persist asset inlets/outlets only when non-empty (PRD §6.9) — keeps the
+      // IR clean and back-compatible (absent on pre-asset `.afdag` files).
+      const inlets = (node.data.inlets ?? []).filter(a => a.trim() !== '');
+      if (inlets.length > 0) {
+        irNode.inlets = inlets;
+      }
+      const outlets = (node.data.outlets ?? []).filter(a => a.trim() !== '');
+      if (outlets.length > 0) {
+        irNode.outlets = outlets;
       }
       return irNode;
     });

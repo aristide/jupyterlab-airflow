@@ -36,11 +36,13 @@ describe('registry -> RJSF schema (nodeForm)', () => {
   it('includes task_id plus operator params, with required + widgets', () => {
     const { schema, uiSchema } = nodeForm(bashOp);
     const props = schema.properties as Record<string, { type?: string }>;
+    // task_id + the operator's params, then the always-present Assets section.
     expect(Object.keys(props)).toEqual([
       'task_id',
       'bash_command',
       'env',
-      'code'
+      'code',
+      '__assets__'
     ]);
     expect(schema.required).toContain('task_id');
     expect(schema.required).toContain('bash_command');
@@ -135,7 +137,10 @@ describe('common params (NODE "Common settings")', () => {
     ]);
     expect(props.__common__.properties.retries.type).toBe('integer');
     const order = uiSchema['ui:order'] as string[];
-    expect(order[order.length - 1]).toBe('__common__');
+    // Common settings come after the params; the Assets section is ordered last.
+    expect(order.indexOf('__common__')).toBeGreaterThan(order.indexOf('mode') - 1);
+    expect(order[order.length - 1]).toBe('__assets__');
+    expect(order.indexOf('__common__')).toBeLessThan(order.indexOf('__assets__'));
   });
 
   it('round-trips common values; omits false booleans and blanks', () => {
@@ -167,6 +172,57 @@ describe('common params (NODE "Common settings")', () => {
     expect(
       formDataToNode(bashOp, { task_id: 't', bash_command: 'x' }).common
     ).toEqual({});
+  });
+});
+
+describe('asset inlets/outlets (NODE "Assets") + DAG schedule_assets, PRD §6.9', () => {
+  it('adds an __assets__ fieldset (inlets/outlets) to every op, ordered last', () => {
+    const { schema, uiSchema } = nodeForm(bashOp); // bashOp has no commonParams
+    const props = schema.properties as Record<string, any>;
+    expect(props.__assets__.type).toBe('object');
+    expect(Object.keys(props.__assets__.properties)).toEqual([
+      'inlets',
+      'outlets'
+    ]);
+    const order = uiSchema['ui:order'] as string[];
+    expect(order[order.length - 1]).toBe('__assets__');
+  });
+
+  it('round-trips inlets/outlets as comma-separated text (trim + de-dup)', () => {
+    const fd = nodeToFormData(
+      bashOp,
+      'build',
+      { bash_command: 'x' },
+      {},
+      { outlets: ['s3://lake/o.csv', 'curated'], inlets: [] }
+    );
+    expect((fd.__assets__ as any).outlets).toBe('s3://lake/o.csv, curated');
+    expect((fd.__assets__ as any).inlets).toBe('');
+
+    const back = formDataToNode(bashOp, {
+      task_id: 'build',
+      bash_command: 'x',
+      __assets__: { outlets: 'a, b ,a', inlets: '  ' } // dup + blank-only
+    });
+    expect(back.outlets).toEqual(['a', 'b']);
+    expect(back.inlets).toEqual([]);
+  });
+
+  it('round-trips DAG schedule_assets as comma-separated text', () => {
+    expect(
+      dagToFormData({ dag_id: 'd', schedule_assets: ['orders', 's3://x'] })
+        .schedule_assets
+    ).toBe('orders, s3://x');
+    expect(
+      formDataToDag({ dag_id: 'd', schedule_assets: 'orders, s3://x ,orders' })
+        .schedule_assets
+    ).toEqual(['orders', 's3://x']);
+    expect(
+      formDataToDag({ dag_id: 'd', schedule_assets: '' }).schedule_assets
+    ).toEqual([]);
+    // The DAG form exposes the field with a placeholder.
+    const { schema } = dagForm();
+    expect((schema.properties as any).schedule_assets.type).toBe('string');
   });
 });
 

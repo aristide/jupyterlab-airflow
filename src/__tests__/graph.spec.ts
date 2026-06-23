@@ -75,6 +75,20 @@ describe('irToFlow / flowToIR mapping', () => {
     expect('callbacks' in back.nodes[1]).toBe(false);
   });
 
+  it('round-trips per-node asset inlets/outlets, dropping empty/blank ones', () => {
+    const ir = makeIR();
+    ir.nodes[0].outlets = ['s3://lake/orders.csv', 'curated'];
+    ir.nodes[0].inlets = ['', '  ']; // blank-only -> must not survive
+    const { nodes, edges } = irToFlow(ir);
+    expect(nodes[0].data.outlets).toEqual(['s3://lake/orders.csv', 'curated']);
+    const back = flowToIR(nodes, edges, ir.dag, ir);
+    expect(back.nodes[0].outlets).toEqual(['s3://lake/orders.csv', 'curated']);
+    // The blank-only inlets list is dropped; a node with neither omits both keys.
+    expect('inlets' in back.nodes[0]).toBe(false);
+    expect('inlets' in back.nodes[1]).toBe(false);
+    expect('outlets' in back.nodes[1]).toBe(false);
+  });
+
   it('flowToIR strips edges to {source,target} and rounds positions', () => {
     const ir = makeIR();
     const { nodes, edges } = irToFlow(ir);

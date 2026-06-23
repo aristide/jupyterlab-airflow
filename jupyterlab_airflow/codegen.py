@@ -99,6 +99,32 @@ def _node_common(node: Dict[str, Any], op: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _asset_list_expr(values: Any) -> Optional[str]:
+    """Render a list of asset names/URIs to ``[Asset('a'), Asset('b')]`` (Airflow 3
+    data-aware scheduling, PRD §6.9), or ``None`` when empty/blank. A single
+    string sets both the asset name and uri (``Asset('orders')``), which is the
+    canonical Airflow-3 form for either a plain name or a URI."""
+    if not isinstance(values, list):
+        return None
+    items = [str(v).strip() for v in values if str(v).strip()]
+    if not items:
+        return None
+    return "[" + ", ".join(f"Asset({_pyrepr(a)})" for a in items) + "]"
+
+
+def _node_assets(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Per-task asset ``inlets``/``outlets`` (PRD §6.9) as trailing kwargs merged
+    into the node's ``common`` slot (like per-task callbacks), so every operator
+    template emits them via ``{{ common | pyargs }}`` — into the ``@task(...)``
+    decorator for native ops, the operator call otherwise, in both families."""
+    out: Dict[str, Any] = {}
+    for key in ("inlets", "outlets"):
+        expr = _asset_list_expr(node.get(key))
+        if expr is not None:
+            out[key] = _Raw(expr)
+    return out
+
+
 def _make_env() -> Environment:
     env = Environment(autoescape=False, keep_trailing_newline=False)
     env.filters["pyrepr"] = _pyrepr
@@ -178,8 +204,14 @@ def _dag_args(dag: Dict[str, Any], extra: Optional[List[str]] = None) -> List[st
     args: List[str] = [f'dag_id={_pyrepr(dag["dag_id"])}']
     if dag.get("description"):
         args.append(f'description={_pyrepr(dag["description"])}')
-    schedule = dag.get("schedule")
-    args.append(f"schedule={_pyrepr(schedule) if schedule else 'None'}")
+    # Data-aware (asset) scheduling overrides the cron/preset schedule (PRD §6.9):
+    # `schedule=[Asset('a'), ...]` runs the DAG when those assets update.
+    schedule_assets = _asset_list_expr(dag.get("schedule_assets"))
+    if schedule_assets:
+        args.append(f"schedule={schedule_assets}")
+    else:
+        schedule = dag.get("schedule")
+        args.append(f"schedule={_pyrepr(schedule) if schedule else 'None'}")
     start_date = _parse_start_date(dag.get("start_date"))
     if start_date:
         args.append(f"start_date={start_date}")
@@ -304,12 +336,16 @@ def _collect_imports(
     ops: List[Dict[str, Any]],
     traditional: bool = False,
     notifiers: Tuple[Dict[str, Any], ...] = (),
+    uses_assets: bool = False,
 ) -> List[str]:
     """datetime + airflow.sdk first, then de-duplicated provider imports.
 
     Traditional uses ``from airflow.sdk import DAG`` and every op's **operator
     class** import (`import:`); TaskFlow uses ``dag, task`` and a native op's
-    ``import_taskflow`` (operator-style ops still use `import:`)."""
+    ``import_taskflow`` (operator-style ops still use `import:`). When the DAG uses
+    data-aware scheduling / asset inlets/outlets (PRD §6.9), ``Asset`` is imported
+    from ``airflow.sdk`` too."""
+    asset_import = "from airflow.sdk import Asset"
     if traditional:
         pinned = ["from datetime import datetime, timedelta", "from airflow.sdk import DAG"]
         extra: List[str] = []
@@ -321,6 +357,8 @@ def _collect_imports(
             line = notifier.get("import")
             if line and line not in pinned and line not in extra:
                 extra.append(line)
+        if uses_assets and asset_import not in extra:
+            extra.append(asset_import)
         return pinned + sorted(extra)
 
     pinned = ["from datetime import datetime, timedelta", "from airflow.sdk import dag, task"]
@@ -343,6 +381,8 @@ def _collect_imports(
         line = notifier.get("import")
         if line and line not in pinned and line not in extra:
             extra.append(line)
+    if uses_assets and asset_import not in extra:
+        extra.append(asset_import)
     return pinned + sorted(extra)
 
 
@@ -481,10 +521,16 @@ def _render(ir: Dict[str, Any]) -> str:
             node, notifier_registry, env
         )
         used_notifiers.extend(node_cb_notifiers)
+        # Per-task asset inlets/outlets (PRD §6.9) ride the same trailing-kwargs
+        # slot as callbacks (merged into `common` after the declared params).
         rendered = env.from_string(template).render(
             task_id=node["task_id"],
             params=node.get("params") or {},
-            common={**_node_common(node, op), **node_cb_kwargs},
+            common={
+                **_node_common(node, op),
+                **node_cb_kwargs,
+                **_node_assets(node),
+            },
         )
         is_operator = op.get("taskflow", "native") == "operator"
         if not _has_code_param(op):
@@ -523,8 +569,12 @@ def _render(ir: Dict[str, Any]) -> str:
         f"# airflow-studio: managed  studio={STUDIO_VERSION}  "
         f"{_ir_hash(ir)}  dag_id={dag_id}  afdag_id={afdag_id}  syntax={syntax}"
     )
+    uses_assets = bool(_asset_list_expr(dag.get("schedule_assets"))) or any(
+        _asset_list_expr(node.get("inlets")) or _asset_list_expr(node.get("outlets"))
+        for node in nodes
+    )
     imports = "\n".join(
-        _collect_imports(used_ops, traditional, tuple(used_notifiers))
+        _collect_imports(used_ops, traditional, tuple(used_notifiers), uses_assets)
     )
 
     body_sections = ["\n\n".join(definitions)] if definitions else ["    pass"]
