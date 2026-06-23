@@ -594,3 +594,202 @@ def test_git_target_gitignores_backups(tmp_path):
     t.write("demo.py", MANAGED.replace("v1", "v2"))  # overwrite -> creates a .bak
     assert "*.bak" in (tmp_path / "repo" / "dags" / ".gitignore").read_text()
     assert ".bak" not in _git(tmp_path / "repo", "status", "--porcelain").stdout
+
+
+# --------------------------------------------------------------------------- #
+# S3DeployTarget (PRD §6.5.1 / §8.7) — exercised against a faithful in-memory S3
+# client whose method/response shapes match the botocore S3 service model
+# (PutObject/GetObject/ListObjectsV2/DeleteObject/HeadObject), since boto3 is not
+# installed here. The live MinIO/S3 deploy is the env-gated step (like Git).
+# --------------------------------------------------------------------------- #
+from jupyterlab_airflow.deploy import S3DeployTarget, get_deploy_target  # noqa: E402
+
+
+class _S3ClientError(Exception):
+    """A botocore-shaped ClientError (404) for a missing key."""
+
+    def __init__(self, code="404"):
+        self.response = {
+            "Error": {"Code": code},
+            "ResponseMetadata": {"HTTPStatusCode": 404},
+        }
+
+
+class _Body:
+    def __init__(self, data):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
+class FakeS3:
+    """Minimal faithful S3 client: keys are (Bucket, Key) -> bytes; ListObjectsV2
+    paginates with a small page size to exercise the pagination loop."""
+
+    def __init__(self, page=2):
+        self.store = {}
+        self.page = page
+
+    def put_object(self, Bucket, Key, Body):
+        self.store[(Bucket, Key)] = Body
+
+    def get_object(self, Bucket, Key):
+        if (Bucket, Key) not in self.store:
+            raise _S3ClientError("NoSuchKey")
+        return {"Body": _Body(self.store[(Bucket, Key)])}
+
+    def head_object(self, Bucket, Key):
+        if (Bucket, Key) not in self.store:
+            raise _S3ClientError("404")
+        return {}
+
+    def delete_object(self, Bucket, Key):
+        self.store.pop((Bucket, Key), None)  # S3 delete of a missing key is a no-op
+
+    def list_objects_v2(self, Bucket, Prefix="", ContinuationToken=None):
+        keys = sorted(k for (b, k) in self.store if b == Bucket and k.startswith(Prefix))
+        start = int(ContinuationToken) if ContinuationToken else 0
+        chunk = keys[start : start + self.page]
+        nxt = start + self.page
+        out = {"Contents": [{"Key": k} for k in chunk], "IsTruncated": nxt < len(keys)}
+        if out["IsTruncated"]:
+            out["NextContinuationToken"] = str(nxt)
+        return out
+
+
+def _s3_target(page=2):
+    fake = FakeS3(page=page)
+    return S3DeployTarget(bucket="dagbucket", prefix="dags", client=fake), fake
+
+
+def test_s3_target_puts_object_with_provenance_and_path():
+    t, fake = _s3_target()
+    path = t.write("demo.py", MANAGED)
+    assert path == "s3://dagbucket/dags/demo.py"
+    assert ("dagbucket", "dags/demo.py") in fake.store
+    assert t.exists("demo.py") and "print('v1')" in t.read("demo.py")
+    assert t.list() == [{"filename": "demo.py", "dag_id": "demo", "afdag_id": "abc"}]
+
+
+def test_s3_target_overwrite_backs_up_and_rollback_restores():
+    t, fake = _s3_target()
+    t.write("demo.py", MANAGED)
+    t.write("demo.py", MANAGED.replace("v1", "v2"))
+    assert t.has_backup("demo.py")
+    assert ("dagbucket", "dags/demo.py.bak") in fake.store
+    assert "print('v2')" in t.read("demo.py")
+    assert rollback_dag("demo", target=t)["rolled_back"]
+    assert "print('v1')" in t.read("demo.py")
+    assert not t.has_backup("demo.py")  # backup consumed by the rollback
+
+
+def test_s3_target_refuses_non_managed_object():
+    t, fake = _s3_target()
+    fake.store[("dagbucket", "dags/hand.py")] = b"print('hand-written')\n"
+    with pytest.raises(DeployError, match="not a Studio-managed"):
+        t.write("hand.py", MANAGED)
+
+
+def test_s3_target_list_paginates_and_skips_nested_and_unmanaged():
+    t, fake = _s3_target(page=2)
+    for i in range(3):
+        t.write(f"d{i}.py", f"# airflow-studio: managed  dag_id=d{i}\nprint({i})\n")
+    fake.store[("dagbucket", "dags/notes.txt")] = b"x"  # non-.py
+    fake.store[("dagbucket", "dags/nested/sub.py")] = b"# airflow-studio: managed\nx\n"  # nested
+    fake.store[("dagbucket", "dags/hand.py")] = b"print('no header')\n"  # unmanaged
+    names = sorted(e["filename"] for e in t.list())
+    assert names == ["d0.py", "d1.py", "d2.py"]  # paginated, nested/non-.py/unmanaged skipped
+
+
+def test_s3_target_delete_removes_object_and_backup():
+    t, fake = _s3_target()
+    t.write("demo.py", MANAGED)
+    t.write("demo.py", MANAGED.replace("v1", "v2"))  # makes a .bak
+    t.delete("demo.py")
+    assert not t.exists("demo.py")
+    assert ("dagbucket", "dags/demo.py.bak") not in fake.store
+
+
+def test_s3_target_ensure_airflowignore_get_modify_put():
+    t, fake = _s3_target()
+    t.ensure_airflowignore()
+    ignore = fake.store[("dagbucket", "dags/.airflowignore")].decode().split()
+    assert "*.afdag" in ignore and "*.bak" in ignore
+    # Idempotent: a second call doesn't duplicate.
+    t.ensure_airflowignore()
+    again = fake.store[("dagbucket", "dags/.airflowignore")].decode().split()
+    assert again.count("*.afdag") == 1
+
+
+def test_s3_target_rejects_unsafe_filename():
+    t, _ = _s3_target()
+    for bad in ("../evil.py", "a/b.py", "evil"):
+        with pytest.raises(DeployError, match="Unsafe filename"):
+            t.exists(bad)
+
+
+def test_s3_target_requires_a_bucket():
+    t = S3DeployTarget(bucket="", prefix="dags", client=None)
+    with pytest.raises(DeployError, match="AIRFLOW_S3_DAGS_BUCKET"):
+        t.write("demo.py", MANAGED)
+
+
+def test_s3_factory_selection(monkeypatch):
+    monkeypatch.setenv("AIRFLOW_DEPLOY_TARGET", "s3")
+    monkeypatch.setenv("AIRFLOW_S3_DAGS_BUCKET", "b")
+    assert type(get_deploy_target()).__name__ == "S3DeployTarget"
+
+
+def test_deploy_dag_through_s3_target():
+    t, fake = _s3_target()
+    res = deploy_dag(_ir("s3dag"), target=t)
+    assert res["deployed"], res["errors"]
+    assert t.exists("s3dag.py")
+    assert ("dagbucket", "dags/s3dag.py") in fake.store
+
+
+def test_s3_target_missing_bucket_surfaces_not_masked():
+    # A missing/mistyped bucket (NoSuchBucket) must NOT be masked as a missing
+    # key, so delete()/purge don't silently report success (review finding).
+    class _NoBucket(FakeS3):
+        def delete_object(self, Bucket, Key):
+            raise _S3ClientError("NoSuchBucket")
+        def head_object(self, Bucket, Key):
+            raise _S3ClientError("NoSuchBucket")
+    t = S3DeployTarget(bucket="missing", prefix="dags", client=_NoBucket())
+    assert S3DeployTarget._is_not_found(_S3ClientError("NoSuchBucket")) is False
+    assert S3DeployTarget._is_not_found(_S3ClientError("NoSuchKey")) is True
+    with pytest.raises(Exception) as exc:  # the NoSuchBucket error surfaces
+        t.delete("demo.py")
+    assert not isinstance(exc.value, DeployError) or "NoSuchBucket" in str(exc.value)
+
+
+def test_s3_target_list_propagates_unexpected_error_but_skips_vanished():
+    t, fake = _s3_target()
+    t.write("a.py", MANAGED)
+    t.write("b.py", MANAGED)
+
+    # An object that vanished between list and get (404) is skipped, not fatal.
+    class _Vanish(FakeS3):
+        def __init__(self, inner):
+            self.store = inner.store; self.page = inner.page; self._miss = "dags/b.py"
+        def get_object(self, Bucket, Key):
+            if Key == self._miss:
+                raise _S3ClientError("NoSuchKey")
+            return super().get_object(Bucket, Key)
+    t._client = _Vanish(fake)
+    assert [e["filename"] for e in t.list()] == ["a.py"]  # b.py skipped, no raise
+
+    # A non-not-found error (e.g. 403 AccessDenied) on one object propagates
+    # rather than silently dropping a managed DAG.
+    class _Denied(FakeS3):
+        def __init__(self, inner):
+            self.store = inner.store; self.page = inner.page
+        def get_object(self, Bucket, Key):
+            err = _S3ClientError("AccessDenied"); err.response["Error"]["Code"] = "AccessDenied"
+            err.response["ResponseMetadata"]["HTTPStatusCode"] = 403
+            raise err
+    t._client = _Denied(fake)
+    with pytest.raises(Exception):
+        t.list()

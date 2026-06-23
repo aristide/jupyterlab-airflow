@@ -74,7 +74,19 @@ def _parse_header(text: str) -> Optional[Dict[str, str]]:
     return meta
 
 
-class SharedVolumeTarget:
+class DeployTarget:
+    """The deploy-target interface (PRD §6.5.1): ``write``/``exists``/``read``/
+    ``list``/``delete``/``verify`` + backup (``has_backup``/``restore_backup``) +
+    ``ensure_airflowignore``, with a ``consistency`` flag (``"sync"`` vs
+    ``"eventual"``) that drives the verification poll. Concrete targets:
+    ``SharedVolumeTarget`` (+ its ``GitDeployTarget`` subclass) and
+    ``S3DeployTarget``. Kept as a thin base so the factory + the deploy functions
+    can type against the interface rather than a specific backend."""
+
+    consistency = "eventual"
+
+
+class SharedVolumeTarget(DeployTarget):
     """A ``DeployTarget`` writing `.py` files to a local/shared-volume dags dir.
 
     Visible to the local filesystem synchronously, but Airflow discovery is
@@ -423,12 +435,228 @@ class GitDeployTarget(SharedVolumeTarget):
         return restored
 
 
-def get_deploy_target() -> SharedVolumeTarget:
-    """The configured deploy target (PRD §6.5.1). ``AIRFLOW_DEPLOY_TARGET=git``
-    selects the git‑bundle target; anything else (default) is the shared volume."""
+class S3DeployTarget(DeployTarget):
+    """A ``DeployTarget`` that writes generated DAGs as **S3 objects** (PRD §6.5.1
+    / §8.7) under a key prefix that an Airflow S3‑backed DAG bundle (or an S3→dags
+    sync) picks up. Works against AWS S3 or any S3‑compatible store (e.g. MinIO via
+    ``AIRFLOW_S3_ENDPOINT_URL``).
+
+    Reuses the shared namespacing helpers (``_FILENAME_RE`` key safety,
+    ``_parse_header`` provenance, ``MANAGED_PREFIX`` collision guard) — only the
+    storage backend differs. ``put_object`` is atomic per object; an overwrite of a
+    managed object first copies the prior version to a ``…​.py.bak`` object (a
+    rollback target, §7); discovery is eventual (the bundle polls), so the
+    consistency flag is ``"eventual"``.
+
+    The boto3 client is created lazily (so importing this module never requires
+    boto3) and is **injectable** for testing. Config (env): ``AIRFLOW_S3_DAGS_BUCKET``
+    (required), ``AIRFLOW_S3_DAGS_PREFIX`` (key prefix, default ``dags``),
+    ``AIRFLOW_S3_ENDPOINT_URL`` (for MinIO / S3‑compatible stores).
+    """
+
+    consistency = "eventual"
+
+    def __init__(
+        self,
+        bucket: Optional[str] = None,
+        prefix: Optional[str] = None,
+        endpoint_url: Optional[str] = None,
+        client: Any = None,
+    ) -> None:
+        self.bucket = (
+            bucket if bucket is not None else os.environ.get("AIRFLOW_S3_DAGS_BUCKET", "")
+        )
+        prefix = prefix if prefix is not None else os.environ.get("AIRFLOW_S3_DAGS_PREFIX", "dags")
+        self.prefix = (prefix or "").strip("/")
+        self.endpoint_url = (
+            endpoint_url
+            if endpoint_url is not None
+            else os.environ.get("AIRFLOW_S3_ENDPOINT_URL", "")
+        ) or None
+        self._client = client  # injectable; lazily created from boto3 otherwise
+
+    # -- helpers ----------------------------------------------------------- #
+    def _s3(self) -> Any:
+        if not self.bucket:
+            raise DeployError(
+                "S3 deploy target: set AIRFLOW_S3_DAGS_BUCKET to the bucket your "
+                "Airflow S3 DAG bundle reads, then restart the server."
+            )
+        if self._client is None:
+            try:
+                import boto3
+            except ImportError as err:
+                raise DeployError(
+                    "S3 deploy target needs the boto3 package (pip install boto3)."
+                ) from err
+            self._client = boto3.client("s3", endpoint_url=self.endpoint_url)
+        return self._client
+
+    def _key(self, filename: str) -> str:
+        """The S3 key for a deployed DAG file. ``filename`` must be a safe
+        ``<dag_id>.py`` (no traversal); the prefix is admin‑configured."""
+        if not _FILENAME_RE.match(filename):
+            raise DeployError(f"Unsafe filename: {filename!r}")
+        return f"{self.prefix}/{filename}" if self.prefix else filename
+
+    def _backup_key(self, filename: str) -> str:
+        return self._key(filename) + _BACKUP_SUFFIX
+
+    def _sidecar_key(self, name: str) -> str:
+        return f"{self.prefix}/{name}" if self.prefix else name
+
+    @staticmethod
+    def _is_not_found(err: Exception) -> bool:
+        """Whether a boto3/botocore error is a missing *key* (404) — without
+        importing botocore (which may be absent until boto3 runs).
+
+        A missing/mistyped *bucket* (``NoSuchBucket``) is **not** treated as a
+        missing key: it's a config error that must surface (e.g. so `delete` /
+        `purge_dag` don't silently report success against a wrong
+        ``AIRFLOW_S3_DAGS_BUCKET``). GET/DELETE return the ``NoSuchBucket`` code so
+        this distinguishes them; a HEAD on a missing bucket reports only HTTP 404
+        (no error body) and is indistinguishable from a missing key — an inherent
+        S3 limitation."""
+        resp = getattr(err, "response", None)
+        if not isinstance(resp, dict):
+            return False
+        code = str(resp.get("Error", {}).get("Code", ""))
+        if code == "NoSuchBucket":
+            return False
+        status = resp.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        return code in ("404", "NoSuchKey", "NotFound") or status == 404
+
+    def _get(self, key: str) -> str:
+        return self._s3().get_object(Bucket=self.bucket, Key=key)["Body"].read().decode("utf-8")
+
+    def _put(self, key: str, content: str) -> None:
+        self._s3().put_object(Bucket=self.bucket, Key=key, Body=content.encode("utf-8"))
+
+    def _delete_key(self, key: str) -> None:
+        # DeleteObject on a missing key is a no-op in S3; tolerate not-found anyway.
+        try:
+            self._s3().delete_object(Bucket=self.bucket, Key=key)
+        except Exception as err:  # noqa: BLE001
+            if not self._is_not_found(err):
+                raise
+
+    def _key_exists(self, key: str) -> bool:
+        try:
+            self._s3().head_object(Bucket=self.bucket, Key=key)
+            return True
+        except Exception as err:  # noqa: BLE001
+            if self._is_not_found(err):
+                return False
+            raise
+
+    # -- DeployTarget interface ------------------------------------------- #
+    def exists(self, filename: str) -> bool:
+        return self._key_exists(self._key(filename))
+
+    def read(self, filename: str) -> str:
+        return self._get(self._key(filename))
+
+    def has_backup(self, filename: str) -> bool:
+        return self._key_exists(self._backup_key(filename))
+
+    def restore_backup(self, filename: str) -> bool:
+        """Restore the `.bak` object over the live object, then drop the backup.
+        Returns False (no-op) when there is no backup (PRD §6.5.5 / §7)."""
+        backup = self._backup_key(filename)
+        if not self._key_exists(backup):
+            return False
+        self._put(self._key(filename), self._get(backup))
+        self._delete_key(backup)
+        return True
+
+    def write(self, filename: str, content: str) -> str:
+        """Put ``content`` as the DAG object. Refuses to clobber an object that
+        lacks the Studio provenance header (collision safety, §6.5.3); an overwrite
+        of a managed object first copies the prior version to a `.bak` object so a
+        bad re-deploy can be rolled back (§6.5.5 / §7)."""
+        key = self._key(filename)
+        if self._key_exists(key):
+            existing = self._get(key)
+            if _parse_header(existing) is None:
+                raise DeployError(
+                    f"Refusing to overwrite {filename!r}: it is not a Studio-managed "
+                    "file (no provenance header)."
+                )
+            self._put(self._backup_key(filename), existing)
+        self._put(key, content)
+        return f"s3://{self.bucket}/{key}"
+
+    def delete(self, filename: str) -> None:
+        self._delete_key(self._key(filename))
+        self._delete_key(self._backup_key(filename))
+
+    def list(self) -> List[Dict[str, str]]:
+        """Studio-managed DAG objects under the prefix, with parsed provenance.
+        Paginates ListObjectsV2 and skips non-`.py` and any nested keys."""
+        managed: List[Dict[str, str]] = []
+        client = self._s3()
+        list_prefix = f"{self.prefix}/" if self.prefix else ""
+        token: Optional[str] = None
+        while True:
+            kwargs: Dict[str, Any] = {"Bucket": self.bucket, "Prefix": list_prefix}
+            if token:
+                kwargs["ContinuationToken"] = token
+            resp = client.list_objects_v2(**kwargs)
+            for obj in resp.get("Contents", []) or []:
+                key = obj.get("Key", "")
+                name = key[len(list_prefix):] if list_prefix else key
+                if not name.endswith(".py") or "/" in name:
+                    continue  # non-DAG, or a nested key under the prefix
+                try:
+                    content = self._get(key)
+                except Exception as err:  # noqa: BLE001
+                    # An object listed but gone by the time we read it (a delete
+                    # racing the list) is skipped; any other error (auth, decode,
+                    # …) propagates rather than silently dropping a managed DAG
+                    # from the listing — matching SharedVolumeTarget.list (which
+                    # only swallows OSError and lets unexpected errors surface).
+                    if self._is_not_found(err):
+                        continue
+                    raise
+                header = _parse_header(content)
+                if header is not None:
+                    managed.append({"filename": name, **header})
+            if not resp.get("IsTruncated"):
+                break
+            token = resp.get("NextContinuationToken")
+            if not token:
+                break
+        return sorted(managed, key=lambda entry: entry["filename"])
+
+    def verify(self, filename: str, ir_hash: Optional[str] = None) -> bool:
+        if not self.exists(filename):
+            return False
+        header = _parse_header(self.read(filename))
+        if header is None:
+            return False
+        return ir_hash is None or header.get("ir_hash") == ir_hash
+
+    def ensure_airflowignore(self) -> None:
+        """Ensure the `.airflowignore` object under the prefix carries the Studio
+        ignore patterns (get-modify-put — S3 has no append)."""
+        key = self._sidecar_key(".airflowignore")
+        existing = self._get(key) if self._key_exists(key) else ""
+        lines = existing.splitlines()
+        missing = [p for p in _AIRFLOWIGNORE_PATTERNS if p not in lines]
+        if missing:
+            sep = "" if (not existing or existing.endswith("\n")) else "\n"
+            self._put(key, existing + sep + "\n".join(missing) + "\n")
+
+
+def get_deploy_target() -> DeployTarget:
+    """The configured deploy target (PRD §6.5.1). ``AIRFLOW_DEPLOY_TARGET`` selects
+    ``git`` (the git‑bundle target) or ``s3`` (the object‑storage target); anything
+    else (default) is the shared volume."""
     kind = os.environ.get("AIRFLOW_DEPLOY_TARGET", "shared_volume").strip().lower()
     if kind in ("git", "git_bundle", "gitdagbundle"):
         return GitDeployTarget()
+    if kind in ("s3", "s3_bundle", "object_storage"):
+        return S3DeployTarget()
     return SharedVolumeTarget()
 
 
@@ -451,7 +679,7 @@ def _stamp_code_hash(content: str) -> str:
     return f"{head}  code=sha256:{digest}\n{body}"
 
 
-def is_drifted(filename: str, target: Optional[SharedVolumeTarget] = None) -> bool:
+def is_drifted(filename: str, target: Optional[DeployTarget] = None) -> bool:
     """True if a deployed managed file was edited out of band: its body no longer
     matches the ``code=`` hash recorded in its provenance header (PRD §6.5.3).
     False when the file is absent, not Studio-managed, or pre-dates the code hash
@@ -520,7 +748,7 @@ def find_source_path(
     filename: Optional[str] = None,
     dag_id: Optional[str] = None,
     contents_root: Optional[str] = None,
-    target: Optional[SharedVolumeTarget] = None,
+    target: Optional[DeployTarget] = None,
 ) -> Dict[str, Any]:
     """Resolve a deployed Studio DAG back to its source `.afdag` Contents path so
     the manager can offer "Open in Studio to fix" on an import error (PRD §7).
@@ -549,7 +777,7 @@ def find_source_path(
 
 def find_orphans(
     contents_root: Optional[str] = None,
-    target: Optional[SharedVolumeTarget] = None,
+    target: Optional[DeployTarget] = None,
 ) -> Dict[str, Any]:
     """Deployed Studio DAGs whose source `.afdag` no longer exists (PRD §6.5.6).
 
@@ -583,7 +811,7 @@ def find_orphans(
     return {"orphans": orphans, "degraded": degraded}
 
 
-def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:
+def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dict[str, Any]:
     """Validate, then atomically write the generated DAG to the dags folder.
 
     Returns ``{deployed, path?, filename?, dag_id, warnings, errors, dagbag}``.
@@ -651,7 +879,7 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[SharedVolumeTarget] = None) 
 
 
 def rollback_dag(
-    dag_id: str, target: Optional[SharedVolumeTarget] = None
+    dag_id: str, target: Optional[DeployTarget] = None
 ) -> Dict[str, Any]:
     """Roll a deployed DAG back to its previous version (PRD §6.5.5 / §7): restore
     the `.bak` saved on the last overwrite-deploy. The restored file re-imports
@@ -664,7 +892,7 @@ def rollback_dag(
     return {"dag_id": dag_id, "rolled_back": rolled_back, "filename": filename}
 
 
-def purge_dag(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:
+def purge_dag(dag_id: str, target: Optional[DeployTarget] = None) -> Dict[str, Any]:
     """Delete a DAG: remove its `.py` **first** (so it isn't re-imported), then
     purge its history via ``DELETE /api/v2/dags/{id}``. Tolerates a missing file
     or a DAG that Airflow hasn't recorded yet (404)."""
@@ -696,7 +924,7 @@ def purge_dag(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[
     }
 
 
-def rename_preflight(dag_id: str, target: Optional[SharedVolumeTarget] = None) -> Dict[str, Any]:
+def rename_preflight(dag_id: str, target: Optional[DeployTarget] = None) -> Dict[str, Any]:
     """Report the deploy state of ``dag_id`` so the editor can pick the rename
     path (PRD §6.1.8(B)). Returns ``{dag_id, file_exists, registered, active_runs}``:
 
@@ -741,7 +969,7 @@ def rename_preflight(dag_id: str, target: Optional[SharedVolumeTarget] = None) -
 
 
 def retire_old_dag(
-    dag_id: str, *, purge: bool, target: Optional[SharedVolumeTarget] = None
+    dag_id: str, *, purge: bool, target: Optional[DeployTarget] = None
 ) -> Dict[str, Any]:
     """Reconcile the OLD DAG after a `dag_id` rename migration (PRD §6.1.8(B)).
 

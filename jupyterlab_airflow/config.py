@@ -21,14 +21,19 @@ by ``.devcontainer/docker-compose.yaml``.
                           override/extend the bundled registry (``registry.py``).
 
     Deploy target selection (PRD §6.5.1 / §8.7), read by ``deploy.py``:
-    AIRFLOW_DEPLOY_TARGET "shared_volume" (default) or "git" — which DeployTarget
-                          to write through.
+    AIRFLOW_DEPLOY_TARGET "shared_volume" (default), "git", or "s3" — which
+                          DeployTarget to write through.
     AIRFLOW_GIT_DAGS_REPO For the git target: path to the local git working tree
                           that the Airflow GitDagBundle tracks (required for git).
     AIRFLOW_GIT_DAGS_SUBDIR  DAG subdir within the repo. Default: dags.
     AIRFLOW_GIT_DAGS_BRANCH  Branch to push to. Default: main.
     AIRFLOW_GIT_DAGS_REMOTE  Remote to push to (e.g. origin). Unset → commit-only
                           (for a repo Airflow reads directly).
+    AIRFLOW_S3_DAGS_BUCKET For the s3 target: the bucket the Airflow S3 DAG
+                          bundle reads (required for s3; needs the boto3 package).
+    AIRFLOW_S3_DAGS_PREFIX   Key prefix for DAG objects. Default: dags.
+    AIRFLOW_S3_ENDPOINT_URL  S3 endpoint for an S3-compatible store (e.g. MinIO);
+                          unset → AWS S3.
 """
 
 import os
