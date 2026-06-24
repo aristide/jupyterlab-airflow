@@ -1,11 +1,13 @@
 import asyncio
 import json
 import traceback
+from uuid import uuid4
 
 import tornado
 from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
+from .audit import audit_event
 from .client import AirflowError, get_client
 from .codegen import generate_dag
 from .deploy import (
@@ -31,18 +33,82 @@ class _AirflowHandler(APIHandler):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
 
-    async def respond(self, fn, *args, **kwargs):
+    def _current_username(self) -> str:
+        """The authenticated Jupyter user for audit attribution (PRD §9). Under
+        JupyterHub this is the Hub user (one server per user); in single-user/dev
+        it's the local identity. Resolved defensively across jupyter_server
+        identity shapes, defaulting to ``"anonymous"``."""
+        user = self.current_user
+        for attr in ("username", "name"):
+            value = getattr(user, attr, None)
+            if value:
+                return str(value)
+        if isinstance(user, (str, bytes)) and user:
+            return user.decode() if isinstance(user, bytes) else user
+        return "anonymous"
+
+    async def respond(
+        self,
+        fn,
+        *args,
+        audit_action: str = None,
+        audit_dag_id: str = None,
+        **kwargs,
+    ):
+        """Run ``fn`` off the event loop and finish the JSON response. When
+        ``audit_action`` is set, emit an audit record (PRD §9) on the way out —
+        ``ok`` on success, ``rejected`` when the action ran but mutated nothing
+        (a deploy refused by validation/provider gate), ``error`` on an exception
+        — stamped with the current user and a per-request ``correlation_id``.
+        Read-only handlers omit it (no audit)."""
+        correlation_id = uuid4().hex if audit_action else ""
+
+        def _audit(outcome, dag_id, detail=None):
+            # Best-effort + isolated: a failure in audit emission (e.g. a custom
+            # SIEM logging handler raising) must NOT alter the request outcome or
+            # re-fire as a contradictory record — never let it propagate.
+            if not audit_action:
+                return
+            try:
+                audit_event(
+                    audit_action,
+                    user=self._current_username(),
+                    correlation_id=correlation_id,
+                    dag_id=dag_id,
+                    outcome=outcome,
+                    detail=detail,
+                )
+            except Exception:  # noqa: BLE001
+                self.log.exception("audit emission failed (action=%s)", audit_action)
+
         try:
             data = await self.run(fn, *args, **kwargs)
-            self.finish(json.dumps({"data": data}))
         except AirflowError as err:
+            _audit("error", audit_dag_id, detail=str(err))
             self.set_status(502)
             self.finish(json.dumps({"error": str(err), "detail": err.detail}))
+            return
         except Exception as err:  # noqa: BLE001 - surface unexpected errors to UI
+            _audit("error", audit_dag_id, detail=str(err))
             self.log.error(err)
             traceback.print_exc()
             self.set_status(500)
             self.finish(json.dumps({"error": str(err)}))
+            return
+        # Success: the outcome reflects the RESULT, not just exception-vs-not — a
+        # deploy refused by validation / a missing provider returns
+        # {"deployed": False, "errors": [...]} (nothing written), which must not be
+        # audited as a successful deploy. Audit is emitted after fn but kept out of
+        # finish()'s path (and best-effort above) so it can't break a good request.
+        dag_id = audit_dag_id
+        if dag_id is None and isinstance(data, dict):
+            dag_id = data.get("dag_id")
+        outcome, detail = "ok", None
+        if isinstance(data, dict) and data.get("deployed") is False:
+            outcome = "rejected"
+            detail = "; ".join(str(e) for e in (data.get("errors") or [])) or None
+        _audit(outcome, dag_id, detail)
+        self.finish(json.dumps({"data": data}))
 
 
 class HealthHandler(_AirflowHandler):
@@ -114,7 +180,8 @@ class DeployHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def post(self):
         ir = self.get_json_body() or {}
-        await self.respond(deploy_dag, ir)
+        dag_id = (ir.get("dag") or {}).get("dag_id")
+        await self.respond(deploy_dag, ir, audit_action="deploy", audit_dag_id=dag_id)
 
 
 class DeployStatusHandler(_AirflowHandler):
@@ -177,7 +244,13 @@ class DagPauseHandler(_AirflowHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "dag_id required"}))
             return
-        await self.respond(get_client().set_paused, dag_id, is_paused)
+        await self.respond(
+            get_client().set_paused,
+            dag_id,
+            is_paused,
+            audit_action="pause" if is_paused else "unpause",
+            audit_dag_id=dag_id,
+        )
 
 
 class DagTriggerHandler(_AirflowHandler):
@@ -194,6 +267,8 @@ class DagTriggerHandler(_AirflowHandler):
             dag_id,
             conf=body.get("conf") or {},
             logical_date=body.get("logical_date"),
+            audit_action="trigger",
+            audit_dag_id=dag_id,
         )
 
 
@@ -237,6 +312,8 @@ class DagRunStateHandler(_AirflowHandler):
             dag_id,
             run_id,
             body.get("state") or "failed",
+            audit_action="stop_run",
+            audit_dag_id=dag_id,
         )
 
 
@@ -304,12 +381,16 @@ class TaskClearHandler(_AirflowHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "dag_id required"}))
             return
+        dry_run = bool(body.get("dry_run", True))
         await self.respond(
             get_client().clear_task_instances,
             dag_id,
             task_ids=body.get("task_ids"),
             dag_run_id=body.get("run_id"),
-            dry_run=bool(body.get("dry_run", True)),
+            dry_run=dry_run,
+            # A dry-run is a read-only preview; only audit a real clear.
+            audit_action=None if dry_run else "clear",
+            audit_dag_id=dag_id,
         )
 
 
@@ -325,7 +406,7 @@ class DagDeleteHandler(_AirflowHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "dag_id required"}))
             return
-        await self.respond(purge_dag, dag_id)
+        await self.respond(purge_dag, dag_id, audit_action="delete", audit_dag_id=dag_id)
 
 
 class DagRollbackHandler(_AirflowHandler):
@@ -341,7 +422,9 @@ class DagRollbackHandler(_AirflowHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "dag_id required"}))
             return
-        await self.respond(rollback_dag, dag_id)
+        await self.respond(
+            rollback_dag, dag_id, audit_action="rollback", audit_dag_id=dag_id
+        )
 
 
 class RenamePreflightHandler(_AirflowHandler):
@@ -366,7 +449,13 @@ class DagRetireHandler(_AirflowHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "dag_id required"}))
             return
-        await self.respond(retire_old_dag, dag_id, purge=bool(body.get("purge")))
+        await self.respond(
+            retire_old_dag,
+            dag_id,
+            purge=bool(body.get("purge")),
+            audit_action="retire",
+            audit_dag_id=dag_id,
+        )
 
 
 def _url(base_url, act):

@@ -346,3 +346,97 @@ async def test_orphans_endpoint_flags_deleted_source(jp_fetch, tmp_path, monkeyp
     assert response.code == 200
     orphans = json.loads(response.body)["data"]["orphans"]
     assert any(o["dag_id"] == "ghost" for o in orphans)
+
+
+# --------------------------------------------------------------------------- #
+# Audit trail (PRD §9): mutating endpoints emit a structured record; read-only
+# ones don't, and a dry-run preview isn't audited. The test server runs in-proc,
+# so the `jupyterlab_airflow.audit` logger is captured directly.
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def audit_records():
+    import logging
+
+    from jupyterlab_airflow.audit import AUDIT_LOGGER_NAME
+
+    records = []
+
+    class _H(logging.Handler):
+        def emit(self, record):
+            records.append(json.loads(record.getMessage()))
+
+    logger = logging.getLogger(AUDIT_LOGGER_NAME)
+    handler = _H()
+    logger.addHandler(handler)
+    prev = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prev)
+
+
+async def test_trigger_is_audited(jp_fetch, audit_records):
+    await jp_fetch(
+        "jupyterlab-airflow", "dags", "trigger",
+        method="POST", body=json.dumps({"dag_id": "demo"}),
+    )
+    assert len(audit_records) == 1
+    rec = audit_records[0]
+    assert rec["action"] == "trigger"
+    assert rec["dag_id"] == "demo"
+    assert rec["outcome"] == "ok"
+    assert rec["user"]  # the authenticated test-server identity, non-empty
+    assert rec["correlation_id"]
+
+
+async def test_read_only_endpoint_is_not_audited(jp_fetch, audit_records):
+    await jp_fetch("jupyterlab-airflow", "dags", params={"limit": "5"})
+    assert audit_records == []
+
+
+async def test_clear_dry_run_not_audited_real_clear_is(jp_fetch, audit_records):
+    # Default dry_run (preview) → no audit.
+    await jp_fetch(
+        "jupyterlab-airflow", "taskinstances", "clear",
+        method="POST", body=json.dumps({"dag_id": "demo", "run_id": "r1"}),
+    )
+    assert audit_records == []
+    # An actual clear (dry_run False) → audited.
+    await jp_fetch(
+        "jupyterlab-airflow", "taskinstances", "clear",
+        method="POST",
+        body=json.dumps({"dag_id": "demo", "run_id": "r1", "dry_run": False}),
+    )
+    assert [r["action"] for r in audit_records] == ["clear"]
+    assert audit_records[0]["dag_id"] == "demo"
+
+
+async def test_delete_is_audited(jp_fetch, tmp_path, monkeypatch, audit_records):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    await jp_fetch(
+        "jupyterlab-airflow", "dags", "delete",
+        method="POST", body=json.dumps({"dag_id": "demo"}),
+    )
+    assert [r["action"] for r in audit_records] == ["delete"]
+    assert audit_records[0]["dag_id"] == "demo" and audit_records[0]["outcome"] == "ok"
+
+
+async def test_rejected_deploy_audited_as_rejected_not_ok(jp_fetch, tmp_path, monkeypatch, audit_records):
+    # A deploy refused by validation (invalid dag_id) writes nothing and returns
+    # {"deployed": False, ...} without raising — it must be audited "rejected",
+    # not "ok" (which would claim a successful deploy of un-written code).
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy",
+        method="POST", body=json.dumps(_bash_ir("1bad")),  # not a Python identifier
+    )
+    data = json.loads(resp.body)["data"]
+    assert data["deployed"] is False
+    assert not list(tmp_path.glob("*.py"))  # nothing written
+    assert len(audit_records) == 1
+    rec = audit_records[0]
+    assert rec["action"] == "deploy"
+    assert rec["outcome"] == "rejected"  # not "ok"
+    assert rec["detail"]  # carries the validation error(s)

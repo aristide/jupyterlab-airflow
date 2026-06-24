@@ -34,6 +34,23 @@ by ``.devcontainer/docker-compose.yaml``.
     AIRFLOW_S3_DAGS_PREFIX   Key prefix for DAG objects. Default: dags.
     AIRFLOW_S3_ENDPOINT_URL  S3 endpoint for an S3-compatible store (e.g. MinIO);
                           unset → AWS S3.
+
+Security / multi-user trust model (PRD §9):
+    The server uses **one Airflow service account** per JupyterLab server process
+    (the env creds above) — there is no per-request Airflow identity inside a
+    server. On **JupyterHub** each user gets their own server process, so inject
+    **per-user** Airflow creds at spawn (``c.Spawner.environment`` /
+    ``auth_state``) for real per-user authorization; env creds are the
+    single-user / dev fallback. Until per-user creds are injected, **any Jupyter
+    user of a given server acts as that one Airflow account**, and the shared dags
+    folder / bundle is a shared trust boundary — writing a DAG runs code as the
+    Airflow worker (treat deploy as privileged).
+
+    Every **mutating** action (deploy / trigger / pause / stop-run / clear /
+    delete / rollback / retire) is **audited** (PRD §9): ``audit.py`` emits a
+    structured ``{ts, user, action, dag_id, correlation_id, outcome}`` JSON line
+    on the ``jupyterlab_airflow.audit`` logger, stamped with the authenticated
+    Jupyter user. Route that logger to a file/SIEM via normal logging config.
 """
 
 import os
