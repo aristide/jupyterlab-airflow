@@ -63,17 +63,20 @@ class _AirflowHandler(APIHandler):
         Read-only handlers omit it (no audit)."""
         correlation_id = uuid4().hex if audit_action else ""
 
-        def _audit(outcome, dag_id, detail=None):
+        def _audit(outcome, dag_id, detail=None, cid=None):
             # Best-effort + isolated: a failure in audit emission (e.g. a custom
             # SIEM logging handler raising) must NOT alter the request outcome or
-            # re-fire as a contradictory record — never let it propagate.
+            # re-fire as a contradictory record — never let it propagate. ``cid``
+            # lets the success path use an action-supplied correlation id (a
+            # deploy stamps the same id into the `.py` header, §8.9/§10) so the
+            # audit record and the deployed file share one trace id.
             if not audit_action:
                 return
             try:
                 audit_event(
                     audit_action,
                     user=self._current_username(),
-                    correlation_id=correlation_id,
+                    correlation_id=cid or correlation_id,
                     dag_id=dag_id,
                     outcome=outcome,
                     detail=detail,
@@ -101,13 +104,18 @@ class _AirflowHandler(APIHandler):
         # audited as a successful deploy. Audit is emitted after fn but kept out of
         # finish()'s path (and best-effort above) so it can't break a good request.
         dag_id = audit_dag_id
-        if dag_id is None and isinstance(data, dict):
-            dag_id = data.get("dag_id")
+        result_cid = None
+        if isinstance(data, dict):
+            if dag_id is None:
+                dag_id = data.get("dag_id")
+            # A deploy returns the correlation_id it stamped into the `.py`; reuse
+            # it so the audit record and the deployed file share one trace id.
+            result_cid = data.get("correlation_id")
         outcome, detail = "ok", None
         if isinstance(data, dict) and data.get("deployed") is False:
             outcome = "rejected"
             detail = "; ".join(str(e) for e in (data.get("errors") or [])) or None
-        _audit(outcome, dag_id, detail)
+        _audit(outcome, dag_id, detail, cid=result_cid)
         self.finish(json.dumps({"data": data}))
 
 

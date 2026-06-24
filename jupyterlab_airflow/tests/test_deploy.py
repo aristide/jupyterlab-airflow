@@ -793,3 +793,40 @@ def test_s3_target_list_propagates_unexpected_error_but_skips_vanished():
     t._client = _Denied(fake)
     with pytest.raises(Exception):
         t.list()
+
+
+def test_deploy_stamps_correlation_id_in_header_and_returns_it(tmp_path):
+    # The deploy correlation_id (PRD §8.9/§10) is stamped into the `.py` header
+    # and returned, so the deploy's audit record can carry the same trace id.
+    import re as _re
+
+    from jupyterlab_airflow.deploy import _parse_header
+
+    target = SharedVolumeTarget(str(tmp_path))
+    res = deploy_dag(_ir("cid_dag"), target=target)
+    assert res["deployed"]
+    cid = res["correlation_id"]
+    assert _re.fullmatch(r"[0-9a-f]{32}", cid)  # a uuid4 hex
+    header = _parse_header((tmp_path / "cid_dag.py").read_text())
+    assert header["correlation_id"] == cid
+    # The body hash (drift) is unaffected — the cid only changes the header line.
+    assert header["code"].startswith("sha256:")
+    assert is_drifted("cid_dag.py", target) is False
+    # generate_dag stays deterministic; the per-deploy id is stamped at deploy.
+    res2 = deploy_dag(_ir("cid_dag"), target=target)
+    assert res2["correlation_id"] != cid  # a fresh id each deploy
+    body1 = (tmp_path / "cid_dag.py.bak").read_text().split("\n", 1)[1]
+    body2 = (tmp_path / "cid_dag.py").read_text().split("\n", 1)[1]
+    assert body1 == body2  # identical body across deploys despite different cid
+
+
+def test_rejected_deploy_returns_correlation_id_without_writing(tmp_path):
+    # Even a refused deploy returns a correlation_id (so its audit has a trace id),
+    # but writes nothing — no header to stamp.
+    import re as _re
+
+    target = SharedVolumeTarget(str(tmp_path))
+    res = deploy_dag(_ir("1bad"), target=target)  # invalid dag_id → refused
+    assert res["deployed"] is False
+    assert _re.fullmatch(r"[0-9a-f]{32}", res["correlation_id"])
+    assert not list(tmp_path.glob("*.py"))

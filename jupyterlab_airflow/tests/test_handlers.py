@@ -440,3 +440,20 @@ async def test_rejected_deploy_audited_as_rejected_not_ok(jp_fetch, tmp_path, mo
     assert rec["action"] == "deploy"
     assert rec["outcome"] == "rejected"  # not "ok"
     assert rec["detail"]  # carries the validation error(s)
+
+
+async def test_deploy_correlation_id_links_audit_to_header(jp_fetch, tmp_path, monkeypatch, audit_records):
+    # The deploy audit record, the response, and the deployed `.py` header all
+    # carry the SAME correlation_id — the §8.9/§10 trace loop.
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_bash_ir())
+    )
+    data = json.loads(resp.body)["data"]
+    cid = data["correlation_id"]
+    assert cid
+    assert [r["correlation_id"] for r in audit_records] == [cid]  # audit == response
+    from jupyterlab_airflow.deploy import _parse_header
+
+    header = _parse_header((tmp_path / "ep_dag.py").read_text())
+    assert header["correlation_id"] == cid  # header == audit

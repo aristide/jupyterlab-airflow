@@ -231,6 +231,10 @@ export interface IDeployRes {
   path?: string;
   filename?: string;
   dag_id: string;
+  /** Per-deploy trace id, also stamped into the `.py` provenance header and the
+   * deploy's audit record — links a deployed DAG (and a later import error) back
+   * to the deploy session (PRD §8.9/§10). */
+  correlation_id?: string;
   /** This deploy overwrote a prior version, so a rollback target exists (§7). */
   backed_up?: boolean;
   warnings: string[];

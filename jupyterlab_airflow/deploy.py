@@ -17,6 +17,7 @@ import os
 import re
 import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple
+from uuid import uuid4
 
 from .validation import validate_dag
 
@@ -668,15 +669,20 @@ def _body_hash(content: str) -> Optional[str]:
     return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
-def _stamp_code_hash(content: str) -> str:
-    """Append ``code=sha256:<body-hash>`` to the provenance header so an
-    out-of-band hand-edit of the deployed body is detectable on re-deploy
-    (PRD §6.5.3). Only the header line changes, so the body hash stays stable."""
+def _stamp_code_hash(content: str, correlation_id: Optional[str] = None) -> str:
+    """Stamp the provenance header at deploy time: ``code=sha256:<body-hash>``
+    (so an out-of-band hand-edit of the deployed body is detectable on re-deploy,
+    PRD §6.5.3) and, when given, ``correlation_id=<id>`` (so a deployed `.py` —
+    and a later import error on it — traces back to the deploy's audit record,
+    §8.9 / §10). Only the **header line** changes, so the body hash stays stable
+    (and `generate_dag` itself stays deterministic — the per-deploy id is stamped
+    here, not in codegen)."""
     head, sep, body = content.partition("\n")
     if not sep:
         return content
     digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    return f"{head}  code=sha256:{digest}\n{body}"
+    cid = f"  correlation_id={correlation_id}" if correlation_id else ""
+    return f"{head}{cid}  code=sha256:{digest}\n{body}"
 
 
 def is_drifted(filename: str, target: Optional[DeployTarget] = None) -> bool:
@@ -814,11 +820,17 @@ def find_orphans(
 def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dict[str, Any]:
     """Validate, then atomically write the generated DAG to the dags folder.
 
-    Returns ``{deployed, path?, filename?, dag_id, warnings, errors, dagbag}``.
-    Does not write when validation fails.
+    Returns ``{deployed, path?, filename?, dag_id, correlation_id, warnings,
+    errors, dagbag}``. Does not write when validation fails. The
+    ``correlation_id`` (a per-deploy id) is stamped into the written `.py`
+    provenance header and returned so the deploy's audit record carries the same
+    id — tracing a deployed DAG (and a later import error) back to the deploy
+    session (§8.9 / §10). It is returned on every path (incl. a refusal) so the
+    audit always has a trace id, even when nothing is written.
     """
     target = target or get_deploy_target()
     dag_id = (ir.get("dag") or {}).get("dag_id", "")
+    correlation_id = uuid4().hex
 
     result = validate_dag(ir)
     if not result["valid"]:
@@ -829,6 +841,7 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
         return {
             "deployed": False,
             "dag_id": dag_id,
+            "correlation_id": correlation_id,
             "warnings": [],
             "errors": errors or ["Validation failed"],
             "dagbag": dagbag,
@@ -844,6 +857,7 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
         return {
             "deployed": False,
             "dag_id": dag_id,
+            "correlation_id": correlation_id,
             "warnings": [],
             "errors": provider_errors,
             "dagbag": result["dagbag"],
@@ -862,15 +876,16 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
     # non-managed file, so a pre-existing file here is always Studio-managed) →
     # `backed_up` tells the editor a rollback target exists (§6.5.5 / §7).
     backed_up = target.exists(filename)
-    # Stamp a body hash into the header so a later out-of-band hand-edit of the
-    # deployed file is detectable on re-deploy (§6.5.3).
-    path = target.write(filename, _stamp_code_hash(result["code"]))
+    # Stamp the body hash (drift detection, §6.5.3) + the per-deploy
+    # correlation_id (audit↔provenance trace loop, §8.9/§10) into the header.
+    path = target.write(filename, _stamp_code_hash(result["code"], correlation_id))
 
     return {
         "deployed": True,
         "path": path,
         "filename": filename,
         "dag_id": dag_id,
+        "correlation_id": correlation_id,
         "backed_up": backed_up,
         "warnings": warnings,
         "errors": [],
