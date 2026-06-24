@@ -235,6 +235,8 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
       tryNumber,
       maxTry,
       text: null,
+      events: undefined,
+      truncated: false,
       error: null
     });
     const res = await getTaskLogs(dagId, runId, taskId, tryNumber);
@@ -250,7 +252,13 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         return prev;
       }
       if (res.status === 'OK') {
-        return { ...prev, text: res.data?.content ?? '', error: null };
+        return {
+          ...prev,
+          text: res.data?.content ?? '',
+          events: res.data?.events,
+          truncated: res.data?.truncated ?? false,
+          error: null
+        };
       }
       return {
         ...prev,

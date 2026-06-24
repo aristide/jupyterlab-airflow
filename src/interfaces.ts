@@ -64,8 +64,25 @@ export interface ITaskInstancesRes {
   total_entries: number;
 }
 
+// One structured log event from Airflow 3's logs endpoint (PRD §6.6). `event` is
+// the message; `level` (when the handler emits it) is authoritative — the viewer
+// colours by it instead of guessing from the line text. Verified against
+// apache-airflow-core 3.0.2 `StructuredLogMessage` (event*, timestamp?, + extras).
+export interface IStructuredLogEvent {
+  event: string;
+  timestamp?: string;
+  level?: string;
+  logger?: string;
+}
+
 export interface ITaskLogsRes {
+  /** Flattened log text (Copy/Download + the plain-text fallback). */
   content: string;
+  /** Structured events when Airflow returned them; absent for plain-text logs. */
+  events?: IStructuredLogEvent[];
+  /** True when the log was capped while more remained (a still-running task that
+   * keeps streaming past the chunk budget) — the viewer flags it as incomplete. */
+  truncated?: boolean;
 }
 
 // `clearTaskInstances` returns the affected set (used as a dry-run preview).

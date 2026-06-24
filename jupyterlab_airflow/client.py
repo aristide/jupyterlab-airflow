@@ -251,22 +251,53 @@ class AirflowClient:
     def get_task_logs(
         self, dag_id: str, dag_run_id: str, task_id: str, try_number: int = 1
     ) -> dict:
-        """Task-instance log text for one try, normalised to ``{content: str}``."""
-        raw = self._request(
-            "GET",
-            f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_id}/logs/{try_number}",
-            params={"full_content": "true"},
+        """Task-instance logs for one try (PRD §6.6).
+
+        Airflow 3's logs endpoint returns ``content`` as a list of **structured
+        events** (``{event, timestamp?, level?, logger?, …}`` — verified against
+        ``apache-airflow-core 3.0.2`` ``StructuredLogMessage``) or a list of
+        strings on a parse error. We pass the structured ``events`` through (so
+        the viewer can colour by the *server-provided* level instead of guessing
+        from the line text) **and** a flattened ``content`` string (for
+        Copy/Download and the plain-text fallback). A plain-text / older response
+        yields ``content`` only — back-compatible with the prior ``{content: str}``.
+
+        For a **finished** task the response is the whole log in one chunk; for a
+        **running/deferred** task it is the first chunk plus a ``continuation_token``
+        (``full_content`` does not force an exhaustive read). We **drain the token**
+        (bounded by ``_MAX_LOG_CHUNKS``) so the viewer shows the complete log so far,
+        and set ``truncated: True`` if the cap is hit while more remained — rather
+        than silently presenting a partial log as complete.
+        """
+        path = (
+            f"/dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_id}/logs/{try_number}"
         )
-        content = raw.get("content") if isinstance(raw, dict) else raw
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, (list, tuple)):
-                    parts.append(" ".join(str(piece) for piece in item))
-                else:
-                    parts.append(str(item))
-            content = "\n".join(parts)
-        return {"content": content if isinstance(content, str) else str(raw)}
+        params: dict = {"full_content": "true"}
+        events: list = []
+        lines: list = []
+        token = None
+        truncated = False
+        for _ in range(_MAX_LOG_CHUNKS):
+            raw = self._request("GET", path, params=params)
+            content = raw.get("content") if isinstance(raw, dict) else raw
+            chunk_lines, chunk_events = _parse_log_content(content)
+            lines.extend(chunk_lines)
+            events.extend(chunk_events)
+            token = raw.get("continuation_token") if isinstance(raw, dict) else None
+            # Stop at end-of-log (no token), or when a chunk adds nothing new (a
+            # running task that has caught up to "now").
+            if not token or not chunk_lines:
+                break
+            params = {"token": token}
+        else:
+            # Exited via the cap with a token still pending → more log remains.
+            truncated = bool(token)
+        result: dict = {"content": "\n".join(lines)}
+        if events:
+            result["events"] = events
+        if truncated:
+            result["truncated"] = True
+        return result
 
     def clear_task_instances(
         self,
@@ -294,6 +325,54 @@ def _safe_json(resp):
         return resp.json()
     except ValueError:
         return resp.text
+
+
+# How many log chunks to drain via the continuation token before giving up and
+# flagging the log truncated (a running task streams a token forever).
+_MAX_LOG_CHUNKS = 20
+
+
+def _format_structured_line(event: dict) -> str:
+    """Render one structured log event as a readable text line for the flattened
+    ``content`` (Copy/Download + plain-text fallback): ``<timestamp> <LEVEL>
+    <event>``, skipping absent fields."""
+    parts = []
+    if event.get("timestamp"):
+        parts.append(event["timestamp"])
+    if event.get("level"):
+        parts.append(str(event["level"]).upper())
+    message = event.get("event", "")
+    if message:
+        parts.append(message)
+    return " ".join(parts)
+
+
+def _parse_log_content(content) -> tuple:
+    """Parse one logs-endpoint ``content`` chunk into ``(lines, events)``.
+
+    ``content`` is a list of structured-event dicts (→ events + readable lines),
+    a list of strings/tuples (parse-error fallback → lines only), or a string
+    (plain text → one line). Any other/unexpected shape contributes nothing (so a
+    malformed envelope yields an empty log, not a dumped Python repr)."""
+    events: list = []
+    lines: list = []
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict):
+                event = {"event": str(item.get("event", ""))}
+                for key in ("timestamp", "level", "logger"):
+                    value = item.get(key)
+                    if value not in (None, ""):
+                        event[key] = str(value)
+                events.append(event)
+                lines.append(_format_structured_line(event))
+            elif isinstance(item, (list, tuple)):
+                lines.append(" ".join(str(piece) for piece in item))
+            else:
+                lines.append(str(item))
+    elif isinstance(content, str) and content:
+        lines.append(content)
+    return lines, events
 
 
 def _basename(path) -> str:

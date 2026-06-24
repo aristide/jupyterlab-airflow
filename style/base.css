@@ -578,6 +578,15 @@
   color: var(--jp-error-color1);
 }
 
+/* "log still streaming / truncated" note above the body (PRD §6.6). */
+.jp-airflow-logtruncated {
+  padding: 6px 12px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  background: var(--jp-warn-color3, var(--jp-layout-color2));
+  border-bottom: 1px solid var(--jp-warn-color1, var(--jp-border-color1));
+}
+
 .jp-airflow-logline {
   display: flex;
   gap: 10px;

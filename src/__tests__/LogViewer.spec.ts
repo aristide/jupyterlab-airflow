@@ -1,4 +1,4 @@
-import { classifyLine } from '../components/LogViewer';
+import { classifyLine, levelFromStructured } from '../components/LogViewer';
 
 describe('log line level classification (LogViewer)', () => {
   it('classifies the level token in an Airflow log line', () => {
@@ -43,5 +43,24 @@ describe('log line level classification (LogViewer)', () => {
     );
     // A bare leading level token still classifies (and ignores trailing words).
     expect(classifyLine('INFO - configured log_level=ERROR')).toBe('info');
+  });
+});
+
+describe('structured-event level mapping (levelFromStructured, PRD §6.6)', () => {
+  it('maps Airflow level strings (any case) to a Level', () => {
+    expect(levelFromStructured('INFO')).toBe('info');
+    expect(levelFromStructured('info')).toBe('info');
+    expect(levelFromStructured('warning')).toBe('warning');
+    expect(levelFromStructured('WARN')).toBe('warning');
+    expect(levelFromStructured('error')).toBe('error');
+    expect(levelFromStructured('CRITICAL')).toBe('critical');
+    expect(levelFromStructured('fatal')).toBe('critical');
+    expect(levelFromStructured('debug')).toBe('debug');
+  });
+
+  it('returns null for an absent/unknown level so the caller falls back to text', () => {
+    expect(levelFromStructured(undefined)).toBeNull();
+    expect(levelFromStructured('')).toBeNull();
+    expect(levelFromStructured('TRACE')).toBeNull();
   });
 });

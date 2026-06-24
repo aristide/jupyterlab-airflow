@@ -152,6 +152,88 @@ def test_get_task_logs_normalises_list_to_text(requests_mock):
     assert out["content"] == "2026-06-15 started\ndone"
 
 
+def test_get_task_logs_passes_structured_events_through(requests_mock):
+    # Airflow 3 returns structured events; we pass `events` through (for accurate
+    # per-event level colouring) plus a flattened `content` (PRD §6.6).
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/d/dagRuns/r/taskInstances/t/logs/1",
+        json={
+            "content": [
+                {"timestamp": "2026-06-24T10:00:00Z", "event": "starting",
+                 "level": "info", "logger": "task"},
+                {"timestamp": "2026-06-24T10:00:01Z", "event": "boom", "level": "error"},
+                {"event": "no level"},  # level absent → client classifies the text
+            ],
+            "continuation_token": None,
+        },
+    )
+    out = make_client().get_task_logs("d", "r", "t", 1)
+    assert len(out["events"]) == 3
+    assert out["events"][1] == {
+        "event": "boom", "timestamp": "2026-06-24T10:00:01Z", "level": "error"
+    }
+    assert out["events"][2] == {"event": "no level"}  # absent fields omitted
+    # The flattened content is a readable text rendering for Copy/Download.
+    assert "ERROR boom" in out["content"] and "INFO starting" in out["content"]
+
+
+def test_get_task_logs_plain_string_has_no_events(requests_mock):
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/d/dagRuns/r/taskInstances/t/logs/1",
+        json={"content": "raw text\nline2"},
+    )
+    out = make_client().get_task_logs("d", "r", "t", 1)
+    assert out == {"content": "raw text\nline2"}  # back-compatible, no events key
+
+
+def test_get_task_logs_drains_continuation_token(requests_mock):
+    # A running task returns the first chunk + a continuation_token; we drain it
+    # (re-issuing with `token`) so the viewer shows the complete log so far (§6.6).
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/d/dagRuns/r/taskInstances/t/logs/1",
+        [
+            {"json": {"content": [{"event": "part1", "level": "info"}],
+                      "continuation_token": "tok1"}},
+            {"json": {"content": [{"event": "part2", "level": "error"}],
+                      "continuation_token": None}},
+        ],
+    )
+    out = make_client().get_task_logs("d", "r", "t", 1)
+    assert [e["event"] for e in out["events"]] == ["part1", "part2"]
+    assert "truncated" not in out  # end-of-log reached
+    # The second request resumed with the token.
+    assert requests_mock.request_history[-1].qs.get("token") == ["tok1"]
+
+
+def test_get_task_logs_flags_truncated_when_stream_never_ends(requests_mock):
+    # A task that keeps streaming a token forever is capped and flagged truncated
+    # rather than looping unbounded / silently showing a partial as complete.
+    from jupyterlab_airflow.client import _MAX_LOG_CHUNKS
+
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/d/dagRuns/r/taskInstances/t/logs/1",
+        json={"content": [{"event": "streaming", "level": "info"}],
+              "continuation_token": "more"},  # always a token → never ends
+    )
+    out = make_client().get_task_logs("d", "r", "t", 1)
+    assert out["truncated"] is True
+    assert len(out["events"]) == _MAX_LOG_CHUNKS  # bounded
+
+
+def test_get_task_logs_malformed_shape_yields_empty(requests_mock):
+    # An unexpected/missing content shape yields an empty log, never a dumped repr.
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    requests_mock.get(
+        f"{BASE}{API_PREFIX}/dags/d/dagRuns/r/taskInstances/t/logs/1",
+        json={"continuation_token": None},  # no content key
+    )
+    assert make_client().get_task_logs("d", "r", "t", 1) == {"content": ""}
+
+
 def test_delete_dag_issues_delete(requests_mock):
     requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
     m = requests_mock.delete(f"{BASE}{API_PREFIX}/dags/d", json={})

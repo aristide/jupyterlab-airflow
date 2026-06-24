@@ -1,6 +1,8 @@
 import { ITranslator } from '@jupyterlab/translation';
 import * as React from 'react';
 
+import { IStructuredLogEvent } from '../interfaces';
+
 type Trans = ReturnType<ITranslator['load']>;
 
 export interface ILogViewerData {
@@ -11,8 +13,16 @@ export interface ILogViewerData {
   tryNumber: number;
   /** Highest available try (the task instance's try_number). */
   maxTry: number;
-  /** Log text, or null while loading. */
+  /** Flattened log text (Copy/Download + the plain-text fallback), or null while
+   * loading. */
   text: string | null;
+  /** Structured events when Airflow returned them (PRD §6.6) — the viewer then
+   * colours by the server-provided `level` instead of guessing from text.
+   * Absent for plain-text logs (falls back to {@link classifyLine}). */
+  events?: IStructuredLogEvent[];
+  /** True when the log was capped while still streaming (a running task) — shown
+   * as an "incomplete, refresh for more" note. */
+  truncated?: boolean;
   /** Non-null when the fetch failed (kept distinct from log content). */
   error: string | null;
 }
@@ -72,6 +82,15 @@ export function classifyLine(line: string): Level {
   return 'plain';
 }
 
+/** Map a structured event's `level` (e.g. "INFO" / "warning") to a {@link Level},
+ * or null when absent/unknown so the caller falls back to {@link classifyLine}. */
+export function levelFromStructured(level: string | undefined): Level | null {
+  if (!level) {
+    return null;
+  }
+  return LEVEL_TOKEN[level.toUpperCase()] ?? null;
+}
+
 /**
  * A friendly task-log viewer (PRD §6.6 / §15.9): per-level colouring + glyph,
  * traceback emphasis, autoscroll to the first error, an attempt selector,
@@ -87,13 +106,31 @@ export function LogViewer(props: ILogViewerProps): JSX.Element {
   const bodyRef = React.useRef<HTMLDivElement>(null);
 
   const lines = React.useMemo(() => {
+    // Prefer the server's structured events (accurate per-event level); fall back
+    // to client-side text classification for plain-text logs (PRD §6.6).
+    if (data.events && data.events.length > 0) {
+      return data.events.map((event, i) => ({
+        n: i + 1,
+        // Compose timestamp + LEVEL + message (skipping absent parts), mirroring
+        // the server's flattened line — so search/errors-only match the level and
+        // an event with metadata but an empty message still renders a real line.
+        text: [
+          event.timestamp,
+          event.level ? event.level.toUpperCase() : '',
+          event.event
+        ]
+          .filter(Boolean)
+          .join(' '),
+        level: levelFromStructured(event.level) ?? classifyLine(event.event)
+      }));
+    }
     const text = data.text ?? '';
     return text.split('\n').map((raw, i) => ({
       n: i + 1,
       text: raw,
       level: classifyLine(raw)
     }));
-  }, [data.text]);
+  }, [data.events, data.text]);
 
   const needle = search.trim().toLowerCase();
   const visible = lines.filter(line => {
@@ -109,8 +146,13 @@ export function LogViewer(props: ILogViewerProps): JSX.Element {
   const errorCount = lines.filter(
     line => line.level === 'error' || line.level === 'critical'
   ).length;
+  // "(empty log)" = no log content at all — whether that's the plain-text empty
+  // case (one blank line) or structured events that carry no visible text. Any
+  // non-blank line (incl. an event whose timestamp/level renders) → not empty.
   const isEmptyLog =
-    data.text !== null && lines.length <= 1 && (lines[0]?.text ?? '') === '';
+    data.text !== null &&
+    lines.length > 0 &&
+    lines.every(line => (line.text ?? '').trim() === '');
 
   // Autoscroll to the first error each time a log loads, so a failure buried in
   // hundreds of INFO lines is visible immediately.
@@ -124,7 +166,7 @@ export function LogViewer(props: ILogViewerProps): JSX.Element {
     } else if (bodyRef.current) {
       bodyRef.current.scrollTop = 0;
     }
-  }, [data.text]);
+  }, [data.text, data.events]);
 
   const copy = async (): Promise<void> => {
     const text = data.text ?? '';
@@ -241,6 +283,14 @@ export function LogViewer(props: ILogViewerProps): JSX.Element {
           {trans.__('Download')}
         </button>
       </div>
+
+      {data.truncated && data.text !== null && data.error === null && (
+        <div className="jp-airflow-logtruncated">
+          {trans.__(
+            '⚠ Showing the log so far — the task is still producing output. Reselect the attempt to refresh.'
+          )}
+        </div>
+      )}
 
       <div
         ref={bodyRef}
