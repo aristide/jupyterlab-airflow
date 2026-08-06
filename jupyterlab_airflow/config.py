@@ -1,8 +1,8 @@
 """Configuration for the Airflow connection.
 
 All settings come from environment variables so that credentials never live
-in the frontend or in tracked files. In the devcontainer these are provided
-by ``.devcontainer/docker-compose.yaml``.
+in the frontend or in tracked files. In the docker-compose dev environment
+these are provided by the repo-root ``docker-compose.yml``.
 
     AIRFLOW_API_URL       Base URL of the Airflow webserver/API server.
                           The REST API is expected at ``<url>/api/v2`` and the
@@ -15,8 +15,8 @@ by ``.devcontainer/docker-compose.yaml``.
     AIRFLOW_VERIFY_SSL    "false" to disable TLS verification. Default: true
     AIRFLOW_DAGS_DIR      Deploy target: the dags folder on the shared volume
                           (read by ``deploy.py``). Default: /opt/airflow/dags.
-                          In the devcontainer this is the mounted host
-                          ``airflow-dags/`` folder.
+                          In the docker-compose dev environment this is the
+                          mounted host ``docker/airflow-dags/`` folder.
     AIRFLOW_OPERATORS_DIR Optional extra directory of operator YAML files that
                           override/extend the bundled registry (``registry.py``).
 

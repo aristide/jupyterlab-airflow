@@ -48,16 +48,26 @@ class DeployError(Exception):
     """A deploy was refused or failed (surfaced to the UI)."""
 
 
+class UnsafeFilenameError(DeployError):
+    """The ``dag_id`` does not map to a safe, Studio-managed ``<dag_id>.py``
+    filename (e.g. a hand-written DAG with a non-identifier name). A subclass of
+    :class:`DeployError` so existing ``except DeployError`` sites still catch it,
+    but distinct so the lifecycle functions (``purge_dag``/``retire_old_dag``)
+    can skip the file step for an unmanaged name **without** also swallowing
+    operational failures (wrong git branch, rejected push, missing S3 bucket),
+    which must surface rather than be reported as a successful removal."""
+
+
 def dags_dir() -> str:
-    """The deploy root. Override with ``AIRFLOW_DAGS_DIR`` (the devcontainer
-    points this at the host `airflow-dags/` mount)."""
+    """The deploy root. Override with ``AIRFLOW_DAGS_DIR`` (the docker-compose
+    dev environment points this at the host `docker/airflow-dags/` mount)."""
     return os.environ.get("AIRFLOW_DAGS_DIR", "/opt/airflow/dags")
 
 
 def _safe_filename(dag_id: str) -> str:
     filename = f"{dag_id}.py"
     if not _FILENAME_RE.match(filename):
-        raise DeployError(f"Unsafe filename for dag_id {dag_id!r}")
+        raise UnsafeFilenameError(f"Unsafe filename for dag_id {dag_id!r}")
     return filename
 
 
@@ -101,11 +111,11 @@ class SharedVolumeTarget(DeployTarget):
 
     def path_for(self, filename: str) -> str:
         if not _FILENAME_RE.match(filename):
-            raise DeployError(f"Unsafe filename: {filename!r}")
+            raise UnsafeFilenameError(f"Unsafe filename: {filename!r}")
         target = os.path.abspath(os.path.join(self.root, filename))
         # Defence in depth against traversal even though the regex forbids it.
         if os.path.dirname(target) != self.root:
-            raise DeployError(f"Refusing path outside the dags dir: {filename!r}")
+            raise UnsafeFilenameError(f"Refusing path outside the dags dir: {filename!r}")
         return target
 
     def exists(self, filename: str) -> bool:
@@ -125,8 +135,8 @@ class SharedVolumeTarget(DeployTarget):
         hint = (
             f"Cannot write the DAG to the dags folder {self.root!r}. Set the "
             "AIRFLOW_DAGS_DIR environment variable on the JupyterLab server to a "
-            "shared dags folder it can write to (in the devcontainer: "
-            "/workspace/.devcontainer/airflow-dags), then restart the server."
+            "shared dags folder it can write to (via docker compose: "
+            "/workspace/docker/airflow-dags), then restart the server."
         )
         try:
             os.makedirs(self.root, exist_ok=True)
@@ -497,7 +507,7 @@ class S3DeployTarget(DeployTarget):
         """The S3 key for a deployed DAG file. ``filename`` must be a safe
         ``<dag_id>.py`` (no traversal); the prefix is admin‑configured."""
         if not _FILENAME_RE.match(filename):
-            raise DeployError(f"Unsafe filename: {filename!r}")
+            raise UnsafeFilenameError(f"Unsafe filename: {filename!r}")
         return f"{self.prefix}/{filename}" if self.prefix else filename
 
     def _backup_key(self, filename: str) -> str:
@@ -920,8 +930,11 @@ def purge_dag(dag_id: str, target: Optional[DeployTarget] = None) -> Dict[str, A
         if target.exists(filename):
             target.delete(filename)
             removed_file = True
-    except DeployError:
-        # dag_id isn't a safe/managed filename (e.g. a hand-written DAG) — skip.
+    except UnsafeFilenameError:
+        # dag_id isn't a safe/managed filename (e.g. a hand-written DAG) — skip the
+        # file step only. Operational failures (wrong git branch, rejected push,
+        # missing S3 bucket) are NOT swallowed: they propagate so the outcome is
+        # reported as an error instead of a false success with the file still live.
         pass
 
     purged_history = False
@@ -1007,8 +1020,9 @@ def retire_old_dag(
         if target.exists(filename):
             target.delete(filename)
             removed_file = True
-    except DeployError:
-        # Not a safe/managed filename (e.g. a hand-written DAG) — leave it.
+    except UnsafeFilenameError:
+        # Not a safe/managed filename (e.g. a hand-written DAG) — skip the file
+        # step only; operational failures still propagate (see purge_dag).
         pass
 
     paused = False

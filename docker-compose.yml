@@ -1,0 +1,98 @@
+# Local dev environment. From the repo root:
+#   docker compose up -d          # pull (first time) + start everything — no image build, ever
+#   docker compose logs -f jupyter
+#   docker compose down           # stop (add -v to also wipe the Airflow metadata DB + JS/Python caches)
+#
+# JupyterLab is served automatically at http://localhost:8888/lab — no token.
+# The `jupyter` service runs a pre-built, off-the-shelf Python+Node image
+# (nikolaik/python-nodejs) unmodified — there is no Dockerfile and nothing to
+# build, locally or in CI. Everything project-specific happens at container
+# start via docker/entrypoint.sh: it (re)installs JS and Python dependencies
+# from whatever is currently on disk, then runs `jlpm watch` (frontend) and
+# `jupyter lab --autoreload` (backend) so both sides pick up source changes
+# live, no restart needed.
+#
+# The Airflow service is controlled via a Docker Compose profile so it can be
+# turned off when you only need the JupyterLab dev container (e.g. to target a
+# remote Airflow instead). Enable/disable it in .env by editing
+# COMPOSE_PROFILES.
+#
+# See docker/README.md for details.
+
+services:
+  airflow:
+    image: apache/airflow:3.0.2
+    command: standalone
+    ports:
+      # Host 8080 is often taken (e.g. an MCP server); map the UI to 8081 on the
+      # host. Inside the compose network Airflow is still reached at airflow:8080.
+      - 0.0.0.0:8081:8080
+    environment:
+      # Dev-only: SQLite metadata DB. Example DAGs are OFF: several of Airflow
+      # 3.0.2's bundled examples import a test-only `tests_common` module that is
+      # not in the published wheel, which surfaces as a spurious import error.
+      # The mounted demo DAG (docker/airflow-dags/) is the "something to show" instead.
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      # Deterministic credentials for the SimpleAuthManager (admin / admin).
+      # The password file is pre-seeded and mounted below; without this Airflow
+      # would generate a random password on every start.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/passwords.json
+      # Stable JWT signing secret so tokens survive restarts.
+      AIRFLOW__API_AUTH__JWT_SECRET: dev-jwt-secret-change-me
+    volumes:
+      - ./docker/airflow-dags:/opt/airflow/dags
+      - ./docker/airflow-config:/opt/airflow/config
+      - airflow-db:/opt/airflow
+    healthcheck:
+      test: ['CMD-SHELL', "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/')\""]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    profiles:
+      - airflow
+
+  jupyter:
+    # Pre-built Python 3.12 + Node 22 image (Debian 'buildpack-deps' base, so
+    # git/build tooling is already there) — pulled from Docker Hub, never built.
+    # https://github.com/nikolaik/docker-python-nodejs
+    image: nikolaik/python-nodejs:python3.12-nodejs22
+    # The image's default user (`pn`) can't write the root-owned named volumes
+    # below without sudo, which isn't installed; running as root sidesteps
+    # that entirely — fine for a disposable local dev container.
+    user: root
+    entrypoint: ["bash", "/workspace/docker/entrypoint.sh"]
+    volumes:
+      - .:/workspace
+      # Named volumes persist installs across `docker compose down` + `up` and
+      # keep them on the container's own Linux filesystem instead of the
+      # bind-mounted (and, on Windows/macOS, cross-platform) workspace.
+      - node_modules:/workspace/node_modules
+      - pip-site-packages:/usr/local/lib/python3.12/site-packages
+      # Optional: point HOST_SSH_DIR (in .env) at your real ~/.ssh to use
+      # your own keys for git inside the container. Defaults to an empty,
+      # gitignored folder so this is a no-op out of the box.
+      - ${HOST_SSH_DIR}:/root/.ssh:ro
+    working_dir: /workspace
+    ports:
+      - 0.0.0.0:8888:8888
+      - 0.0.0.0:9999:9999
+    environment:
+      # Where the server extension reaches Airflow. Inside the compose network
+      # the Airflow API server is at http://airflow:8080.
+      AIRFLOW_API_URL: http://airflow:8080
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
+      # Deploy target: the same host docker/airflow-dags/ folder Airflow reads
+      # from /opt/airflow/dags, reachable here under the mounted workspace.
+      AIRFLOW_DAGS_DIR: /workspace/docker/airflow-dags
+    depends_on:
+      airflow:
+        condition: service_started
+        required: false
+
+volumes:
+  airflow-db:
+  node_modules:
+  pip-site-packages:

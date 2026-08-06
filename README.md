@@ -136,8 +136,20 @@ pip install jupyterlab-airflow
 
 ## Development install
 
-> See [`.devcontainer/README.md`](.devcontainer/README.md) for a ready-to-use
-> dev container that also spins up a local Airflow 3.x.
+The project includes a `docker-compose.yml` that spins up a JupyterLab dev
+container plus a local Airflow 3.x instance to develop against — it runs a
+pre-built Python+Node image with **nothing to build**, dependencies install
+automatically, and both the frontend (`jlpm watch`) and the backend
+(`jupyter lab --autoreload`) live-reload on code changes. Toggle the bundled
+Airflow via the `COMPOSE_PROFILES` variable in `.env`. See
+[`docker/README.md`](docker/README.md) for details.
+
+```bash
+cp .env.sample .env
+docker compose up -d
+```
+
+Alternatively, install manually against your own Python/Node environment:
 
 ```bash
 # Clone, then from the repo root:
