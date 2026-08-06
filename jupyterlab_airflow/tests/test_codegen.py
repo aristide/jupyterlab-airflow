@@ -22,6 +22,66 @@ def _ir(nodes, edges, **dag):
     return {"dag": base, "nodes": nodes, "edges": edges}
 
 
+def _string_literal_with(code, needle):
+    """The value of the first string-constant assignment whose text contains
+    ``needle`` (used to assert a user code body's literal survived codegen)."""
+    for node in ast.walk(ast.parse(code)):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and needle in node.value.value
+        ):
+            return node.value.value
+    return None
+
+
+def test_user_code_multiline_string_literal_is_preserved_verbatim():
+    # Regression: _indent/_tidy (and the template's indent filter) must not mutate
+    # the interior of a multi-line string literal in a user `code` body — a
+    # whitespace-only line and trailing spaces are content, not layout.
+    body = 's = """\nheader\n   \nfooter with spaces   \n"""\nreturn s'
+    ir = _ir(
+        nodes=[{"id": "n", "op": "python_task", "task_id": "t",
+                "params": {"code": body}}],
+        edges=[],
+    )
+    res = generate_dag(ir)
+    assert res["valid"] is True, res["errors"]
+    literal = _string_literal_with(res["code"], "header")
+    assert literal == "\nheader\n   \nfooter with spaces   \n"
+
+
+def test_malformed_dag_fields_return_errors_not_a_crash():
+    # A hand-edited/crafted IR with wrong-typed DAG fields must come back as
+    # {valid: False, errors:[...]}, never raise (which the handler maps to a 500).
+    for bad in (
+        {"retries": "x"},
+        {"retry_delay_seconds": "nope"},
+        {"retries": [1]},
+        {"tags": 5},
+        {"default_args": [1, 2]},
+        {"params": [1]},
+    ):
+        res = generate_dag(_ir(nodes=[], edges=[], **bad))
+        assert res["valid"] is False and res["errors"], (bad, res)
+
+
+def test_non_finite_numbers_are_rejected_before_write():
+    # repr(inf)/repr(nan) are bare names -> a DAG that parses but NameErrors at
+    # Airflow import. Reject pre-write, including nested inside params.
+    for bad in (
+        {"params": {"thresh": float("inf")}},
+        {"default_args": {"factor": float("nan")}},
+    ):
+        res = generate_dag(_ir(nodes=[], edges=[], **bad))
+        assert res["valid"] is False
+        assert any("Non-finite" in e for e in res["errors"]), res
+    # A finite float is unaffected.
+    ok = generate_dag(_ir(nodes=[], edges=[], params={"ratio": 1.5}))
+    assert ok["valid"] is True, ok["errors"]
+
+
 def test_taskflow_dag_is_valid_python_and_airflow3():
     ir = _ir(
         nodes=[

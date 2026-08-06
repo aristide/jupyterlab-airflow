@@ -51,7 +51,7 @@ params:
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
   def configure_checkpoint_{{ task_id }}(context):
-  {{ params.configure | indent(4, true) }}
+  {{ params.configure | pycode_indent(4) }}
 
   {{ task_id }} = GXValidateCheckpointOperator(
       task_id={{ task_id | pyrepr }},
@@ -69,7 +69,7 @@ template_traditional: |
   )
 template_taskflow: |
   def configure_checkpoint_{{ task_id }}(context):
-  {{ params.configure | indent(4, true) }}
+  {{ params.configure | pycode_indent(4) }}
 
   {{ task_id }} = GXValidateCheckpointOperator(
       task_id={{ task_id | pyrepr }},

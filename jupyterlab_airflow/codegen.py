@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import io
 import json
 import keyword
+import math
+import tokenize
 from typing import Any, Dict, List, Optional, Tuple
 
 from jinja2 import Environment, Undefined
@@ -40,6 +43,28 @@ class _Raw(str):
     expression for a per-task ``retry_delay``."""
 
 
+def _reject_non_finite(value: Any) -> None:
+    """Raise :class:`CodegenError` if ``value`` (or anything nested in a
+    list/dict) is a non-finite float. ``repr(float('inf'))`` is the bare name
+    ``inf`` (likewise ``nan``) — syntactically valid so ``ast.parse``/``compile``
+    accept it, but a ``NameError`` at Airflow import. JSON ``Infinity``/``NaN`` is
+    accepted by Tornado's permissive decoder, so a crafted/hand-edited IR can
+    reach here; reject it pre-write instead of shipping a DAG that won't import."""
+    if isinstance(value, bool):
+        return
+    if isinstance(value, float) and not math.isfinite(value):
+        raise CodegenError(
+            f"Non-finite number ({value!r}) is not a valid DAG value; remove or "
+            "replace it."
+        )
+    if isinstance(value, dict):
+        for nested in value.values():
+            _reject_non_finite(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            _reject_non_finite(nested)
+
+
 def _pyrepr(value: Any) -> str:
     """Emit a Python literal for a JSON-derived value. ``repr`` already yields
     valid Python for str/int/float/bool/None/list/dict, and escapes strings."""
@@ -47,6 +72,7 @@ def _pyrepr(value: Any) -> str:
         return str(value)  # already a Python expression — emit as-is
     if isinstance(value, Undefined):
         value = None
+    _reject_non_finite(value)
     return repr(value)
 
 
@@ -125,10 +151,50 @@ def _node_assets(node: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _string_continuation_lines(code: str) -> set:
+    """The 1-based physical line numbers that are *continuation* lines of a
+    multi-line string/f-string literal — i.e. lines whose leading whitespace,
+    trailing whitespace, and blank-ness are literal string **content**, not code
+    layout. Re-indent / rstrip / blank-collapse must leave these untouched, or a
+    user-authored code body with embedded whitespace-sensitive text (heredocs,
+    YAML, fixed-width payloads) is silently corrupted.
+
+    Returns an empty set if ``code`` cannot be tokenized (a best-effort fallback
+    to the old line-wise behaviour for a fragment that is not yet valid Python).
+    ``_pyrepr`` always emits single-line string literals, so only user-authored
+    ``code``-widget bodies ever produce multi-line string tokens here."""
+    protected: set = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(code).readline):
+            if tok.end[0] > tok.start[0]:  # a token spanning >1 line ⇒ a string
+                protected.update(range(tok.start[0] + 1, tok.end[0] + 1))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return set()
+    return protected
+
+
+def _pycode_indent(code: str, width: int = 4) -> str:
+    """Indent a user-authored Python code body by ``width`` spaces, leaving the
+    interior of multi-line string literals verbatim (tokenize-aware). A drop-in
+    for Jinja's line-wise ``indent(width, true)`` that, unlike it, does not
+    corrupt embedded multi-line strings. Blank (non-string) lines stay blank,
+    matching ``indent``'s ``blank=False`` default."""
+    pad = " " * width
+    protected = _string_continuation_lines(code)
+    out: List[str] = []
+    for lineno, line in enumerate(code.splitlines(), start=1):
+        if lineno in protected or not line.strip():
+            out.append(line)  # string interior, or a blank line — untouched
+        else:
+            out.append(pad + line)
+    return "\n".join(out)
+
+
 def _make_env() -> Environment:
     env = Environment(autoescape=False, keep_trailing_newline=False)
     env.filters["pyrepr"] = _pyrepr
     env.filters["pyargs"] = _pyargs
+    env.filters["pycode_indent"] = _pycode_indent
     return env
 
 
@@ -443,7 +509,19 @@ def _collect_imports(
 
 def _indent(block: str, spaces: int = 4) -> str:
     pad = " " * spaces
-    return "\n".join((pad + line) if line.strip() else "" for line in block.splitlines())
+    # Continuation lines of a multi-line string literal (a user `code` body) are
+    # emitted verbatim — prepending ``pad`` or blanking a whitespace-only line
+    # there would alter the literal's content.
+    protected = _string_continuation_lines(block)
+    out: List[str] = []
+    for lineno, line in enumerate(block.splitlines(), start=1):
+        if lineno in protected:
+            out.append(line)
+        elif line.strip():
+            out.append(pad + line)
+        else:
+            out.append("")
+    return "\n".join(out)
 
 
 def _has_code_param(op: Dict[str, Any]) -> bool:
@@ -455,11 +533,19 @@ def _has_code_param(op: Dict[str, Any]) -> bool:
 
 def _tidy(code: str) -> str:
     """Strip trailing whitespace and the blank lines left by empty template
-    expansions (e.g. an empty ``{{ common | pyargs }}`` before a closing paren)."""
-    lines = [line.rstrip() for line in code.splitlines()]
+    expansions (e.g. an empty ``{{ common | pyargs }}`` before a closing paren).
+
+    Lines inside a multi-line string literal (a user `code` body) are left
+    untouched — rstripping or dropping a blank line there would corrupt the
+    literal's whitespace-sensitive content."""
+    protected = _string_continuation_lines(code)
+    lines = [
+        ln if (i + 1) in protected else ln.rstrip()
+        for i, ln in enumerate(code.splitlines())
+    ]
     out: List[str] = []
     for i, line in enumerate(lines):
-        if line == "":
+        if (i + 1) not in protected and line == "":
             nxt = next((later for later in lines[i + 1:] if later.strip()), "")
             if nxt.lstrip().startswith(")"):
                 continue
@@ -475,6 +561,37 @@ def _tidy(code: str) -> str:
 def _ir_hash(ir: Dict[str, Any]) -> str:
     canonical = json.dumps(ir, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _validate_dag_fields(dag: Dict[str, Any]) -> List[str]:
+    """Type-check the DAG-level fields the arg builders would otherwise crash on.
+    A hand-edited `.afdag` (or a crafted POST) can carry a wrong-typed value
+    (``retries: "x"``, ``tags: 5``, ``default_args: [1, 2]``); turn that into a
+    clean validation error instead of an uncaught ``ValueError``/``TypeError`` (a
+    500). ``_node_common`` already guards the per-task equivalents."""
+    if not isinstance(dag, dict):
+        return [f"DAG must be an object, got {type(dag).__name__}"]
+    errors: List[str] = []
+    for key in ("retries", "retry_delay_seconds"):
+        val = dag.get(key)
+        if val is None or isinstance(val, bool):
+            continue
+        try:
+            int(val)
+        except (TypeError, ValueError):
+            errors.append(f"DAG {key} must be a whole number, got {val!r}")
+    default_args = dag.get("default_args")
+    if default_args is not None and not isinstance(default_args, dict):
+        errors.append(
+            f"DAG default_args must be an object, got {type(default_args).__name__}"
+        )
+    tags = dag.get("tags")
+    if tags is not None and not isinstance(tags, (list, tuple)):
+        errors.append(f"DAG tags must be a list, got {type(tags).__name__}")
+    params = dag.get("params")
+    if params is not None and not isinstance(params, dict):
+        errors.append(f"DAG params must be an object, got {type(params).__name__}")
+    return errors
 
 
 def _validate_identifiers(dag_id: str, nodes: List[Dict[str, Any]]) -> List[str]:
@@ -503,6 +620,12 @@ def generate_dag(ir: Dict[str, Any]) -> Dict[str, Any]:
         code = _render(ir)
     except CodegenError as err:
         return {"code": "", "valid": False, "errors": [str(err)]}
+    except (ValueError, TypeError, AttributeError, KeyError) as err:
+        # Backstop: a malformed-but-JSON-valid IR (wrong field types, a non-object
+        # `dag`/`nodes`, …) must yield a clean validation error, never a 500. The
+        # stage-1 checks catch the common cases with friendly messages; this
+        # guards anything they miss so the {valid, errors} contract always holds.
+        return {"code": "", "valid": False, "errors": [f"Invalid DAG definition: {err}"]}
 
     errors: List[str] = []
     try:
@@ -537,9 +660,9 @@ def _render(ir: Dict[str, Any]) -> str:
     traditional = syntax == "traditional"
 
     # Stage 1–3: structural + identifier validation (no code executed).
-    id_errors = _validate_identifiers(dag_id, nodes)
-    if id_errors:
-        raise CodegenError("; ".join(id_errors))
+    errors = _validate_identifiers(dag_id, nodes) + _validate_dag_fields(dag)
+    if errors:
+        raise CodegenError("; ".join(errors))
 
     registry = {op["id"]: op for op in load_registry()}
     for node in nodes:

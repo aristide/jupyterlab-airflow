@@ -25,10 +25,10 @@ common_params: [retries, retry_delay, depends_on_past]
 template_taskflow: |
   @task.branch(task_id={{ task_id | pyrepr }}{% if common %}, {{ common | pyargs }}{% endif %})
   def {{ task_id }}():
-  {{ params.code | indent(4, true) }}
+  {{ params.code | pycode_indent(4) }}
 template_traditional: |
   def _{{ task_id }}(**context):
-  {{ params.code | indent(4, true) }}
+  {{ params.code | pycode_indent(4) }}
   {{ task_id }} = BranchPythonOperator(
       task_id={{ task_id | pyrepr }},
       python_callable=_{{ task_id }},

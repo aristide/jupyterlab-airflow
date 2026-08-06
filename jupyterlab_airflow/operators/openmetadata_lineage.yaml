@@ -47,7 +47,7 @@ params:
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
   def server_config_{{ task_id }}():
-  {{ params.server_config | indent(4, true) }}
+  {{ params.server_config | pycode_indent(4) }}
 
   {{ task_id }} = OpenMetadataLineageOperator(
       task_id={{ task_id | pyrepr }},
@@ -63,7 +63,7 @@ template_traditional: |
   )
 template_taskflow: |
   def server_config_{{ task_id }}():
-  {{ params.server_config | indent(4, true) }}
+  {{ params.server_config | pycode_indent(4) }}
 
   {{ task_id }} = OpenMetadataLineageOperator(
       task_id={{ task_id | pyrepr }},

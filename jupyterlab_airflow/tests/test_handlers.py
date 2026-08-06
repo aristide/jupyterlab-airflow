@@ -133,6 +133,16 @@ async def test_generate_endpoint(jp_fetch):
     assert "@task.bash(task_id='t')" in data["code"]
 
 
+@pytest.mark.parametrize("endpoint", ["dags/trigger", "dags/pause", "generate", "deploy"])
+@pytest.mark.parametrize("payload", ["[1, 2, 3]", '"hello"', "42", "true"])
+async def test_non_object_body_is_a_clean_400(jp_fetch, endpoint, payload):
+    # A valid-JSON-but-non-object body must be a clean 400, not an opaque 500
+    # ("Unhandled error") from a downstream .get() on a list/str/number.
+    with pytest.raises(HTTPClientError) as exc:
+        await jp_fetch("jupyterlab-airflow", endpoint, method="POST", body=payload)
+    assert exc.value.code == 400
+
+
 def _bash_ir(dag_id="ep_dag"):
     return {
         "dag": {"dag_id": dag_id, "schedule": "@daily", "start_date": "2026-01-01"},

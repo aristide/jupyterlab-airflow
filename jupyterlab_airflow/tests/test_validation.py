@@ -48,3 +48,40 @@ def test_dagbag_env_is_secret_scrubbed(monkeypatch):
     assert "AIRFLOW_API_TOKEN" not in env
     assert "AIRFLOW_PASSWORD" not in env
     assert "MY_DB_PASSWORD" not in env
+
+
+def test_dagbag_env_allowlist_drops_cloud_and_app_credentials(monkeypatch):
+    # The env is an allowlist: cloud/app credentials whose names contain none of
+    # the old denylist substrings must NOT reach the (user-code-running)
+    # subprocess. A safe baseline var (PATH) and the AIRFLOW__ config namespace
+    # (minus secrets) are still forwarded so Airflow can import faithfully.
+    for leaky in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "API_KEY",
+        "DATABASE_URL",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AIRFLOW_CONN_MY_DB",
+        "AIRFLOW_VAR_TOPSECRET",
+        "AIRFLOW__CORE__FERNET_KEY",
+    ):
+        monkeypatch.setenv(leaky, "leak")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("AIRFLOW__CORE__PARALLELISM", "32")
+
+    env = validation._scrubbed_env()
+
+    for leaky in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "API_KEY",
+        "DATABASE_URL",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AIRFLOW_CONN_MY_DB",
+        "AIRFLOW_VAR_TOPSECRET",
+        "AIRFLOW__CORE__FERNET_KEY",  # in AIRFLOW__ namespace but a KEY → dropped
+    ):
+        assert leaky not in env, f"{leaky} leaked into the DagBag subprocess env"
+    # Non-secret baseline + non-secret Airflow config survive.
+    assert env.get("PATH") == "/usr/bin"
+    assert env.get("AIRFLOW__CORE__PARALLELISM") == "32"

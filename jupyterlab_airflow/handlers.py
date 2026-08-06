@@ -47,6 +47,23 @@ class _AirflowHandler(APIHandler):
             return user.decode() if isinstance(user, bytes) else user
         return "anonymous"
 
+    def _json_body_object(self):
+        """The POST body as a JSON **object**. ``get_json_body`` already rejects
+        invalid JSON (a 400); this additionally rejects a valid-JSON-but-non-object
+        body (a list/string/number/bool) with a clean 400 instead of letting a
+        later ``.get()`` raise — which, when it runs synchronously in ``post()``
+        before :meth:`respond`, escapes as an opaque Tornado 500. Returns the
+        dict (``{}`` for an empty body), or ``None`` after finishing the 400 — the
+        caller must then ``return``."""
+        body = self.get_json_body()
+        if body is None:
+            return {}
+        if not isinstance(body, dict):
+            self.set_status(400)
+            self.finish(json.dumps({"error": "request body must be a JSON object"}))
+            return None
+        return body
+
     async def respond(
         self,
         fn,
@@ -163,7 +180,9 @@ class GenerateHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        ir = self.get_json_body() or {}
+        ir = self._json_body_object()
+        if ir is None:
+            return
         await self.respond(generate_dag, ir)
 
 
@@ -173,7 +192,9 @@ class ValidateHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        ir = self.get_json_body() or {}
+        ir = self._json_body_object()
+        if ir is None:
+            return
         await self.respond(validate_dag, ir)
 
 
@@ -187,7 +208,9 @@ class DeployHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        ir = self.get_json_body() or {}
+        ir = self._json_body_object()
+        if ir is None:
+            return
         dag_id = (ir.get("dag") or {}).get("dag_id")
         await self.respond(deploy_dag, ir, audit_action="deploy", audit_dag_id=dag_id)
 
@@ -245,7 +268,9 @@ class DagDetailsHandler(_AirflowHandler):
 class DagPauseHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def post(self):
-        body = self.get_json_body() or {}
+        body = self._json_body_object()
+        if body is None:
+            return
         dag_id = body.get("dag_id")
         is_paused = bool(body.get("is_paused"))
         if not dag_id:
@@ -264,7 +289,9 @@ class DagPauseHandler(_AirflowHandler):
 class DagTriggerHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def post(self):
-        body = self.get_json_body() or {}
+        body = self._json_body_object()
+        if body is None:
+            return
         dag_id = body.get("dag_id")
         if not dag_id:
             self.set_status(400)
@@ -308,7 +335,9 @@ class DagRunStateHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        body = self.get_json_body() or {}
+        body = self._json_body_object()
+        if body is None:
+            return
         dag_id = body.get("dag_id")
         run_id = body.get("run_id")
         if not dag_id or not run_id:
@@ -383,7 +412,9 @@ class TaskClearHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        body = self.get_json_body() or {}
+        body = self._json_body_object()
+        if body is None:
+            return
         dag_id = body.get("dag_id")
         if not dag_id:
             self.set_status(400)
@@ -408,7 +439,9 @@ class DagDeleteHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        body = self.get_json_body() or {}
+        body = self._json_body_object()
+        if body is None:
+            return
         dag_id = body.get("dag_id")
         if not dag_id:
             self.set_status(400)
@@ -424,7 +457,9 @@ class DagRollbackHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        body = self.get_json_body() or {}
+        body = self._json_body_object()
+        if body is None:
+            return
         dag_id = body.get("dag_id")
         if not dag_id:
             self.set_status(400)
@@ -451,7 +486,9 @@ class DagRetireHandler(_AirflowHandler):
 
     @tornado.web.authenticated
     async def post(self):
-        body = self.get_json_body() or {}
+        body = self._json_body_object()
+        if body is None:
+            return
         dag_id = body.get("dag_id")
         if not dag_id:
             self.set_status(400)

@@ -45,17 +45,45 @@ print(json.dumps({
 }))
 """
 
-# Env keys whose values must never reach the (potentially user-authored) DagBag
-# subprocess.
-_SECRET_ENV_PREFIXES = ("AIRFLOW_API_", "AIRFLOW_USERNAME", "AIRFLOW_PASSWORD")
-_SECRET_ENV_SUBSTRINGS = ("SECRET", "TOKEN", "PASSWORD", "CONN")
+# The DagBag subprocess imports — and at parse time may execute — user-authored
+# DAG code (the by-design ``code``-widget operators), so its environment is built
+# from an **allowlist**: only a known infrastructure/runtime baseline plus
+# Airflow's own ``AIRFLOW__`` configuration namespace is forwarded; every other
+# variable (cloud/app credentials such as AWS_ACCESS_KEY_ID, API_KEY,
+# DATABASE_URL, GOOGLE_APPLICATION_CREDENTIALS, …) is dropped. A *denylist* alone
+# is unsafe here — any secret whose name we failed to anticipate would leak — so
+# the allowlist is the primary control; the secret denylist below is then applied
+# over whatever the allowlist let through (e.g. an AIRFLOW__CORE__FERNET_KEY) as
+# defence in depth.
+_ENV_ALLOW_EXACT = frozenset(
+    {
+        "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "TERM", "TZ",
+        "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TMPDIR", "TMP", "TEMP",
+        "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "SYSTEMROOT", "WINDIR",
+        "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV", "AIRFLOW_HOME",
+    }
+)
+# ``AIRFLOW__`` (double underscore) is Airflow's own config namespace, needed to
+# import it faithfully; the single-underscore ``AIRFLOW_`` family (AIRFLOW_CONN_*,
+# AIRFLOW_VAR_*, AIRFLOW_API_*, AIRFLOW_USERNAME/PASSWORD) is deliberately NOT
+# allowed — those carry credentials/connections.
+_ENV_ALLOW_PREFIXES = ("PYTHON", "LC_", "AIRFLOW__")
+# Applied *after* the allowlist as defence in depth, so a sensitive value in an
+# otherwise-allowed namespace is still removed.
+_SECRET_ENV_SUBSTRINGS = (
+    "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CONN", "KEY", "CRED",
+    "AUTH", "PRIVATE", "CIPHER", "SALT", "ACCESS",
+)
 
 
 def _scrubbed_env() -> Dict[str, str]:
-    env = {}
+    """Build the DagBag subprocess environment from an allowlist (see note
+    above), then drop anything matching the secret denylist as defence in
+    depth."""
+    env: Dict[str, str] = {}
     for key, value in os.environ.items():
         upper = key.upper()
-        if upper.startswith(_SECRET_ENV_PREFIXES):
+        if upper not in _ENV_ALLOW_EXACT and not upper.startswith(_ENV_ALLOW_PREFIXES):
             continue
         if any(part in upper for part in _SECRET_ENV_SUBSTRINGS):
             continue
