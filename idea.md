@@ -1,0 +1,26 @@
+- [] manages(CRUD) variables  and integration in the flow.
+	- handle default value of variables 
+	- handle the type json with deserializtion
+	- add warning/error when a used variables does not exist in the sets of variables
+	- make sure a variable does not yet exist in airflow when defining it   
+- [] manages(CRUD) connexions  with integration in the flow. 
+	- handle default values
+	- when creating connection check it does not yet exising in airflow 
+	- make sure that if a connection is used it should be present.
+	- should be able to sed default value
+	- handle the item json type
+	- manage error/warning if using connection not existing in the list of defined (local) connection
+	- prevent user to remove a connection from the list when it's still used in the 
+	-  there are two type of connection: remote and local
+		- local is just a way of saying the the connexion belong to the current flow
+		- remote is a connection that was found in airflow at time the current flow was created they can change while the current flow is in edition 
+	- list airflow make a difference between remote connexion (exist in the runnin airflow)
+	- the current flow can not touch (modify, change , delete et) a remote connexion it is consider as another flow defined connection or manually set connexion on airflow
+	- the current flow can only use the remote connection
+	- when checking the current flow make sure to check that all the remote connexion existes
+- [ ] Email operator should be able to handle tls (extra connection)
+- [ ] all operator should be able to handle variables 
+- [ ] kubernetes operator handle:
+	- init containers
+	- volumes  
+	- params 
