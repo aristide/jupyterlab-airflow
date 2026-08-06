@@ -498,6 +498,52 @@ def test_git_target_delete_commits_removal(tmp_path):
     assert _git(tmp_path / "repo", "show", "HEAD:dags/demo.py").returncode != 0
 
 
+def test_git_purge_does_not_mask_wrong_branch_failure(monkeypatch, tmp_path):
+    # An operational (wrong-branch) failure in GitDeployTarget.delete must NOT be
+    # swallowed as a successful purge: the .py is still live, so purge_dag must
+    # raise AND must not go on to purge history (regression for the
+    # purge/retire DeployError-swallow bug — only unsafe filenames are skipped).
+    repo = _init_repo(tmp_path / "repo")
+    t = GitDeployTarget(repo=str(repo), subdir="dags", branch="main")
+    t.write("demo.py", MANAGED)
+    _git(repo, "checkout", "-b", "other")  # move off the configured branch
+
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+
+    with pytest.raises(DeployError, match="configured for branch"):
+        purge_dag("demo", target=t)
+    assert t.exists("demo.py")  # file still live — not falsely removed
+    assert fake.deleted == []  # history NOT purged after the failed file removal
+
+
+def test_retire_does_not_mask_wrong_branch_failure(monkeypatch, tmp_path):
+    # Same guarantee for the rename-retire path (purge=False).
+    repo = _init_repo(tmp_path / "repo")
+    t = GitDeployTarget(repo=str(repo), subdir="dags", branch="main")
+    t.write("demo.py", MANAGED)
+    _git(repo, "checkout", "-b", "other")
+
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+
+    with pytest.raises(DeployError, match="configured for branch"):
+        retire_old_dag("demo", purge=False, target=t)
+    assert t.exists("demo.py")
+    assert fake.paused == []  # not falsely paused after the failed file removal
+
+
+def test_purge_skips_file_for_unmanaged_dag_id_but_purges_history(monkeypatch, tmp_path):
+    # An unsafe/unmanaged dag_id (not a Studio-managed `<id>.py`) skips ONLY the
+    # file step and still purges history — the legitimately-narrowed path.
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    out = purge_dag("weird-name", target=SharedVolumeTarget(str(tmp_path)))
+    assert out["removed_file"] is False
+    assert out["purged_history"] is True
+    assert fake.deleted == ["weird-name"]
+
+
 def test_git_target_requires_a_repo(tmp_path):
     t = GitDeployTarget(repo="", subdir="dags")
     with pytest.raises(DeployError, match="AIRFLOW_GIT_DAGS_REPO"):
