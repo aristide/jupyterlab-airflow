@@ -1,7 +1,7 @@
 # Local dev environment. From the repo root:
 #   docker compose up -d          # pull (first time) + start everything — no image build, ever
 #   docker compose logs -f jupyter
-#   docker compose down           # stop (add -v to also wipe the Airflow metadata DB + JS/Python caches)
+#   docker compose down           # stop (add -v to also wipe the Airflow metadata DB + node_modules)
 #
 # JupyterLab is served automatically at http://localhost:8888/lab — no token.
 # The `jupyter` service runs a pre-built, off-the-shelf Python+Node image
@@ -65,11 +65,20 @@ services:
     entrypoint: ["bash", "/workspace/docker/entrypoint.sh"]
     volumes:
       - .:/workspace
-      # Named volumes persist installs across `docker compose down` + `up` and
-      # keep them on the container's own Linux filesystem instead of the
+      # Named volume so node_modules stays on the container's own Linux
+      # filesystem (avoiding host/container binary mismatches) and persists
+      # across `docker compose down` + `up`, instead of living on the
       # bind-mounted (and, on Windows/macOS, cross-platform) workspace.
+      #
+      # There's deliberately no equivalent volume for the Python side
+      # (/usr/local): tried it, and it broke on the *second* full recreate —
+      # pip's own uninstall/reinstall dance for the editable install collided
+      # with `jupyter labextension develop`'s symlink under the (now
+      # persisted) /usr/local/share/jupyter/labextensions/, failing with a
+      # missing build_log.json. So a full `down` + `up` always reinstalls
+      # Python deps from scratch (a couple of minutes); a plain `restart`
+      # reuses the same container/writable layer and stays fast regardless.
       - node_modules:/workspace/node_modules
-      - pip-site-packages:/usr/local/lib/python3.12/site-packages
       # Optional: point HOST_SSH_DIR (in .env) at your real ~/.ssh to use
       # your own keys for git inside the container. Defaults to an empty,
       # gitignored folder so this is a no-op out of the box.
@@ -95,4 +104,3 @@ services:
 volumes:
   airflow-db:
   node_modules:
-  pip-site-packages:

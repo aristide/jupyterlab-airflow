@@ -21,7 +21,7 @@ JupyterLab is served automatically at http://localhost:8888/lab (no token). Open
 docker compose exec jupyter bash
 ```
 
-Stop everything with `docker compose down` (add `-v` to also delete the `airflow-db`/`node_modules`/`pip-site-packages` volumes for a clean slate).
+Stop everything with `docker compose down` (add `-v` to also delete the `airflow-db`/`node_modules` volumes for a clean slate).
 
 ## How it works — no build, live reload both ways
 
@@ -44,7 +44,9 @@ So:
 - **Dependency changes** (`package.json`, `pyproject.toml`) are picked up automatically on the next `docker compose restart jupyter` / `up`, since steps 1–3 above re-run every start.
 - There is genuinely **nothing to rebuild, ever** — not even after changing this dev environment's own tooling, since it isn't baked into an image.
 
-`node_modules` and the installed Python packages (JupyterLab, this project, etc.) live in named Docker volumes (`node_modules`, `pip-site-packages`) rather than the bind-mounted workspace or the base image's writable layer, so installs stay native to the container's Linux filesystem (avoiding host/container binary mismatches) and persist across `docker compose down` + `up` — a fresh container still starts fast because pip/jlpm find everything already installed and only fetch what changed.
+`node_modules` lives in a named Docker volume rather than the bind-mounted workspace, so JS installs stay native to the container's Linux filesystem (avoiding host/container binary mismatches) and persist across `docker compose down` + `up`.
+
+There's deliberately **no equivalent volume for the Python side** (`/usr/local`). It was tried, and it broke on the *second* full recreate: pip's own uninstall/reinstall dance for the editable install collided with `jupyter labextension develop`'s symlink under the (then-persisted) `/usr/local/share/jupyter/labextensions/`, failing with a missing `build_log.json`. So a full `docker compose down` + `up` always reinstalls Python dependencies from scratch (a couple of minutes, network-bound); a plain `docker compose restart jupyter` reuses the same container and its writable layer, so it stays fast regardless — and that's the common case while iterating.
 
 The container runs as **root** (`user: root`): the base image's default non-root user (`pn`) can't write the root-owned named volumes above without `sudo`, which isn't installed in this image. Root is fine for a disposable local dev container; `jupyter lab` is passed `--allow-root` accordingly.
 
