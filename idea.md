@@ -17,7 +17,7 @@
 	- list airflow make a difference between remote connexion (exist in the runnin airflow)
 	- the current flow can not touch (modify, change , delete et) a remote connexion it is consider as another flow defined connection or manually set connexion on airflow
 	- the current flow can only use the remote connection
-	- when checking the current flow make sure to check that all the remote connexion existes
+	- when checking the  current flow make sure to check that all the remote connexion existes
 - [ ] Email operator should be able to handle tls (extra connection)
 - [ ] all operator should be able to handle variables 
 - [ ] kubernetes operator handle:
