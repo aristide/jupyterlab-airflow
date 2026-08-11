@@ -175,13 +175,20 @@ def test_list_and_verify(tmp_path):
 
 
 class _FakeClient:
-    """Minimal Airflow client stub for rename_preflight / retire_old_dag."""
+    """Minimal Airflow client stub for rename_preflight / retire_old_dag.
 
-    def __init__(self, *, registered=True, runs=None):
+    Models the variables endpoints too (PRD §6.10) because the teardown paths
+    reclaim the variables a flow owns — ``variables`` is ``{key: {key, value,
+    description}}``, where the description carries the ownership marker.
+    """
+
+    def __init__(self, *, registered=True, runs=None, variables=None):
         self._registered = registered
         self._runs = runs or []
         self.paused = []
         self.deleted = []
+        self.variables = dict(variables or {})
+        self.deleted_variables = []
 
     def get_dag(self, dag_id):
         if not self._registered:
@@ -197,6 +204,43 @@ class _FakeClient:
 
     def delete_dag(self, dag_id):
         self.deleted.append(dag_id)
+        return {}
+
+    # -- variables ---------------------------------------------------------
+
+    def list_variables(self, limit=1000, offset=0, key_pattern=None):
+        return {
+            "variables": list(self.variables.values()),
+            "total_entries": len(self.variables),
+        }
+
+    def get_variable(self, key):
+        if key not in self.variables:
+            raise AirflowError("not found", status=404)
+        return self.variables[key]
+
+    def create_variable(self, key, value, description=None):
+        if key in self.variables:
+            raise AirflowError("exists", status=409)
+        self.variables[key] = {
+            "key": key,
+            "value": value,
+            "description": description,
+        }
+        return self.variables[key]
+
+    def update_variable(self, key, value, description=None):
+        entry = self.variables.setdefault(key, {"key": key})
+        entry["value"] = value
+        if description is not None:
+            entry["description"] = description
+        return entry
+
+    def delete_variable(self, key):
+        if key not in self.variables:
+            raise AirflowError("not found", status=404)
+        del self.variables[key]
+        self.deleted_variables.append(key)
         return {}
 
 

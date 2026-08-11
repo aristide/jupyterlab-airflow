@@ -43,6 +43,8 @@ ACTIONS = frozenset(
         "delete",
         "rollback",
         "retire",
+        "variable_set",
+        "variable_delete",
     }
 )
 

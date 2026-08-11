@@ -873,12 +873,38 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
             "dagbag": result["dagbag"],
         }
 
+    # Hard-gate on the flow's variables in the TARGET Airflow (PRD §6.10): a
+    # referenced remote variable that has since vanished, or a flow variable
+    # whose key is already taken by one this flow doesn't own (deploying would
+    # clobber another flow's value). Also a no-op when Airflow is unreachable.
+    from . import variables as variables_mod
+
+    variable_errors = variables_mod.block_errors(ir)
+    if variable_errors:
+        return {
+            "deployed": False,
+            "dag_id": dag_id,
+            "correlation_id": correlation_id,
+            "warnings": [],
+            "errors": variable_errors,
+            "dagbag": result["dagbag"],
+        }
+
     warnings: List[str] = []
     if result["dagbag"].get("status") == "skipped":
         warnings.append(
             "Local DagBag check skipped (Airflow not importable here); "
             "Airflow will validate the DAG when it imports the file."
         )
+
+    # Push this flow's own variables into Airflow (PRD §6.10) *before* writing
+    # the file: deploy unpauses and triggers a run straight after, so a task
+    # must never observe a DAG whose variables aren't there yet. If the write
+    # then fails, the variables linger — but they carry this flow's ownership
+    # marker, so the next undeploy/purge reclaims them. Failures are warnings,
+    # not errors: they are reported without hiding what did land.
+    synced, sync_warnings = variables_mod.sync(ir)
+    warnings.extend(sync_warnings)
 
     filename = _safe_filename(dag_id)
     target.ensure_airflowignore()
@@ -897,6 +923,7 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
         "dag_id": dag_id,
         "correlation_id": correlation_id,
         "backed_up": backed_up,
+        "variables": synced,
         "warnings": warnings,
         "errors": [],
         "dagbag": result["dagbag"],
@@ -919,8 +946,10 @@ def rollback_dag(
 
 def purge_dag(dag_id: str, target: Optional[DeployTarget] = None) -> Dict[str, Any]:
     """Delete a DAG: remove its `.py` **first** (so it isn't re-imported), then
-    purge its history via ``DELETE /api/v2/dags/{id}``. Tolerates a missing file
-    or a DAG that Airflow hasn't recorded yet (404)."""
+    purge its history via ``DELETE /api/v2/dags/{id}``, then drop the variables
+    this flow created (PRD §6.10). Tolerates a missing file or a DAG that Airflow
+    hasn't recorded yet (404)."""
+    from . import variables as variables_mod
     from .client import AirflowError, get_client
 
     target = target or get_deploy_target()
@@ -945,10 +974,16 @@ def purge_dag(dag_id: str, target: Optional[DeployTarget] = None) -> Dict[str, A
         if err.status != 404:
             raise
 
+    # Reclaim the variables this flow created (PRD §6.10). Driven by the
+    # ownership marker, so a variable Studio did not create is never touched —
+    # which is also why this works from `dag_id` alone (purge never sees the IR).
+    removed_variables = variables_mod.purge(dag_id)
+
     return {
         "dag_id": dag_id,
         "removed_file": removed_file,
         "purged_history": purged_history,
+        "removed_variables": removed_variables,
     }
 
 
@@ -1011,6 +1046,7 @@ def retire_old_dag(
     if purge:
         return purge_dag(dag_id, target)
 
+    from . import variables as variables_mod
     from .client import AirflowError, get_client
 
     target = target or get_deploy_target()
@@ -1033,9 +1069,17 @@ def retire_old_dag(
         if err.status != 404:
             raise
 
+    # Release the old id's variables even though the history is kept (PRD §6.10).
+    # They are still stamped with the OLD dag_id, and the rename re-deploys the
+    # same keys under the NEW one — leaving them owned by the retired id would
+    # make that deploy fail the "key already exists, owned by another flow" gate.
+    # The old `.py` is gone, so the retired DAG can no longer read them anyway.
+    removed_variables = variables_mod.purge(dag_id)
+
     return {
         "dag_id": dag_id,
         "removed_file": removed_file,
         "paused": paused,
         "purged_history": False,
+        "removed_variables": removed_variables,
     }

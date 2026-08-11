@@ -11,6 +11,7 @@ blocked.
 """
 
 import threading
+from urllib.parse import quote
 
 import requests
 
@@ -318,6 +319,74 @@ class AirflowClient:
 
     def delete_dag(self, dag_id: str) -> dict:
         return self._request("DELETE", f"/dags/{dag_id}")
+
+    # -- variables (PRD §6.10) ----------------------------------------------
+
+    def list_variables(self, limit: int = 1000, offset: int = 0, key_pattern=None) -> dict:
+        """List Airflow variables → ``{"variables": [...], "total_entries": N}``.
+
+        Each entry is ``{key, value, description, is_encrypted}``. The default
+        page size of the endpoint is 50; we ask for a large page because the
+        editor wants the whole set (to mark a key as already-taken and to list
+        the remote ones a flow may reference).
+        """
+        params: dict = {"limit": limit, "offset": offset}
+        if key_pattern:
+            params["variable_key_pattern"] = key_pattern
+        return self._request("GET", "/variables", params=params)
+
+    def get_variable(self, key: str) -> dict:
+        """Fetch one variable. Raises ``AirflowError`` with ``status=404`` when
+        the key does not exist (callers use the 404-tolerant idiom).
+
+        Note the returned ``value`` may be ``"***"``: Airflow redacts variables
+        whose key looks sensitive (``password``/``secret``/``token``/… ) and any
+        nested sensitive field. Never write a fetched value back — see
+        ``variables.REDACTED``.
+        """
+        return self._request("GET", f"/variables/{_quote_key(key)}")
+
+    def create_variable(self, key: str, value: str, description=None) -> dict:
+        """Create a variable. Airflow answers **409** when the key already
+        exists — it never silently overwrites.
+
+        ``value`` is always sent as a **string**: the endpoint's schema accepts
+        any JSON, but a non-string is stored through Python ``str()``, so a dict
+        would land as a Python repr (``"{'a': 1, 'n': None}"``) rather than JSON.
+        """
+        body: dict = {"key": key, "value": str(value)}
+        if description is not None:
+            body["description"] = description
+        return self._request("POST", "/variables", json=body)
+
+    def update_variable(self, key: str, value: str, description=None) -> dict:
+        """Update an existing variable.
+
+        Airflow's PATCH wants a **complete** body (``key`` + ``value``; a partial
+        body is a 422) and the body ``key`` must equal the path key (else 400) —
+        so this cannot rename a variable; a rename is delete + create. Omitting
+        ``description`` leaves the stored one untouched; passing ``None``
+        explicitly here omits it rather than clearing it.
+        """
+        body: dict = {"key": key, "value": str(value), "description": description}
+        if description is None:
+            del body["description"]
+        return self._request("PATCH", f"/variables/{_quote_key(key)}", json=body)
+
+    def delete_variable(self, key: str) -> dict:
+        """Delete a variable (204/empty on success, 404 when absent)."""
+        return self._request("DELETE", f"/variables/{_quote_key(key)}")
+
+
+def _quote_key(key: str) -> str:
+    """Percent-encode a variable key for use as a URL path segment.
+
+    Airflow accepts almost anything as a variable key — verified against 3.0.2:
+    dots, dashes, spaces, unicode, and notably ``/``, ``%`` and ``#``. Without
+    encoding, those last three would silently corrupt the request path (``#``
+    truncates it into a fragment, a bare ``%`` is an invalid escape).
+    """
+    return quote(str(key), safe="")
 
 
 def _safe_json(resp):

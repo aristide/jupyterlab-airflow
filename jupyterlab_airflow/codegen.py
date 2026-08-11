@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from jinja2 import Environment, Undefined
 
+from . import variables
 from .registry import load_notifiers, load_registry
 
 STUDIO_VERSION = "0.1.0"
@@ -660,7 +661,15 @@ def _render(ir: Dict[str, Any]) -> str:
     traditional = syntax == "traditional"
 
     # Stage 1–3: structural + identifier validation (no code executed).
-    errors = _validate_identifiers(dag_id, nodes) + _validate_dag_fields(dag)
+    # Variable checks are pure IR (declaration shape + used-but-not-declared);
+    # "does it exist in Airflow?" needs the live target and is a deploy gate
+    # instead (`variables.block_errors`, called from `deploy_dag`).
+    errors = (
+        _validate_identifiers(dag_id, nodes)
+        + _validate_dag_fields(dag)
+        + variables.declaration_errors(ir)
+        + variables.undefined_reference_errors(ir)
+    )
     if errors:
         raise CodegenError("; ".join(errors))
 
@@ -753,6 +762,13 @@ def _render(ir: Dict[str, Any]) -> str:
     asset_imports = set(_build_schedule(dag)[1])
     if any(_node_assets(node) for node in nodes):
         asset_imports.add("from airflow.sdk import Asset")
+    # `Variable` only when a code body actually calls `Variable.get` (PRD §6.10).
+    # Jinja references (`{{ var.value.k }}`) need no import — Airflow resolves
+    # them at run time — so a template-only DAG stays byte-identical. The read
+    # itself must stay inside a task: `airflow.sdk.Variable.get` goes through the
+    # Task SDK supervisor and is not a DAG-parse-time API.
+    if variables.uses_variable_api(ir):
+        asset_imports.add("from airflow.sdk import Variable")
     imports = "\n".join(
         _collect_imports(
             used_ops, traditional, tuple(used_notifiers), tuple(sorted(asset_imports))

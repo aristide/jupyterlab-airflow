@@ -344,6 +344,36 @@ Airflow 3 renamed Datasets → **Assets** and lets a DAG be **scheduled on asset
 
 **Asset modelling:** each entry is a single string — an asset **name** or a **URI** — emitted as `Asset('<string>')` (verified against `apache‑airflow‑task‑sdk 1.2.2`: `Asset(name=None, uri=None, …)` requires at least one, and a lone positional sets both `name` and `uri`, the canonical Airflow‑3 form for either a plain name or a URI). `from airflow.sdk import Asset` (and `AssetAny`/`AssetAll`, plus `AssetOrTimeSchedule` from `airflow.timetables.assets` + `CronTriggerTimetable` from `airflow.timetables.trigger` for the combined schedule) is collected **only when** the DAG actually uses it — a DAG with no assets is byte‑unchanged (no stray import). All class/import paths verified against the **exact 3.0.2 target** (airflow‑core 3.0.2 + task‑sdk 1.2.2). Remaining advanced surface — `AssetAlias`, asset **watchers**, `group`/`extra`, the `@asset` decorator, and nested boolean conditions (`AssetAny`/`AssetAll` mixing beyond the flat any/all toggle) — is deferred 🔭 (addable with no IR change). Wireframes **§15.1** (DAG tab schedule‑on‑assets + match‑mode/combine fields) + **§15.3** (NODE‑tab Assets section).
 
+### 6.10 Airflow Variables — flow‑scoped vs. pre‑existing — shipped ✅ (2026‑08‑11)
+
+Tasks need configuration that shouldn't be hard‑coded into operator fields (endpoints, bucket names, tuning knobs). Airflow's answer is **Variables**, and Studio models the flow's relationship to them as **plain data on the IR root** — `ir.variables[]`, alongside `notes` and outside `nodes[]`/`edges[]`, so the task graph, cycle check and codegen are untouched.
+
+**Two scopes, and the split is the whole feature.**
+
+| | `local` — *flow variable* | `remote` — *Airflow variable* |
+| --- | --- | --- |
+| Owned by | this flow | Airflow (another flow, an operator, a secrets backend) |
+| Value lives in | the `.afdag` → pushed to Airflow on deploy | Airflow only — never copied into Studio |
+| Studio may | create · update · delete | **reference only** |
+| On deploy | created/updated in Airflow | verified to still exist |
+| On undeploy/purge | deleted from Airflow | untouched |
+
+**Ownership marker.** Every local variable is written with `description = "[airflow-studio dag_id=<id>] <user text>"`. That marker is what makes the lifecycle both *safe* and *recoverable*: the teardown paths (`purge_dag`, the orphan sweep, the manager's Delete) only receive a **`dag_id`, never the IR**, so ownership must be discoverable from Airflow itself — and it guarantees Studio never deletes or overwrites a variable it did not create. It is also self‑documenting in the Airflow UI, and mirrors the `# airflow-studio: managed` provenance header `deploy.py` stamps into generated `.py` (§8.9).
+
+**Referencing (both syntaxes are tracked).** Jinja in any templated operator field — `{{ var.value.k }}`, `{{ var.json.k }}` (JSON‑deserialized), or `{{ var.value.get('dotted.key') }}` for a key attribute access can't express — and `Variable.get("k")` inside a Python code node. A scanner walks task params (recursively), task code bodies, and DAG `params`/`default_args`, so *"which tasks use this variable?"* is answerable regardless of which form the author chose. That single question powers three behaviours: **used‑but‑not‑declared is a blocking error** (otherwise the DAG parses fine and fails opaquely at run time, inside the task); **a declared‑but‑unused key is a hint**, never an error; and **a variable still referenced cannot be removed** from the tab.
+
+**Codegen.** Jinja references need *no* generated code at all — Airflow resolves them at task run time — so a template‑only flow is byte‑identical to one with no variables. `from airflow.sdk import Variable` is collected **only** when a code body actually calls `Variable.get`. Critically, the read must stay **inside a task**: `airflow.sdk.Variable.get` delegates to the Task SDK supervisor, and a top‑level call fails DAG parsing with `ImportError: cannot import name 'SUPERVISOR_COMMS'` — so Studio never emits a module‑level variable preamble. Verified against the live 3.0.2 target, as is the SDK signature `Variable.get(key, default=…, deserialize_json=…)` — the parameter is **`default`, not** the Airflow‑2 ORM's `default_var`, which raises `TypeError` against `airflow.sdk`.
+
+**Deploy gates (live‑Airflow, mirroring the §6.2.1 provider gate).** A referenced **remote** variable that has since vanished, and a **local** key already taken by a variable this flow does not own (deploying would silently clobber another flow's value), both hard‑block with a plain‑language message *before* anything is written. Both are no‑ops when Airflow is unreachable, so an infrastructure blip never blocks a deploy — `/importErrors` remains the authoritative post‑deploy verdict. Local variables are pushed **before** the file is written, because deploy unpauses and triggers a run immediately after (§6.5.4) and a task must never observe a DAG whose variables aren't there yet.
+
+**Rename interaction.** `retire_old_dag` releases the old id's variables even when the history is *kept* — they are stamped with the old `dag_id`, and the rename re‑deploys the same keys under the new one, so leaving them owned by the retired id would make that deploy fail its own ownership gate.
+
+**Secrets (resolves the §9 tension).** A `local` value is stored **in plaintext in the `.afdag`**, and therefore in git — which is exactly what §9 tells users to avoid. The `remote` scope *is* the sanctioned path: create the secret directly in Airflow (or via a secrets backend) and reference it, so the value never touches Studio. The VARIABLES tab says so inline. Related: Airflow **redacts** values whose key looks sensitive (`password`/`secret`/`token`/`api_key`/… ) plus nested sensitive fields, returning `"***"` over REST — Studio detects that sentinel, shows "hidden", and never writes a fetched value back, since a read‑modify‑write would replace the real secret with three asterisks.
+
+**Server surface.** `GET variables` (the picker), `POST variables/inspect` (reconcile an unsaved IR against the live Airflow), `POST variables/set` / `POST variables/delete` (single‑variable CRUD, **ownership‑enforced server‑side** — a refusal is a `409`, audited as `rejected`, not a 500). Airflow's variable keys are near‑unconstrained (`/`, `%`, `#`, spaces, unicode all accepted), so every key is percent‑encoded into the request path. Audit gains `variable_set`/`variable_delete`. Wireframe **§15.15**.
+
+**Deferred 🔭:** a `widget: variable` operator‑param picker (insert a reference without typing Jinja); variable **usage in notifier params**; and Airflow's bulk `PATCH /variables` endpoint (single‑key CRUD is sufficient at this scale).
+
 ---
 
 ## 7. UX / UI specification
@@ -554,7 +584,7 @@ The 3‑pane document: full‑width top bar, then collapsible **palette « · ca
 │ ✦ Airflow Studio   my_dag.afdag · 4 nodes · ✓ no errors                         │
 │        [ Traditional │▣TaskFlow ]  ≣ Tidy  ↶ ↷  Reset  Save  ⚙ Generate DAG  ▶ Deploy │
 ├──── OPERATORS ───«─┬─────────────── CANVAS ───────────────┬─»── INSPECTOR ───────┤
-│ 🔍 Search…         │                                      │ [DAG] NODE INFO CODE SAVED │
+│ 🔍 Search…         │                                      │ [DAG] NODE INFO VARS NOTIFY CODE SAVED │
 │ ▾ PYTHON / BASH    │        ┌────────────────────┐        │ ─────────────────────│
 │   Bash operator    │        │ PYTHON_BASH        │        │ DAG CONFIGURATION    │
 │   Branch operator  │        │ ▷ Bash operator  ✕ │ ● green│ DAG ID    [ my_dag ] │
@@ -880,6 +910,54 @@ The inspector tab to attach **notifiers** to DAG callbacks (§6.8) — the half 
  └─────────────────────────────────────────────────────────────┘
 ```
 ✅ built (DAG‑level **and** per‑task, §6.8). The **NOTIFY** inspector tab edits `ir.dag.callbacks` (`on_failure`/`on_success` — `sla_miss` is omitted, SLAs were removed in Airflow 3.0); each event lists add/remove notifiers with a registry‑driven RJSF form (per‑field `help`/`ⓘ`). A **notifier registry** (`notifiers/*.yaml` → `GET notifiers`, provider‑gated) ships 5 channels — `Smtp`, `Slack`, `Apprise` (multi‑channel → Teams/WhatsApp), `Discord`, `Opsgenie`; codegen wires `on_*_callback=[…]` into the `@dag`/`with DAG(…)` call with the notifier imports. **Per‑task callbacks ✅ (2026‑06‑22):** the identical editor is extracted into a shared `CallbacksEditor` and reused as a "Notifications" section in the **NODE** tab (§15.1), editing `node.callbacks` over `on_failure`/`on_retry`/`on_success` (`on_retry` is the task‑only event); codegen merges the rendered `on_*_callback=[…]` into the task's trailing kwargs (the `@task(…)` decorator for native ops, the operator call otherwise) and the deploy provider hard‑gate + the error badge scan node callbacks too. The **operator** channels (`EmailOperator`, `SlackAPIPostOperator`, …) ship as palette nodes (§6.2.2).
+
+### 15.15 Studio editor — Variables tab ✅
+
+The **VARS** inspector tab: declare the Airflow variables the flow depends on, and see how each lines up with the live Airflow. Two scopes — `Flow` (this flow owns it) and `Airflow` (it already exists there, read‑only to this flow).
+
+```
+│ … palette …  │ … canvas … │ DAG NODE INFO [VARS] NOTIFY CODE SAVED │
+│              │            │ ─────────────────────────────────────── │
+│              │            │ Variables this flow depends on. A Flow  │
+│              │            │ variable is created on deploy and       │
+│              │            │ removed on undeploy; an Airflow one     │
+│              │            │ already exists — read only.             │
+│              │            │ ⚠ Keep secrets out of flow variables —  │
+│              │            │   values are plaintext in the .afdag.   │
+│              │            │ ┌───────────────────────────────────┐   │
+│              │            │ │ ✕ Used but not defined: api_base  │   │ ← blocks deploy
+│              │            │ └───────────────────────────────────┘   │
+│              │            │ ┌───────────────────────────────────┐   │
+│              │            │ │ [api_base      ] (Flow)        ✕ │   │
+│              │            │ │ Scope [Flow variable ▾] Type[Text▾]│  │
+│              │            │ │ Value [ https://api.example.com  ]│   │
+│              │            │ │ Default […]  Description […]      │   │
+│              │            │ │ {{ var.value.api_base }}          │   │ ← copy into a field
+│              │            │ │ Variable.get("api_base")          │   │ ← copy into code
+│              │            │ │ Used by task 'fetch'              │   │ ← ✕ disabled
+│              │            │ └───────────────────────────────────┘   │
+│              │            │ ┌───────────────────────────────────┐   │
+│              │            │ │ [warehouse_dsn ] (Airflow)     ✕ │   │
+│              │            │ │ Scope [Airflow variable ▾] …      │   │ ← no Value field
+│              │            │ │ {{ var.value.warehouse_dsn }}     │   │
+│              │            │ └───────────────────────────────────┘   │
+│              │            │ ┌───────────────────────────────────┐   │
+│              │            │ │ [tuning_cfg    ] (Flow) (missing) │   │ ← not in Airflow yet
+│              │            │ │ Type [JSON ▾]  {"retries": 3}     │   │
+│              │            │ │ {{ var.json.tuning_cfg }}         │   │ ← var.json, not var.value
+│              │            │ └───────────────────────────────────┘   │
+│              │            │ ＋ Flow variable  ＋ Airflow variable (7)│
+│              │            │ ＋ define “api_base”                    │ ← one-click fix
+└──────────────┴────────────┴─────────────────────────────────────────┘
+
+  “＋ Airflow variable” opens a picker of every variable in the target:
+  ┌──────────────────────────────────────┐
+  │ warehouse_dsn          owned by etl_a │ ← another flow's → reference only
+  │ slack_webhook                         │ ← created outside Studio
+  │ region                                │
+  └──────────────────────────────────────┘
+```
+✅ built (§6.10). Declarations live on **`ir.variables[]`** (IR root, beside `notes` — never a node/edge). Each row shows its **scope badge** (`Flow`/`Airflow`) plus a **`missing`** badge when the key isn't in Airflow (an error for `Airflow` scope, just "not yet created" for `Flow`). The two **reference snippets** are generated per row — `var.json` for a JSON‑typed variable, and the `.get("…")` form when the key isn't a plain identifier — so the author never has to remember the Jinja shape. **Remove is disabled while a variable is still referenced**, with the using tasks named in the tooltip. **Used‑but‑not‑defined** raises a blocking banner with a one‑click *define* button per key. The tab re‑inspects (debounced) against `POST variables/inspect`, and degrades to "Airflow unreachable — the deploy will re‑check" rather than guessing. A value Airflow redacts (sensitive‑looking key) shows as hidden and is never written back.
 
 ---
 

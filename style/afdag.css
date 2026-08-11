@@ -1244,3 +1244,224 @@
 .jp-afdag-note:hover .jp-afdag-note-del {
   opacity: 1;
 }
+
+/* -- VARIABLES tab (PRD §6.10 / §15.15) ---------------------------------- */
+
+.jp-afdag-var-intro {
+  margin: 0 0 8px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-secrets {
+  color: var(--jp-warn-color1);
+}
+
+.jp-afdag-var-secrets code {
+  margin: 0 2px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-alert {
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--jp-warn-color1);
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-alert-error {
+  border-left-color: var(--jp-error-color1);
+}
+
+.jp-afdag-var-empty {
+  margin: 12px 0;
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+  font-style: italic;
+}
+
+.jp-afdag-var-row {
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  background: var(--jp-layout-color1);
+}
+
+.jp-afdag-var-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jp-afdag-var-key {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-afdag-var-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: var(--jp-ui-font-size0);
+  white-space: nowrap;
+}
+
+.jp-afdag-var-badge-local {
+  background: var(--jp-brand-color3);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+.jp-afdag-var-badge-remote {
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-afdag-var-badge-missing {
+  background: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+.jp-afdag-var-remove {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-afdag-var-remove:disabled {
+  color: var(--jp-ui-font-color3);
+  cursor: not-allowed;
+}
+
+.jp-afdag-var-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.jp-afdag-var-wide {
+  grid-column: 1 / -1;
+}
+
+.jp-afdag-var-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-fields input,
+.jp-afdag-var-fields select,
+.jp-afdag-var-fields textarea {
+  padding: 3px 6px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-family: inherit;
+  font-size: var(--jp-ui-font-size1);
+  resize: vertical;
+}
+
+.jp-afdag-var-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.jp-afdag-var-refs code {
+  padding: 2px 5px;
+  border-radius: 2px;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-ui-font-size0);
+  overflow-wrap: anywhere;
+}
+
+.jp-afdag-var-usage {
+  margin-top: 6px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.jp-afdag-var-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-actions button:disabled {
+  color: var(--jp-ui-font-color3);
+  cursor: not-allowed;
+}
+
+.jp-afdag-var-loading {
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-picker {
+  max-height: 220px;
+  margin-top: 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  overflow-y: auto;
+}
+
+.jp-afdag-var-pick {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-bottom: 1px solid var(--jp-border-color2);
+  background: none;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size0);
+  text-align: left;
+}
+
+.jp-afdag-var-pick:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-afdag-var-pick-key {
+  font-family: var(--jp-code-font-family);
+  overflow-wrap: anywhere;
+}
+
+.jp-afdag-var-pick-owner {
+  flex: 0 0 auto;
+  color: var(--jp-ui-font-color3);
+}

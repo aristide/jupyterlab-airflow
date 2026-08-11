@@ -310,3 +310,65 @@ export interface IRetireRes {
   paused?: boolean;
   purged_history: boolean;
 }
+
+// -- Variables (PRD §6.10) --------------------------------------------------
+
+// One variable in the target Airflow, as offered by the "reference an existing
+// Airflow variable" picker. `owner` is the Studio flow that created it (null
+// when it was made outside Studio) — a variable owned by another flow is
+// referenceable but never editable from here.
+export interface IAirflowVariable {
+  key: string;
+  description?: string;
+  owner?: string | null;
+  /** Already declared by the open flow (so the picker can grey it out). */
+  declared?: boolean;
+}
+
+// A flow's declaration reconciled against the live Airflow.
+export interface IVariableStatus {
+  key: string;
+  scope: 'local' | 'remote';
+  value: string;
+  description: string;
+  var_type: 'string' | 'json';
+  default?: string;
+  /** Where the key is referenced ("task 'x'", "DAG params"). Non-empty means
+   * removing it would break the flow, so the UI refuses. */
+  used_by: string[];
+  /** Present in the target Airflow right now. */
+  exists: boolean;
+  /** Present AND created by this flow (so it is safe to modify/delete). */
+  owned: boolean;
+  /** Airflow withheld the value (the key looks sensitive). It cannot be read
+   * back, and must never be written back — that would overwrite the real
+   * secret with three asterisks. */
+  redacted?: boolean;
+  airflow_value?: string | null;
+}
+
+// The VARIABLES tab payload: declarations + what Airflow actually has.
+export interface IVariablesInspectRes {
+  variables: IVariableStatus[];
+  available: IAirflowVariable[];
+  /** Keys used by a task but declared nowhere — the blocking error case. */
+  undefined: string[];
+  /** Declared but referenced nowhere — a hint, never an error. */
+  unused: string[];
+  /** False when Airflow was unreachable; existence checks are then unknown. */
+  airflow_reachable: boolean;
+}
+
+export interface IVariablesListRes {
+  variables: IAirflowVariable[];
+}
+
+export interface IVariableSetRes {
+  key: string;
+  created: boolean;
+}
+
+export interface IVariableDeleteRes {
+  key: string;
+  deleted: boolean;
+}

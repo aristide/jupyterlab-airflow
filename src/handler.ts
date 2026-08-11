@@ -23,7 +23,11 @@ import {
   IRetireRes,
   ITaskInstancesRes,
   ITaskLogsRes,
-  IValidateRes
+  IValidateRes,
+  IVariableDeleteRes,
+  IVariableSetRes,
+  IVariablesInspectRes,
+  IVariablesListRes
 } from './interfaces';
 import { IAfdagIR } from './ir';
 
@@ -245,3 +249,39 @@ export const clearTasks = (
     task_ids: taskIds,
     dry_run: dryRun
   });
+
+/** Every variable in the target Airflow (PRD §6.10) — the picker's source. */
+export const listVariables = (): Promise<IApiRes<IVariablesListRes>> =>
+  GET<IVariablesListRes>('variables');
+
+/** Reconcile a flow's variable declarations against the live Airflow. Takes the
+ * IR because it inspects an unsaved document, not a deployed one. */
+export const inspectVariables = (
+  ir: IAfdagIR
+): Promise<IApiRes<IVariablesInspectRes>> =>
+  POST<IVariablesInspectRes>(
+    'variables/inspect',
+    ir as unknown as Record<string, unknown>
+  );
+
+/** Create/update one variable owned by this flow. The server refuses to touch a
+ * variable the flow does not own (409). */
+export const setVariable = (
+  dagId: string,
+  key: string,
+  value: string,
+  description = ''
+): Promise<IApiRes<IVariableSetRes>> =>
+  POST<IVariableSetRes>('variables/set', {
+    dag_id: dagId,
+    key,
+    value,
+    description
+  });
+
+/** Delete one variable, only when this flow owns it. */
+export const deleteVariable = (
+  dagId: string,
+  key: string
+): Promise<IApiRes<IVariableDeleteRes>> =>
+  POST<IVariableDeleteRes>('variables/delete', { dag_id: dagId, key });

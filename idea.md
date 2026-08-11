@@ -1,4 +1,4 @@
-- [] manages(CRUD) variables  and integration in the flow.
+- [x] manages(CRUD) variables  and integration in the flow. **DONE 2026-08-11** — PRD §6.10 / §15.15 (local vs remote scopes, ownership marker, reference scanning, deploy gates, purge cleanup).
 	- handle default value of variables 
 	- handle the type json with deserializtion
 	- add warning/error when a used variables does not exist in the sets of variables

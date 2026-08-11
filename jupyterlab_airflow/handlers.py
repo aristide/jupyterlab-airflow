@@ -7,6 +7,7 @@ import tornado
 from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
+from . import variables
 from .audit import audit_event
 from .client import AirflowError, get_client
 from .codegen import generate_dag
@@ -107,6 +108,14 @@ class _AirflowHandler(APIHandler):
             _audit("error", audit_dag_id, detail=str(err))
             self.set_status(502)
             self.finish(json.dumps({"error": str(err), "detail": err.detail}))
+            return
+        except variables.VariableOwnershipError as err:
+            # A deliberate refusal (the flow doesn't own that variable), not a
+            # server fault: audit it as `rejected` and answer 409 with the
+            # explanation, rather than a 500 + traceback.
+            _audit("rejected", audit_dag_id, detail=str(err))
+            self.set_status(409)
+            self.finish(json.dumps({"error": str(err)}))
             return
         except Exception as err:  # noqa: BLE001 - surface unexpected errors to UI
             _audit("error", audit_dag_id, detail=str(err))
@@ -450,6 +459,96 @@ class DagDeleteHandler(_AirflowHandler):
         await self.respond(purge_dag, dag_id, audit_action="delete", audit_dag_id=dag_id)
 
 
+class VariablesHandler(_AirflowHandler):
+    """Every variable in the target Airflow (PRD §6.10) — the "pick an existing
+    Airflow variable" list. Each entry carries the flow that owns it (or `null`
+    when it was not created by Studio), so the editor can mark which ones are
+    off-limits to modify."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        def _list():
+            payload = get_client().list_variables()
+            entries = payload.get("variables") or []
+            return {
+                "variables": [
+                    {
+                        "key": entry.get("key"),
+                        "description": variables.strip_marker(entry.get("description")),
+                        "owner": variables.owner_of(entry.get("description")),
+                    }
+                    for entry in entries
+                    if isinstance(entry, dict) and entry.get("key")
+                ]
+            }
+
+        await self.respond(_list)
+
+
+class VariablesInspectHandler(_AirflowHandler):
+    """Reconcile a flow's variable declarations against the live Airflow: what it
+    declares, where each key is used, which are undefined/unused, and every
+    variable available to reference. Takes the IR as the POST body (it is a
+    read-only projection of an unsaved document, hence POST rather than GET)."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        ir = self._json_body_object()
+        if ir is None:
+            return
+        await self.respond(variables.annotated, ir)
+
+
+class VariableSetHandler(_AirflowHandler):
+    """Create/update one variable owned by this flow. Refuses to touch a variable
+    the flow does not own — the server-side half of "a flow may use, but never
+    modify, an Airflow variable it did not create"."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self._json_body_object()
+        if body is None:
+            return
+        dag_id = body.get("dag_id")
+        key = body.get("key")
+        if not dag_id or not key:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id and key required"}))
+            return
+        await self.respond(
+            variables.set_one,
+            dag_id,
+            key,
+            "" if body.get("value") is None else str(body.get("value")),
+            str(body.get("description") or ""),
+            audit_action="variable_set",
+            audit_dag_id=dag_id,
+        )
+
+
+class VariableDeleteHandler(_AirflowHandler):
+    """Delete one variable, only when this flow owns it."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self._json_body_object()
+        if body is None:
+            return
+        dag_id = body.get("dag_id")
+        key = body.get("key")
+        if not dag_id or not key:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id and key required"}))
+            return
+        await self.respond(
+            variables.delete_one,
+            dag_id,
+            key,
+            audit_action="variable_delete",
+            audit_dag_id=dag_id,
+        )
+
+
 class DagRollbackHandler(_AirflowHandler):
     """Roll a deployed DAG back to its previous version (PRD §6.5.5 / §7): restore
     the `.bak` saved on the last overwrite-deploy. File-only; the dag-processor
@@ -535,5 +634,9 @@ def setup_handlers(web_app):
         (_url(base_url, "taskinstances"), TaskInstancesHandler),
         (_url(base_url, "taskinstances/logs"), TaskLogsHandler),
         (_url(base_url, "taskinstances/clear"), TaskClearHandler),
+        (_url(base_url, "variables"), VariablesHandler),
+        (_url(base_url, "variables/inspect"), VariablesInspectHandler),
+        (_url(base_url, "variables/set"), VariableSetHandler),
+        (_url(base_url, "variables/delete"), VariableDeleteHandler),
     ]
     web_app.add_handlers(host_pattern, handlers)

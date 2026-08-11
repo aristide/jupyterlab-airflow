@@ -60,6 +60,7 @@ import {
   AfdagCallbacksValue,
   IAfdagCallbackEntry,
   IAfdagIR,
+  IAfdagVariable,
   SyntaxStyle,
   createEmptyIR,
   dagIdFromPath,
@@ -163,6 +164,10 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     phase: 'idle',
     message: ''
   });
+
+  // Bumped whenever the flow's variables change, so the `currentIR` memo (which
+  // reads them out of `baseRef`) recomputes — a ref is not a reactive dep.
+  const [variablesRev, setVariablesRev] = React.useState(0);
 
   const baseRef = React.useRef<IAfdagIR>(createEmptyIR(''));
   const lastWritten = React.useRef<string>('');
@@ -607,7 +612,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   // The IR projected from the live graph, fed to the CODE preview.
   const currentIR = React.useMemo(
     () => flowToIR(nodes, edges, dag, baseRef.current),
-    [nodes, edges, dag, syntaxStyle]
+    [nodes, edges, dag, syntaxStyle, variablesRev]
   );
 
   // Plain-language translation of a failed import (PRD §7), with a best-effort
@@ -630,6 +635,26 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       }
       baseRef.current = { ...baseRef.current, syntax_style: next };
       setSyntaxStyle(next);
+      commit();
+    },
+    [commit]
+  );
+
+  // Replace the flow's variable declarations (PRD §6.10). Variables live on the
+  // IR *root*, which `flowToIR` carries through from `base` — so, exactly like
+  // the syntax toggle, the write goes into `baseRef` (not React state) and then
+  // commits. `variablesRev` only exists to re-run the `currentIR` memo, since
+  // the ref itself is not a reactive dependency.
+  const onVariablesChange = React.useCallback(
+    (next: IAfdagVariable[]): void => {
+      const base = { ...baseRef.current };
+      if (next.length > 0) {
+        base.variables = next;
+      } else {
+        delete base.variables;
+      }
+      baseRef.current = base;
+      setVariablesRev(rev => rev + 1);
       commit();
     },
     [commit]
@@ -1410,6 +1435,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             onToggle={toggleRight}
             onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
             onNodeChange={updateNode}
+            onVariablesChange={onVariablesChange}
           />
         </div>
       </div>

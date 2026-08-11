@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 import { AfdagFlowNode, IAfdagNodeData } from '../graph';
-import { IAfdagIR } from '../ir';
+import { IAfdagIR, IAfdagVariable } from '../ir';
 import { IStudioServices } from '../services';
 import { CodePanel } from './CodePanel';
 import { DagTab } from './DagTab';
@@ -9,11 +9,13 @@ import { InfoTab } from './InfoTab';
 import { NodeTab } from './NodeTab';
 import { NotificationsTab } from './NotificationsTab';
 import { SavedTab } from './SavedTab';
+import { VariablesTab } from './VariablesTab';
 
 export type InspectorTab =
   | 'dag'
   | 'node'
   | 'info'
+  | 'vars'
   | 'notify'
   | 'code'
   | 'saved';
@@ -33,12 +35,16 @@ export interface IInspectorProps {
   onToggle: () => void;
   onDagChange: (patch: Partial<IAfdagIR['dag']>) => void;
   onNodeChange: (id: string, patch: Partial<IAfdagNodeData>) => void;
+  /** Replace the flow's variable declarations (PRD §6.10). Separate from
+   * `onDagChange` because variables live on the IR root, not on `ir.dag`. */
+  onVariablesChange: (next: IAfdagVariable[]) => void;
 }
 
 const TABS: Array<{ id: InspectorTab; label: string }> = [
   { id: 'dag', label: 'DAG' },
   { id: 'node', label: 'NODE' },
   { id: 'info', label: 'INFO' },
+  { id: 'vars', label: 'VARS' },
   { id: 'notify', label: 'NOTIFY' },
   { id: 'code', label: 'CODE' },
   { id: 'saved', label: 'SAVED' }
@@ -123,6 +129,13 @@ export function Inspector(props: IInspectorProps): JSX.Element {
         />
       )}
       {tab === 'info' && <InfoTab node={props.node} />}
+      {tab === 'vars' && (
+        <VariablesTab
+          ir={props.ir}
+          variables={props.ir.variables ?? []}
+          onVariablesChange={props.onVariablesChange}
+        />
+      )}
       {tab === 'notify' && (
         <NotificationsTab
           key={`${props.reloadKey}:${props.dag.dag_id}`}

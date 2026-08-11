@@ -10,11 +10,49 @@ import pytest
 from tornado.httpclient import HTTPClientError
 
 from jupyterlab_airflow import client as client_module
+from jupyterlab_airflow.client import AirflowError
 
 
 class FakeClient:
+    def __init__(self):
+        # {key: {key, value, description}} — description carries the ownership
+        # marker for Studio-created variables (PRD §6.10).
+        self.variables = {}
+
     def health(self):
         return {"ok": True, "base_url": "http://airflow.test", "username": "admin"}
+
+    # -- variables ---------------------------------------------------------
+
+    def list_variables(self, limit=1000, offset=0, key_pattern=None):
+        return {
+            "variables": list(self.variables.values()),
+            "total_entries": len(self.variables),
+        }
+
+    def get_variable(self, key):
+        if key not in self.variables:
+            raise AirflowError("not found", status=404)
+        return self.variables[key]
+
+    def create_variable(self, key, value, description=None):
+        if key in self.variables:
+            raise AirflowError("exists", status=409)
+        self.variables[key] = {"key": key, "value": value, "description": description}
+        return self.variables[key]
+
+    def update_variable(self, key, value, description=None):
+        entry = self.variables.setdefault(key, {"key": key})
+        entry["value"] = value
+        if description is not None:
+            entry["description"] = description
+        return entry
+
+    def delete_variable(self, key):
+        if key not in self.variables:
+            raise AirflowError("not found", status=404)
+        del self.variables[key]
+        return {}
 
     def trigger_dag(self, dag_id, conf=None, logical_date=None):
         return {"dag_run_id": "manual__1", "dag_id": dag_id, "state": "queued"}

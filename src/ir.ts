@@ -117,6 +117,35 @@ export interface IAfdagNote {
   size?: { width: number; height: number };
 }
 
+/**
+ * A variable this flow depends on (PRD §6.10). Like {@link IAfdagNote}, it lives
+ * OUTSIDE `nodes[]`/`edges[]` — a variable is never a task, an edge, or a cycle.
+ *
+ * `scope` is the whole model:
+ * - `local`  — owned by this flow. `value` is stored here, pushed to Airflow on
+ *   deploy, and deleted again on undeploy/purge. Studio is the source of truth.
+ * - `remote` — already exists in Airflow (another flow, an operator, a secrets
+ *   backend). Read-only: the flow may reference it, never create/modify/delete
+ *   it, and deploy checks it still exists.
+ *
+ * Secrets belong in a `remote` variable — a `local` value is stored in plaintext
+ * in this `.afdag` (and therefore in git). See PRD §9.
+ */
+export interface IAfdagVariable {
+  key: string;
+  scope: 'local' | 'remote';
+  /** The value pushed to Airflow. `local` only — a `remote` value lives in
+   * Airflow and is never copied here. */
+  value?: string;
+  description?: string;
+  /** `json` renders `{{ var.json.key }}` / `deserialize_json=True` and requires
+   * the value to parse as JSON; `string` (the default) is a plain value. */
+  var_type?: 'string' | 'json';
+  /** Optional fallback for a code-node read (`Variable.get(key, default=…)`).
+   * Airflow's SDK parameter is `default` — NOT the ORM's `default_var`. */
+  default?: string;
+}
+
 export interface IAfdagIR {
   schema_version: string;
   provenance: IAfdagProvenance;
@@ -126,6 +155,8 @@ export interface IAfdagIR {
   edges: IAfdagEdge[];
   /** Annotation cards (optional; absent on pre-notes `.afdag` files). */
   notes?: IAfdagNote[];
+  /** Variable declarations (optional; absent on pre-variables `.afdag` files). */
+  variables?: IAfdagVariable[];
 }
 
 export const AFDAG_SCHEMA_VERSION = '1.0';
