@@ -1,9 +1,12 @@
 # Local dev environment. From the repo root:
 #   docker compose up -d          # pull (first time) + start everything — no image build, ever
 #   docker compose logs -f jupyter
-#   docker compose down           # stop (add -v to also wipe the Airflow metadata DB + node_modules)
+#   docker compose down           # stop (add -v to also wipe the Airflow metadata DB + JS/Python caches)
 #
-# JupyterLab is served automatically at http://localhost:8888/lab — no token.
+# JupyterLab is served automatically at http://localhost:8889/lab — no token.
+# (Host ports are offset from the JupyterLab defaults — 8889/9998 instead of
+# 8888/9999 — so this stack can run alongside jupyterlab-db-explorer's, which
+# already claims 8888/9999 for its own jupyter service.)
 # The `jupyter` service runs a pre-built, off-the-shelf Python+Node image
 # (nikolaik/python-nodejs) unmodified — there is no Dockerfile and nothing to
 # build, locally or in CI. Everything project-specific happens at container
@@ -65,28 +68,33 @@ services:
     entrypoint: ["bash", "/workspace/docker/entrypoint.sh"]
     volumes:
       - .:/workspace
-      # Named volume so node_modules stays on the container's own Linux
-      # filesystem (avoiding host/container binary mismatches) and persists
-      # across `docker compose down` + `up`, instead of living on the
-      # bind-mounted (and, on Windows/macOS, cross-platform) workspace.
-      #
-      # There's deliberately no equivalent volume for the Python side
-      # (/usr/local): tried it, and it broke on the *second* full recreate —
-      # pip's own uninstall/reinstall dance for the editable install collided
-      # with `jupyter labextension develop`'s symlink under the (now
-      # persisted) /usr/local/share/jupyter/labextensions/, failing with a
-      # missing build_log.json. So a full `down` + `up` always reinstalls
-      # Python deps from scratch (a couple of minutes); a plain `restart`
-      # reuses the same container/writable layer and stays fast regardless.
+      # Named volumes so installs stay on the container's own Linux filesystem
+      # (avoiding host/container binary mismatches) and persist across
+      # `docker compose down` + `up`, instead of living on the bind-mounted
+      # (and, on Windows/macOS, cross-platform) workspace or the base image's
+      # writable layer.
       - node_modules:/workspace/node_modules
+      # /usr/local (Python packages + their /usr/local/bin launcher scripts,
+      # plus Node/yarn, which the base image also installs under /usr/local).
+      # A first attempt at this broke on the *second* full recreate: pip's
+      # uninstall/reinstall dance for jupyterlab_airflow's own editable
+      # install collided with `jupyter labextension develop`'s symlink under
+      # the persisted /usr/local/share/jupyter/labextensions/. Fixed in
+      # docker/entrypoint.sh, which now wipes that package's own install
+      # footprint before every `pip install -e .` so it's always a clean
+      # install rather than an uninstall+rollback — see the comment there.
+      - usr-local:/usr/local
       # Optional: point HOST_SSH_DIR (in .env) at your real ~/.ssh to use
       # your own keys for git inside the container. Defaults to an empty,
       # gitignored folder so this is a no-op out of the box.
       - ${HOST_SSH_DIR}:/root/.ssh:ro
     working_dir: /workspace
     ports:
-      - 0.0.0.0:8888:8888
-      - 0.0.0.0:9999:9999
+      # Host ports offset from the container's own 8888/9999 (see the top-of-
+      # file note) to avoid colliding with another docker-compose project's
+      # jupyter service on the same host.
+      - 0.0.0.0:8889:8888
+      - 0.0.0.0:9998:9999
     environment:
       # Where the server extension reaches Airflow. Inside the compose network
       # the Airflow API server is at http://airflow:8080.
@@ -104,3 +112,4 @@ services:
 volumes:
   airflow-db:
   node_modules:
+  usr-local:

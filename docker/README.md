@@ -15,13 +15,13 @@ docker compose up -d
 docker compose logs -f jupyter
 ```
 
-JupyterLab is served automatically at http://localhost:8888/lab (no token). Open a shell in the running container with:
+JupyterLab is served automatically at http://localhost:8889/lab (no token — offset from JupyterLab's usual 8888 so this stack can run alongside another docker-compose project's `jupyter` service, e.g. `jupyterlab-db-explorer`, on the same host). Open a shell in the running container with:
 
 ```bash
 docker compose exec jupyter bash
 ```
 
-Stop everything with `docker compose down` (add `-v` to also delete the `airflow-db`/`node_modules` volumes for a clean slate).
+Stop everything with `docker compose down` (add `-v` to also delete the `airflow-db`/`node_modules`/`usr-local` volumes for a clean slate).
 
 ## How it works — no build, live reload both ways
 
@@ -35,7 +35,7 @@ The repo is bind-mounted at `/workspace`. On every `docker compose up` / restart
 4. `jupyter labextension develop . --overwrite` — symlinks the extension into JupyterLab
 5. `jupyter server extension enable jupyterlab_airflow`
 6. `jlpm watch` in the background — recompiles TypeScript and rebuilds the labextension bundle on every source change
-7. `jupyter lab --autoreload` in the foreground on `:8888`
+7. `jupyter lab --autoreload` in the foreground on `:8888` (published on the host as `:8889` — see Services below)
 
 So:
 
@@ -44,18 +44,18 @@ So:
 - **Dependency changes** (`package.json`, `pyproject.toml`) are picked up automatically on the next `docker compose restart jupyter` / `up`, since steps 1–3 above re-run every start.
 - There is genuinely **nothing to rebuild, ever** — not even after changing this dev environment's own tooling, since it isn't baked into an image.
 
-`node_modules` lives in a named Docker volume rather than the bind-mounted workspace, so JS installs stay native to the container's Linux filesystem (avoiding host/container binary mismatches) and persist across `docker compose down` + `up`.
+`node_modules` and `/usr/local` (Python packages, their `bin/` launcher scripts, and Node/yarn) live in named Docker volumes (`node_modules`, `usr-local`) rather than the bind-mounted workspace or the base image's writable layer, so installs stay native to the container's Linux filesystem (avoiding host/container binary mismatches) and persist across `docker compose down` + `up` — a full recreate stays fast because pip/jlpm find everything already installed and only fetch what changed.
 
-There's deliberately **no equivalent volume for the Python side** (`/usr/local`). It was tried, and it broke on the *second* full recreate: pip's own uninstall/reinstall dance for the editable install collided with `jupyter labextension develop`'s symlink under the (then-persisted) `/usr/local/share/jupyter/labextensions/`, failing with a missing `build_log.json`. So a full `docker compose down` + `up` always reinstalls Python dependencies from scratch (a couple of minutes, network-bound); a plain `docker compose restart jupyter` reuses the same container and its writable layer, so it stays fast regardless — and that's the common case while iterating.
+Persisting `/usr/local` needed one specific workaround: `jupyter labextension develop --overwrite` (step 4 above) replaces `/usr/local/share/jupyter/labextensions/jupyterlab-airflow` — a real directory pip's editable install populated — with a **symlink** into the bind-mounted repo. With `/usr/local` persisted, that symlink persists too, so the *next* `pip install -e .` finds an "existing installation" and tries its usual uninstall-then-reinstall dance; its uninstall step expects the real files its RECORD listed and instead finds a symlink to a directory missing one of them (`build_log.json`), crashing mid-rollback. `docker/entrypoint.sh` now wipes `jupyterlab_airflow`'s own install footprint (dist-info, the `.pth` file, that labextensions path, its two `jupyter_*_config.d` JSON files) before every install, so it's always a clean install for that one package — its dependencies are untouched and stay cached. Verified clean across three consecutive full `down`+`up` cycles.
 
 The container runs as **root** (`user: root`): the base image's default non-root user (`pn`) can't write the root-owned named volumes above without `sudo`, which isn't installed in this image. Root is fine for a disposable local dev container; `jupyter lab` is passed `--allow-root` accordingly.
 
 ## Services
 
-| Service | Image                                       | Ports      | Profile     | Purpose                        |
-| ------- | -------------------------------------------- | ---------- | ----------- | ------------------------------- |
-| jupyter | `nikolaik/python-nodejs:python3.12-nodejs22` | 8888, 9999 | (always on) | JupyterLab dev container        |
-| airflow | `apache/airflow:3.0.2`                       | 8081→8080  | airflow     | Local Airflow 3.x (standalone)  |
+| Service | Image                                       | Ports        | Profile     | Purpose                        |
+| ------- | -------------------------------------------- | ------------ | ----------- | ------------------------------- |
+| jupyter | `nikolaik/python-nodejs:python3.12-nodejs22` | 8889→8888, 9998→9999 | (always on) | JupyterLab dev container |
+| airflow | `apache/airflow:3.0.2`                       | 8081→8080    | airflow     | Local Airflow 3.x (standalone)  |
 
 ## Enable / disable Airflow
 
