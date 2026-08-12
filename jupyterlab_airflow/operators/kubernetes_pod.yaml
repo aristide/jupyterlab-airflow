@@ -57,12 +57,21 @@ params:
       help: 'Name of a Kubernetes PriorityClass to set on the pod (affects scheduling and preemption).' }
   - { name: security_context, label: 'Pod security context', type: object, required: false, widget: json,
       help: 'Pod-level security context as a JSON object, e.g. {"runAsUser": 1000, "fsGroup": 2000}.' }
+  - { name: volumes, label: 'Volumes', type: array, required: false, widget: json,
+      help: 'Storage to attach to the pod, as a JSON list in Kubernetes format — e.g. [{"name": "scratch", "emptyDir": {}}] or [{"name": "data", "persistentVolumeClaim": {"claimName": "my-pvc"}}]. Mount them into the container with Volume mounts below. Keys are camelCase, exactly as in a pod manifest.' }
+  - { name: volume_mounts, label: 'Volume mounts', type: array, required: false, widget: json,
+      help: 'Where to mount each volume inside the container, as a JSON list — e.g. [{"name": "scratch", "mountPath": "/scratch"}]. The `name` must match a volume above. Optional per entry: "readOnly", "subPath".' }
+  - { name: init_containers, label: 'Init containers', type: array, required: false, widget: json,
+      help: 'Containers that run to completion before the main one starts — for fetching data, waiting on a dependency, or preparing a volume. A JSON list in Kubernetes format, e.g. [{"name": "fetch", "image": "busybox", "command": ["sh", "-c", "wget -O /scratch/in.csv $URL"], "volumeMounts": [{"name": "scratch", "mountPath": "/scratch"}]}]. If one fails the pod fails and the main container never runs.' }
+  - { name: container_resources, label: 'CPU / memory', type: object, required: false, widget: json,
+      help: 'Resource requests and limits for the main container, as a JSON object — e.g. {"requests": {"cpu": "500m", "memory": "512Mi"}, "limits": {"cpu": "2", "memory": "2Gi"}}. Requests are what the scheduler reserves; exceeding the memory limit gets the pod OOM-killed. Leave blank for the namespace default.' }
   - { name: pod_template_file, label: 'Pod template file', type: string, required: false, widget: text,
       help: 'Path to a pod-template YAML file (in your dags bundle) used as the base pod; the fields above are merged on top. Use it for volumes, affinity, init containers, and other settings without dedicated fields. Pick this OR Pod template (dict) — if both are set the file wins and the dict is ignored.' }
   - { name: pod_template_dict, label: 'Pod template (dict)', type: object, required: false, widget: json,
       help: 'A full or partial pod manifest as a JSON object, used as the base pod (Airflow deserializes and merges it with the fields above). This is how you add volumes, secrets, affinity, tolerations, or container resource requests/limits without writing Python. Put container settings on the first container (the operator merges by position, so name it "base" to match), e.g. {"spec": {"containers": [{"name": "base", "resources": {"limits": {"memory": "1Gi"}}}]}}. Ignored if Pod template file is also set.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
+  {{ pod_setup }}
   {{ task_id }} = KubernetesPodOperator(
       task_id={{ task_id | pyrepr }},
       image={{ params.image | pyrepr }},
@@ -79,11 +88,13 @@ template_traditional: |
       {% if params.service_account_name %}service_account_name={{ params.service_account_name | pyrepr }},{% endif %}
       {% if params.priority_class_name %}priority_class_name={{ params.priority_class_name | pyrepr }},{% endif %}
       {% if params.security_context %}security_context={{ params.security_context | pyrepr }},{% endif %}
+      {% if pod_kwargs %}{{ pod_kwargs | pyargs }},{% endif %}
       {% if params.pod_template_file %}pod_template_file={{ params.pod_template_file | pyrepr }},{% endif %}
       {% if params.pod_template_dict %}pod_template_dict={{ params.pod_template_dict | pyrepr }},{% endif %}
       {{ common | pyargs }}
   )
 template_taskflow: |
+  {{ pod_setup }}
   {{ task_id }} = KubernetesPodOperator(
       task_id={{ task_id | pyrepr }},
       image={{ params.image | pyrepr }},
@@ -100,6 +111,7 @@ template_taskflow: |
       {% if params.service_account_name %}service_account_name={{ params.service_account_name | pyrepr }},{% endif %}
       {% if params.priority_class_name %}priority_class_name={{ params.priority_class_name | pyrepr }},{% endif %}
       {% if params.security_context %}security_context={{ params.security_context | pyrepr }},{% endif %}
+      {% if pod_kwargs %}{{ pod_kwargs | pyargs }},{% endif %}
       {% if params.pod_template_file %}pod_template_file={{ params.pod_template_file | pyrepr }},{% endif %}
       {% if params.pod_template_dict %}pod_template_dict={{ params.pod_template_dict | pyrepr }},{% endif %}
       {{ common | pyargs }}

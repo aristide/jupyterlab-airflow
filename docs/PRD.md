@@ -390,6 +390,25 @@ Two things make connections genuinely different from variables:
 
 **Deferred 🔭:** the `POST /connections/test` endpoint (present but `403` unless `core.test_connection=Enabled`, so it needs an admin opt‑in and a clear "ask your admin" state); a `widget: connection` param picker so a task's conn_id field offers the declared set; and Airflow's bulk `PATCH /connections`.
 
+### 6.12 Kubernetes pod: volumes, init containers, container resources — shipped ✅ (2026‑08‑12)
+
+`KubernetesPodOperator` shipped (§6.2.2 P2) with the pod's *scalar* settings as fields and everything structural pushed into the "Pod template (dict)" escape hatch. Four of those now have real fields, each taking **standard Kubernetes JSON** — paste it straight out of a pod manifest, no Python and no `k8s` imports: **`volumes`**, **`volume_mounts`**, **`init_containers`**, and **`container_resources`** (CPU/memory requests & limits).
+
+**Why this needed codegen work rather than a YAML edit.** Verified against the live provider: `volumes` and `volume_mounts` **reject plain dicts at DAG‑parse time** (the operator runs them through `_convert_kube_model_object` and raises `Expected V1Volume, got dict`), while `init_containers` and `container_resources` accept dicts but are stored **completely unvalidated** — a typo rides all the way to the API server. So Studio emits, per pod task, **one** call to Airflow's public `PodGenerator.deserialize_model_dict` and reads the typed objects back off it:
+
+```python
+_pod_train = PodGenerator.deserialize_model_dict({'spec': {'containers': [{'name': 'base', …}], 'volumes': […], 'initContainers': […]}}).spec
+train = KubernetesPodOperator(…, volumes=_pod_train.volumes, volume_mounts=_pod_train.containers[0].volume_mounts, …)
+```
+
+The container is named `base` to match the one the operator creates. The `PodGenerator` import is collected **only when a pod task actually sets one of these fields**, so an existing pod DAG is byte‑identical to before (the same rule as `Asset`/`Variable`). Both template families emit it, and the generated DAG was **executed inside the real Airflow container** to confirm it builds a correct pod spec — volumes, PVC claim name, init container, read‑only mount and both resource maps all land exactly as entered.
+
+**The silent‑drop guard (`podspec.py`).** The deserializer reads **camelCase only**: a snake_case or misspelled *optional* key is discarded **without any error** — `{"name": "scratch", "empty_dir": {}}` yields a volume with no source at all, and the failure then appears as a baffling pod‑admission error nowhere near the field the user typed. Required fields do raise, but only those. So the JSON is linted before it is emitted: shape (list vs object), the genuinely required keys (`name`; `mountPath`; `image`), and any key that looks snake_case — reported as *"volumes uses 'empty_dir', but Kubernetes JSON is camelCase — did you mean 'emptyDir'?"*. The lint deliberately **does not descend into free‑form maps** (`limits`/`requests`/`labels`/`annotations`/`nodeSelector`/…), whose keys are user data: `nvidia.com/gpu`, `hugepages-2Mi` and a custom `my_custom_resource` are all legal and must not be flagged. It is schema‑free by necessity — the Jupyter server has no `kubernetes` package to introspect (only the Airflow side does), so it checks structure and key style rather than pretending to know every field of every type.
+
+**Two footguns avoided.** The parameter is **`container_resources`**; `resources` is inherited from `BaseOperator` and means Airflow's *scheduler* resource concept, so emitting it would silently leave the container's k8s resources unset (asserted against in the tests). And these fields are emitted as **explicit operator args, not merged into `pod_template_dict`** — `pod_template_file` beats `pod_template_dict` in the operator's `if/elif`, so a user with a template file would have had their form‑entered volumes silently ignored.
+
+**Still on the escape hatch:** secrets, affinity, tolerations (the last two do accept plain camelCase dicts, so they are a cheap follow‑up). Wireframe **§15.3** (the NODE tab renders these as JSON fields from the registry, so no new screen).
+
 ---
 
 ## 7. UX / UI specification

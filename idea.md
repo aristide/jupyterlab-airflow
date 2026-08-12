@@ -20,7 +20,7 @@
 	- when checking the  current flow make sure to check that all the remote connexion existes
 - [ ] Email operator should be able to handle tls (extra connection)
 - [ ] all operator should be able to handle variables 
-- [ ] kubernetes operator handle:
+- [x] kubernetes operator handle: **DONE 2026-08-12** — PRD §6.12 (volumes, volume mounts, init containers, container CPU/memory; raw K8s JSON deserialized via PodGenerator, with a camelCase lint).
 	- init containers
 	- volumes  
 	- params 

@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from jinja2 import Environment, Undefined
 
-from . import connections, variables
+from . import connections, podspec, variables
 from .registry import load_notifiers, load_registry
 
 STUDIO_VERSION = "0.1.0"
@@ -189,6 +189,36 @@ def _pycode_indent(code: str, width: int = 4) -> str:
         else:
             out.append(pad + line)
     return "\n".join(out)
+
+
+def _node_pod_spec(node: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Render a Kubernetes pod task's raw-K8s-JSON fields (PRD §6.12).
+
+    Returns ``(setup_line, kwargs)``: a statement that deserializes the node's
+    manifest fragment once, and the operator kwargs that read the typed objects
+    back off it — e.g.::
+
+        _pod_run = PodGenerator.deserialize_model_dict({...}).spec
+        run = KubernetesPodOperator(..., volumes=_pod_run.volumes, ...)
+
+    Going through the deserializer is not a stylistic choice: ``volumes`` and
+    ``volume_mounts`` **reject plain dicts** at DAG-parse time (the operator
+    converts them and raises ``Expected V1Volume, got dict``), while
+    ``init_containers``/``container_resources`` accept dicts but skip validation
+    entirely. One public call gives real model objects for all four. Both are
+    empty for a node that sets none of these fields, so such a DAG is
+    byte-identical to one generated before the feature.
+    """
+    fields = podspec.node_fields(node)
+    if not fields:
+        return "", {}
+    var = f"_pod_{node['task_id']}"
+    setup = (
+        f"{var} = PodGenerator.deserialize_model_dict("
+        f"{_pyrepr(podspec.manifest_for(node))}).spec"
+    )
+    kwargs = {name: _Raw(f"{var}.{path}") for name, path in podspec.accessors(node)}
+    return setup, kwargs
 
 
 def _make_env() -> Environment:
@@ -675,6 +705,7 @@ def _render(ir: Dict[str, Any]) -> str:
         + variables.declaration_errors(ir)
         + variables.undefined_reference_errors(ir)
         + connections.declaration_errors(ir)
+        + podspec.validation_errors(ir)
     )
     if errors:
         raise CodegenError("; ".join(errors))
@@ -716,6 +747,7 @@ def _render(ir: Dict[str, Any]) -> str:
         used_notifiers.extend(node_cb_notifiers)
         # Per-task asset inlets/outlets (PRD §6.9) ride the same trailing-kwargs
         # slot as callbacks (merged into `common` after the declared params).
+        pod_setup, pod_kwargs = _node_pod_spec(node)
         rendered = env.from_string(template).render(
             task_id=node["task_id"],
             params=node.get("params") or {},
@@ -724,6 +756,10 @@ def _render(ir: Dict[str, Any]) -> str:
                 **node_cb_kwargs,
                 **_node_assets(node),
             },
+            # Kubernetes pod fields supplied as raw K8s JSON (PRD §6.12). Empty
+            # for every other operator, so their templates are unaffected.
+            pod_setup=pod_setup,
+            pod_kwargs=pod_kwargs,
         )
         is_operator = op.get("taskflow", "native") == "operator"
         if not _has_code_param(op):
@@ -775,6 +811,12 @@ def _render(ir: Dict[str, Any]) -> str:
     # Task SDK supervisor and is not a DAG-parse-time API.
     if variables.uses_variable_api(ir):
         asset_imports.add("from airflow.sdk import Variable")
+    # Only when a pod task supplies raw K8s JSON (PRD §6.12) — a pod task
+    # without those fields emits no extra import.
+    if podspec.uses_pod_spec(ir):
+        asset_imports.add(
+            "from airflow.providers.cncf.kubernetes.pod_generator import PodGenerator"
+        )
     imports = "\n".join(
         _collect_imports(
             used_ops, traditional, tuple(used_notifiers), tuple(sorted(asset_imports))
