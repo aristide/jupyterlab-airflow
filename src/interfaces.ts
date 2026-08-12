@@ -405,6 +405,8 @@ export interface IConnectionStatus {
   /** Airflow withheld the password (it masks secrets on read). */
   redacted?: boolean;
   airflow_conn_type?: string | null;
+  /** Advisory notes about this connection's `extra` (never blocking). */
+  hints?: string[];
 }
 
 // A conn_id a task uses that the flow does not declare. A warning, never a
@@ -423,6 +425,8 @@ export interface IConnectionsInspectRes {
   undeclared: IUndeclaredConnection[];
   unused: string[];
   airflow_reachable: boolean;
+  /** Curated `extra` metadata for the declared connection types (PRD §6.13). */
+  type_hints?: Record<string, IConnTypeHints>;
 }
 
 export interface IConnectionsListRes {
@@ -437,4 +441,36 @@ export interface IConnectionSetRes {
 export interface IConnectionDeleteRes {
   conn_id: string;
   deleted: boolean;
+}
+
+// -- Connection-type extra hints (PRD §6.13) --------------------------------
+
+// One `extra` key a known connection type understands. Curated server-side:
+// Airflow's REST API does not expose the per-provider connection form metadata,
+// so without this an `extra` is an opaque JSON box whose keys fail silently.
+export interface IConnExtraField {
+  key: string;
+  type: 'boolean' | 'integer' | 'string';
+  label: string;
+  help: string;
+  default?: unknown;
+  /** Allowed values; anything else is rejected by the provider at run time. */
+  enum?: string[];
+}
+
+// A one-click starting point for a common setup of this connection type.
+export interface IConnPreset {
+  id: string;
+  label: string;
+  help: string;
+  port?: number;
+  extra: Record<string, unknown>;
+}
+
+export interface IConnTypeHints {
+  conn_type: string;
+  label: string;
+  intro: string;
+  fields: IConnExtraField[];
+  presets: IConnPreset[];
 }

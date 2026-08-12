@@ -1,7 +1,12 @@
 import * as React from 'react';
 
 import { inspectConnections } from '../handler';
-import { IConnectionStatus, IConnectionsInspectRes } from '../interfaces';
+import {
+  IConnPreset,
+  IConnTypeHints,
+  IConnectionStatus,
+  IConnectionsInspectRes
+} from '../interfaces';
 import { IAfdagConnection, IAfdagIR } from '../ir';
 
 export interface IConnectionsTabProps {
@@ -89,13 +94,89 @@ function ScopeBadges(props: {
   );
 }
 
+/** Merge a preset's keys into whatever the user already has in `extra`, so
+ * applying one never silently discards their other settings. */
+function applyPreset(extra: string | undefined, preset: IConnPreset): string {
+  let current: Record<string, unknown> = {};
+  if (extra && extra.trim()) {
+    try {
+      const parsed = JSON.parse(extra);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        current = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Unparseable JSON is replaced rather than merged into — the preset is
+      // the user asking for a known-good starting point.
+    }
+  }
+  return JSON.stringify({ ...current, ...preset.extra }, null, 2);
+}
+
+/** The `extra` helper shown for a connection type Studio knows about: what the
+ * keys mean, and one-click presets for the common setups. Without it the Extra
+ * box is opaque JSON whose keys fail silently when misspelled. */
+function ExtraHelp(props: {
+  hints: IConnTypeHints;
+  entry: IAfdagConnection;
+  onChange: (patch: Partial<IAfdagConnection>) => void;
+}): JSX.Element {
+  const { hints, entry, onChange } = props;
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="jp-afdag-conn-extrahelp">
+      <p className="jp-afdag-conn-extraintro">{hints.intro}</p>
+      <div className="jp-afdag-var-actions">
+        {hints.presets.map(preset => (
+          <button
+            key={preset.id}
+            className="jp-afdag-conn-declare"
+            title={preset.help}
+            onClick={() =>
+              onChange({
+                extra: applyPreset(entry.extra, preset),
+                ...(preset.port ? { port: String(preset.port) } : {})
+              })
+            }
+          >
+            {preset.label}
+          </button>
+        ))}
+        <button
+          className="jp-afdag-conn-declare"
+          onClick={() => setOpen(v => !v)}
+          aria-expanded={open}
+        >
+          {open ? 'Hide' : 'Show'} all {hints.label} settings
+        </button>
+      </div>
+      {open && (
+        <dl className="jp-afdag-conn-keys">
+          {hints.fields.map(field => (
+            <React.Fragment key={field.key}>
+              <dt>
+                <code>{field.key}</code>
+                {field.default !== undefined && (
+                  <em> · default {JSON.stringify(field.default)}</em>
+                )}
+                {field.enum && <em> · {field.enum.join(' | ')}</em>}
+              </dt>
+              <dd>{field.help}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
 function ConnectionRow(props: {
   entry: IAfdagConnection;
   status?: IConnectionStatus;
+  typeHints?: IConnTypeHints;
   onChange: (patch: Partial<IAfdagConnection>) => void;
   onRemove: () => void;
 }): JSX.Element {
-  const { entry, status, onChange, onRemove } = props;
+  const { entry, status, typeHints, onChange, onRemove } = props;
   const usedBy = status?.used_by ?? [];
   const inUse = usedBy.length > 0;
   const remote = entry.scope === 'remote';
@@ -194,12 +275,21 @@ function ConnectionRow(props: {
             <label className="jp-afdag-var-wide">
               <span>Extra (JSON)</span>
               <textarea
-                rows={2}
+                rows={typeHints ? 4 : 2}
                 value={entry.extra ?? ''}
                 placeholder='{"sslmode": "require"}'
                 onChange={e => onChange({ extra: e.target.value })}
               />
             </label>
+            {typeHints && (
+              <div className="jp-afdag-var-wide">
+                <ExtraHelp
+                  hints={typeHints}
+                  entry={entry}
+                  onChange={onChange}
+                />
+              </div>
+            )}
           </>
         )}
 
@@ -212,6 +302,11 @@ function ConnectionRow(props: {
         </label>
       </div>
 
+      {(status?.hints ?? []).map(hint => (
+        <div key={hint} className="jp-afdag-conn-hint">
+          {hint}
+        </div>
+      ))}
       {inUse && (
         <div className="jp-afdag-var-usage">Used by {usedBy.join(', ')}</div>
       )}
@@ -368,6 +463,9 @@ export function ConnectionsTab(props: IConnectionsTabProps): JSX.Element {
           key={index}
           entry={entry}
           status={statusFor(entry.conn_id)}
+          typeHints={
+            inspect?.type_hints?.[(entry.conn_type ?? '').trim().toLowerCase()]
+          }
           onChange={patch => update(index, patch)}
           onRemove={() => remove(index)}
         />

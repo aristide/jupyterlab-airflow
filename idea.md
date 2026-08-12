@@ -18,7 +18,7 @@
 	- the current flow can not touch (modify, change , delete et) a remote connexion it is consider as another flow defined connection or manually set connexion on airflow
 	- the current flow can only use the remote connection
 	- when checking the  current flow make sure to check that all the remote connexion existes
-- [ ] Email operator should be able to handle tls (extra connection)
+- [x] Email operator should be able to handle tls (extra connection) **DONE 2026-08-12** — PRD §6.13. EmailOperator has no TLS params; TLS lives on the SMTP connection extra, so the CONNECTIONS tab now ships curated SMTP field help, one-click STARTTLS/SSL/plain presets, and ssl_context validation.
 - [ ] all operator should be able to handle variables 
 - [x] kubernetes operator handle: **DONE 2026-08-12** — PRD §6.12 (volumes, volume mounts, init containers, container CPU/memory; raw K8s JSON deserialized via PodGenerator, with a camelCase lint).
 	- init containers

@@ -1511,3 +1511,51 @@
   color: var(--jp-ui-font-color3);
   font-style: normal;
 }
+
+/* -- connection-type extra help (PRD §6.13) ------------------------------ */
+
+.jp-afdag-conn-extrahelp {
+  margin-top: 2px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--jp-brand-color1);
+  background: var(--jp-layout-color2);
+}
+
+.jp-afdag-conn-extraintro {
+  margin: 0 0 6px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-conn-keys {
+  margin: 8px 0 0;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-conn-keys dt {
+  margin-top: 6px;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-afdag-conn-keys dt code {
+  font-family: var(--jp-code-font-family);
+}
+
+.jp-afdag-conn-keys dt em {
+  color: var(--jp-ui-font-color3);
+  font-style: normal;
+}
+
+.jp-afdag-conn-keys dd {
+  margin: 2px 0 0;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-afdag-conn-hint {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--jp-warn-color1);
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+}

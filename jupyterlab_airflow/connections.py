@@ -39,6 +39,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from . import conn_types
 from .managed import (  # noqa: F401  (re-exported: shared ownership protocol)
     compose_description,
     is_owned_by,
@@ -335,6 +336,14 @@ def declaration_errors(ir: Dict[str, Any]) -> List[str]:
                             "valid JSON but not an object — Airflow needs "
                             'something like {"sslmode": "require"}.'
                         )
+                    else:
+                        # Values a known provider outright rejects — e.g. an
+                        # SMTP `ssl_context` other than default/none, which
+                        # raises only when the mail is actually sent (PRD §6.13).
+                        for detail in conn_types.extra_errors(
+                            entry.get("conn_type"), parsed
+                        ):
+                            errors.append(f"Connection '{conn_id}': {detail}")
     return errors
 
 
@@ -612,6 +621,16 @@ def annotated(ir: Dict[str, Any], client=None) -> Dict[str, Any]:
     for entry in declared(ir):
         conn_id = entry["conn_id"]
         existing = index.get(conn_id)
+        # Advisory notes for a known connection type (PRD §6.13) — e.g. the SMTP
+        # TLS defaults, which are counterintuitive enough to be worth saying out
+        # loud on the connection that configures them.
+        parsed_extra: Any = {}
+        raw_extra = entry.get("extra")
+        if isinstance(raw_extra, str) and raw_extra.strip():
+            try:
+                parsed_extra = json.loads(raw_extra)
+            except ValueError:
+                parsed_extra = {}
         entries.append(
             {
                 **entry,
@@ -620,6 +639,7 @@ def annotated(ir: Dict[str, Any], client=None) -> Dict[str, Any]:
                 "owned": is_owned_by((existing or {}).get("description"), dag_id),
                 "redacted": is_redacted((existing or {}).get("password")),
                 "airflow_conn_type": (existing or {}).get("conn_type"),
+                "hints": conn_types.extra_hints(entry.get("conn_type"), parsed_extra),
             }
         )
 
@@ -644,4 +664,15 @@ def annotated(ir: Dict[str, Any], client=None) -> Dict[str, Any]:
         "undeclared": pending,
         "unused": unused_declarations(ir),
         "airflow_reachable": reachable,
+        # Curated per-type `extra` metadata (PRD §6.13) so the tab can offer
+        # real field help and presets instead of an opaque JSON box. Keyed by
+        # conn_type; only the types actually declared here are sent.
+        "type_hints": {
+            conn_type: conn_types.hints_for(conn_type)
+            for conn_type in {
+                str(entry.get("conn_type") or "").strip().lower()
+                for entry in declared(ir)
+            }
+            if conn_types.hints_for(conn_type)
+        },
     }

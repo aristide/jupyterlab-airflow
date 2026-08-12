@@ -18,5 +18,5 @@ params:
   - { name: from_email, label: 'From', type: string, required: false, widget: text,
       help: 'Sender address. Defaults to the SMTP connection''s configured sender.' }
   - { name: smtp_conn_id, label: 'SMTP connection', type: string, required: false, widget: text, default: smtp_default,
-      help: 'The Airflow SMTP Connection. Defaults to "smtp_default".' }
+      help: 'The Airflow SMTP Connection. The SMTP server, port, credentials AND encryption all come from that connection — EmailOperator has no TLS settings of its own. Define it on the CONNECTIONS tab, where the SMTP type offers one-click STARTTLS (587) / implicit SSL (465) / no-encryption presets. Note both encryption modes are ON by default and implicit SSL wins, so a STARTTLS server needs `disable_ssl: true` in the connection''s Extra. Defaults to "smtp_default".' }
 template: 'SmtpNotifier(to={{ params.to | pyrepr }}{% if params.subject %}, subject={{ params.subject | pyrepr }}{% endif %}{% if params.from_email %}, from_email={{ params.from_email | pyrepr }}{% endif %}{% if params.smtp_conn_id %}, smtp_conn_id={{ params.smtp_conn_id | pyrepr }}{% endif %})'

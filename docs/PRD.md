@@ -409,6 +409,27 @@ The container is named `base` to match the one the operator creates. The `PodGen
 
 **Still on the escape hatch:** secrets, affinity, tolerations (the last two do accept plain camelCase dicts, so they are a cheap follow‑up). Wireframe **§15.3** (the NODE tab renders these as JSON fields from the registry, so no new screen).
 
+### 6.13 Connection‑type `extra` hints — SMTP/TLS first — shipped ✅ (2026‑08‑12)
+
+`EmailOperator` has **no TLS parameters**: encryption is configured entirely on the SMTP *connection*, in its untyped `extra` JSON. In the Airflow UI each provider contributes form widgets for its own `extra` keys; over the **REST API — all Studio has — that metadata is not exposed**, so the CONNECTIONS tab's Extra box was an opaque blob whose keys fail *silently* when misspelled.
+
+So `conn_types.py` is a small, deliberately **curated** registry of that metadata, starting with SMTP because that is where §6.13's driving requirement (email TLS) actually lives. Three things come out of it:
+
+- **Presets.** One‑click *STARTTLS — port 587* / *implicit SSL/TLS — port 465* / *no encryption — port 25 (dev only)*, each writing the complete `extra` **and** the matching port. Applying one **merges** into whatever the user already has rather than replacing it.
+- **Field help.** Every key the SMTP hook reads (`disable_ssl`, `disable_tls`, `ssl_context`, `timeout`, `retry_limit`, `from_email`, `subject_template`, `html_content_template`) with its default and meaning, expandable inline.
+- **Checks.** `ssl_context` is a hard **error** unless it is `default` or `none` — the hook raises `RuntimeError` for anything else, and it does so *when the mail is sent*, so the typo would otherwise surface in a task log long after the DAG parsed. An unrecognised key is a **hint**, never an error, because a provider may read keys this registry doesn't list.
+
+**The trap this exists to defuse.** Read straight out of `SmtpHook` on the 3.0.2 provider:
+
+```python
+smtp_starttls = not extra.get("disable_tls", False)   # STARTTLS on by default
+use_ssl       = not extra.get("disable_ssl", False)   # implicit SSL ALSO on by default
+```
+
+Both encryption modes default **on**, and `use_ssl` **wins** — `_build_client` picks `smtplib.SMTP_SSL` whenever it is true and only calls `starttls()` on the plain‑SMTP branch. So the single most common setup, STARTTLS on port 587, requires the counterintuitive `{"disable_ssl": true}`; without it Airflow attempts implicit SSL against a STARTTLS port and simply hangs. A connection whose `extra` leaves `disable_ssl` unset therefore carries a standing note saying exactly that. The `email` operator's and `smtp` notifier's `conn_id` help now say the same and point at the CONNECTIONS tab, since neither has a TLS field of its own to offer.
+
+The registry is data‑only and keyed by `conn_type`, so adding a type (Postgres `sslmode`, HTTP headers, …) is a data change; only the types a flow actually declares are sent to the editor. Wireframe **§15.16** (the helper renders inside the existing connection row).
+
 ---
 
 ## 7. UX / UI specification
@@ -1036,6 +1057,8 @@ The **CONNS** inspector tab: declare the Airflow connections the flow depends on
   │ slack_api_default · slack                  │ ← created outside Studio
   └────────────────────────────────────────────┘
 ```
+**Connection‑type helper ✅ (§6.13).** When the type is one Studio curates (SMTP today), the Extra box grows an inline helper: one‑click **presets** (*STARTTLS 587* · *implicit SSL 465* · *no encryption 25*) that write the whole `extra` **and** the port, merging into what's already there; an expandable list of every key the provider reads with its default; and a standing note when the configuration hits a known trap — e.g. *"Implicit SSL is on (the default) … if your server is STARTTLS on port 587, set disable_ssl to true — otherwise the connection hangs."* This is how **email TLS** is configured, since `EmailOperator` has no TLS setting of its own.
+
 ✅ built (§6.11). A **flow** connection shows the full field set (type/host/port/login/password/schema/Extra); an **Airflow** one shows only id + description, because its settings live in Airflow and are never copied into the `.afdag`. Badges mirror §15.15 (`Flow`/`Airflow` + `missing`/`not yet created`). **Remove is disabled while the connection is still referenced**, and the tooltip names the task *and the exact param* (`task 'load' (postgres_conn_id)`) — the registry-driven scan makes that precise. The **“used but not declared”** panel is a warning with a one-click *declare* (pre-set to `Airflow` scope when the id already exists there, `Flow` when it doesn't), never a deploy blocker — flows predating this feature keep working. A password Airflow masks on read is shown as hidden and never written back.
 
 ---

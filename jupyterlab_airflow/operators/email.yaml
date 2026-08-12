@@ -6,8 +6,9 @@ airflow_min_version: '3.0'
 description: >-
   Sends an email as a task — e.g. "the report is ready" with a link, or a summary
   at the end of a pipeline. In Airflow 3 EmailOperator lives in the smtp provider;
-  the SMTP server comes from an SMTP Connection. (To alert only on failure, use a
-  notifier on the DAG instead — that's a callback, not a task.)
+  the SMTP server — and its TLS settings — come from an SMTP Connection, not from
+  this task. (To alert only on failure, use a notifier on the DAG instead — that's a
+  callback, not a task.)
 docs_url: https://airflow.apache.org/docs/apache-airflow-providers-smtp/stable/operators/email.html
 example: |
   to:            data-eng@example.com
@@ -25,7 +26,7 @@ params:
   - { name: html_content, label: 'Body (HTML)', type: string, required: true, widget: textarea,
       help: 'The email body as HTML, e.g. `<p>The daily load completed.</p>`.' }
   - { name: conn_id, label: 'SMTP connection', type: string, required: false, widget: text, default: smtp_default,
-      help: 'The Airflow SMTP Connection (server, port, credentials). Defaults to `smtp_default`.' }
+      help: 'The Airflow SMTP Connection. The SMTP server, port, credentials AND encryption all come from that connection — EmailOperator has no TLS settings of its own. Define it on the CONNECTIONS tab, where the SMTP type offers one-click STARTTLS (587) / implicit SSL (465) / no-encryption presets. Note both encryption modes are ON by default and implicit SSL wins, so a STARTTLS server needs `disable_ssl: true` in the connection''s Extra. Defaults to `smtp_default`.' }
 common_params: [retries, retry_delay, depends_on_past]
 template_traditional: |
   {{ task_id }} = EmailOperator(
