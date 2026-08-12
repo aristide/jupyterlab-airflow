@@ -643,6 +643,7 @@ The 3‑pane document: full‑width top bar, then collapsible **palette « · ca
 ┌───────────────────────────────────────────────────────────────────────────────┐
 │ ✦ Airflow Studio   my_dag.afdag · 4 nodes · ✓ no errors                         │
 │        [ Traditional │▣TaskFlow ]  ≣ Tidy  ↶ ↷  Reset  Save  ⚙ Generate DAG  ▶ Deploy │
+│   (the dag_id above is click-to-edit — §15.11; renaming the FILE is the file browser's job) │
 ├──── OPERATORS ───«─┬─────────────── CANVAS ───────────────┬─»── INSPECTOR ───────┤
 │ 🔍 Search…         │                                      │ [DAG] NODE INFO VARS CONNS NOTIFY CODE SAVED │
 │ ▾ PYTHON / BASH    │        ┌────────────────────┐        │ ─────────────────────│
@@ -878,13 +879,18 @@ Built ✅: `ManagerApp.trigger` calls **`getDagDetails`** (`GET /dags/{id}/detai
 Rename splits by *what* is renamed and the deploy/run state (§6.1.8). The safe path (A) reuses JupyterLab's file rename; (B)/(B′) are a guided migration.
 
 ```
- (A) Rename the document (.afdag), not deployed → just a file rename, no Airflow impact
- ┌ Rename ──────────────────────────────────┐
- │ Name  [ my_dag.afdag              ]       │   reuses docmanager:rename;
- │              [ Cancel ]   [ Rename ]      │   dag_id + any deployed DAG unaffected
- └───────────────────────────────────────────┘
+ (A) Rename the document (.afdag) → the JupyterLab FILE BROWSER, not Studio
+     (filesystem-only; the dag_id and any deployed DAG are unaffected, so Studio
+      no longer duplicates a rename the file browser already does well)
 
- (B) Change dag_id, DEPLOYED + idle → migration (new DAG, fresh history)
+ (B) Change dag_id → edit it IN PLACE in the top bar
+ ┌──────────────────────────────────────────────────────────┐
+ │ ✦ Airflow Studio  [ sales_etl_v2       ]  4 nodes  ✓ ok   │ ← click the id to edit
+ └──────────────────────────────────────────────────────────┘
+      Enter / click away = commit · Escape = revert
+      invalid id → inline error, editor stays open
+
+ (B) …then, DEPLOYED + idle → migration (new DAG, fresh history)
  ┌ Rename & redeploy ────────────────────────────────────────┐
  │ New dag_id   [ sales_etl_v2               ]   ✓ valid       │
  │ ⚠ Airflow has no rename — this creates a NEW DAG           │
@@ -903,7 +909,11 @@ Rename splits by *what* is renamed and the deploy/run state (§6.1.8). The safe 
  │    [ Override (lose the in-flight run) ]      [ Cancel ]    │
  └────────────────────────────────────────────────────────────┘
 ```
-✅ built (parts A + B, 2026‑06‑16). (A) **Rename file…** reuses the JupyterLab document `context.rename` (filesystem‑only, no Airflow impact). (B) **Rename DAG id…** — the DAG‑form `dag_id` is read‑only; the toolbar action validates the new id, runs `renamePreflight`, then branches by state (draft = set id; deployed‑idle = confirm keep‑history vs purge → `runDeploy(newIR)` then `retireOldDag` once registered; deployed + active run = blocked). `afdag_id` (in the provenance header, §8.9) keeps the `.afdag` ↔ deployed‑DAG link across the rename.
+✅ built (parts A + B, 2026‑06‑16; **both toolbar buttons removed in favour of the native/inline affordances 2026‑08‑12**).
+
+(A) **Renaming the document is the file browser's job.** Studio's own *Rename file…* button was removed: it only wrapped `context.rename`, which is filesystem‑only and has no Airflow impact, so it duplicated something JupyterLab already does — with less context — while occupying prime toolbar space next to the destructive Deploy action.
+
+(B) **The `dag_id` is edited in place in the top bar.** Click it to turn the label into an input; **Enter** or **moving focus away** commits, **Escape** reverts. This replaced the *Rename DAG id…* dialog, but is emphatically *not* a plain field edit — committing runs the **same migration** as before: validate → `renamePreflight` → branch by state (draft = set the id; deployed‑idle = confirm keep‑history vs purge → `runDeploy(newIR)` then `retireOldDag` once registered; deployed + active run = blocked with an explicit override). Two guards make the inline form safe: an unchanged id is a no‑op, so clicking in and out never triggers a migration; and an **invalid** id cannot commit — Enter leaves the editor open with the reason inline, while blurring reverts rather than trapping focus in a field the user is trying to leave. The DAG‑form `dag_id` stays read‑only, and `afdag_id` (provenance header, §8.9) keeps the `.afdag` ↔ deployed‑DAG link across the rename.
 
 ### 15.12 Re‑deploy an updated DAG — active‑run + drift guards ✅
 

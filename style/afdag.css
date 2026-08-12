@@ -1641,3 +1641,56 @@
   font-size: var(--jp-ui-font-size0);
   overflow-wrap: anywhere;
 }
+
+/* -- inline dag_id editor (PRD §6.1.8(B) / §15.1) ------------------------ */
+
+/* The read state is a button so it is keyboard-reachable, but it must look
+   exactly like the plain `dag_id` label it replaced. */
+.jp-afdag-dagid-btn {
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  cursor: text;
+  font-family: var(--jp-code-font-family);
+  font-size: inherit;
+}
+
+.jp-afdag-dagid-btn:hover {
+  border-color: var(--jp-border-color1);
+  background: var(--jp-layout-color2);
+}
+
+.jp-afdag-dagid-edit {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.jp-afdag-dagid-input {
+  padding: 1px 4px;
+  border: 1px solid var(--jp-brand-color1);
+  border-radius: 3px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-code-font-family);
+  font-size: inherit;
+}
+
+.jp-afdag-dagid-input[aria-invalid='true'] {
+  border-color: var(--jp-error-color1);
+}
+
+.jp-afdag-dagid-error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  margin-top: 2px;
+  padding: 4px 8px;
+  max-width: 320px;
+  border-radius: 3px;
+  background: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  font-size: var(--jp-ui-font-size0);
+}
