@@ -21,7 +21,7 @@ JupyterLab is served automatically at http://localhost:8889/lab (no token — of
 docker compose exec jupyter bash
 ```
 
-Stop everything with `docker compose down` (add `-v` to also delete the `airflow-db`/`node_modules`/`usr-local` volumes for a clean slate).
+Stop everything with `docker compose down` (add `-v` to also delete the `airflow-home`/`airflow-pgdata`/`node_modules`/`usr-local` volumes for a clean slate — note `airflow-pgdata` holds Airflow's metadata, so `-v` discards DAG run history).
 
 ## How it works — no build, live reload both ways
 
