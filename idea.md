@@ -3,7 +3,7 @@
 	- handle the type json with deserializtion
 	- add warning/error when a used variables does not exist in the sets of variables
 	- make sure a variable does not yet exist in airflow when defining it   
-- [] manages(CRUD) connexions  with integration in the flow. 
+- [x] manages(CRUD) connexions  with integration in the flow. **DONE 2026-08-12** — PRD §6.11 / §15.16 (local vs remote scopes, registry-driven conn_id usage, ownership marker, deploy gates, purge cleanup).
 	- handle default values
 	- when creating connection check it does not yet exising in airflow 
 	- make sure that if a connection is used it should be present.

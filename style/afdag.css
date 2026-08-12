@@ -1465,3 +1465,49 @@
   flex: 0 0 auto;
   color: var(--jp-ui-font-color3);
 }
+
+/* -- CONNECTIONS tab additions (PRD §6.11 / §15.16) ---------------------- */
+
+.jp-afdag-conn-pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-conn-pending code {
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--jp-layout-color1);
+  font-family: var(--jp-code-font-family);
+}
+
+.jp-afdag-conn-pending em {
+  color: var(--jp-ui-font-color3);
+  font-style: normal;
+}
+
+/* Class-only selector rather than `.jp-afdag-conn-pending button`: the
+   descendant form has the same specificity as the earlier
+   `.jp-afdag-var-actions button:disabled` but comes later in the file, which
+   stylelint's no-descending-specificity flags as a source-order hazard. */
+.jp-afdag-conn-declare {
+  padding: 1px 6px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-conn-missing {
+  color: var(--jp-error-color1);
+}
+
+.jp-afdag-conn-type {
+  color: var(--jp-ui-font-color3);
+  font-style: normal;
+}

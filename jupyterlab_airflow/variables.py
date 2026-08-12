@@ -38,6 +38,17 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+# Re-exported: the ownership protocol is shared with connections (PRD §6.11) so
+# that `sync` and `purge` can never drift apart. Callers and tests keep using
+# `variables.compose_description(...)` etc.
+from .managed import (  # noqa: F401
+    compose_description,
+    is_owned_by,
+    owner_marker,
+    owner_of,
+    strip_marker,
+)
+
 # Airflow's own limit on a variable key (VariableBody.key, maxLength 250).
 MAX_KEY_LENGTH = 250
 
@@ -51,8 +62,6 @@ REDACTED = "***"
 
 def is_redacted(value: Any) -> bool:
     return value == REDACTED
-
-_MARKER_RE = re.compile(r"^\[airflow-studio dag_id=([^\]]*)\]\s?")
 
 # How a task references a variable. Both forms are detected so that "is this
 # variable still used?" is answerable regardless of which one the author chose:
@@ -111,37 +120,6 @@ def declared_keys(ir: Dict[str, Any]) -> set:
 
 def by_scope(ir: Dict[str, Any], scope: str) -> List[Dict[str, Any]]:
     return [entry for entry in declared(ir) if entry["scope"] == scope]
-
-
-# -- ownership marker ------------------------------------------------------
-
-
-def owner_marker(dag_id: str) -> str:
-    """The description prefix stamped onto every variable this flow creates."""
-    return f"[airflow-studio dag_id={dag_id}]"
-
-
-def compose_description(dag_id: str, description: str = "") -> str:
-    """Airflow-side description for a local variable: the ownership marker plus
-    the author's own text."""
-    text = (description or "").strip()
-    return f"{owner_marker(dag_id)} {text}".strip()
-
-
-def owner_of(description: Optional[str]) -> Optional[str]:
-    """The ``dag_id`` that owns a variable, read back from its description, or
-    ``None`` when the variable is not Studio-managed."""
-    match = _MARKER_RE.match(description or "")
-    return match.group(1) if match else None
-
-
-def strip_marker(description: Optional[str]) -> str:
-    """The author's description with the ownership marker removed."""
-    return _MARKER_RE.sub("", description or "").strip()
-
-
-def is_owned_by(description: Optional[str], dag_id: str) -> bool:
-    return owner_of(description) == dag_id
 
 
 # -- reference scanning ----------------------------------------------------

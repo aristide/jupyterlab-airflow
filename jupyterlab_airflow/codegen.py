@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from jinja2 import Environment, Undefined
 
-from . import variables
+from . import connections, variables
 from .registry import load_notifiers, load_registry
 
 STUDIO_VERSION = "0.1.0"
@@ -664,11 +664,17 @@ def _render(ir: Dict[str, Any]) -> str:
     # Variable checks are pure IR (declaration shape + used-but-not-declared);
     # "does it exist in Airflow?" needs the live target and is a deploy gate
     # instead (`variables.block_errors`, called from `deploy_dag`).
+    # Connections contribute only `declaration_errors` (a malformed declaration
+    # — no conn_type, bad port, unparseable Extra). An *undeclared* conn_id is
+    # deliberately NOT an error: flows written before §6.11 reference conn_ids
+    # that exist perfectly well in Airflow, and blocking them would break
+    # pipelines that deploy fine today. It surfaces as a deploy warning instead.
     errors = (
         _validate_identifiers(dag_id, nodes)
         + _validate_dag_fields(dag)
         + variables.declaration_errors(ir)
         + variables.undefined_reference_errors(ir)
+        + connections.declaration_errors(ir)
     )
     if errors:
         raise CodegenError("; ".join(errors))

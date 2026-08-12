@@ -10,6 +10,7 @@ handlers run it in a thread-pool executor so the server event loop is never
 blocked.
 """
 
+import json as _json_mod
 import threading
 from urllib.parse import quote
 
@@ -376,6 +377,80 @@ class AirflowClient:
     def delete_variable(self, key: str) -> dict:
         """Delete a variable (204/empty on success, 404 when absent)."""
         return self._request("DELETE", f"/variables/{_quote_key(key)}")
+
+    # -- connections (PRD §6.11) --------------------------------------------
+
+    def list_connections(self, limit: int = 1000, offset: int = 0) -> dict:
+        """List connections → ``{"connections": [...], "total_entries": N}``.
+
+        Each entry is ``{connection_id, conn_type, description, host, login,
+        schema, port, password, extra}``. As with variables, ask for a large
+        page because the editor wants the whole set.
+        """
+        return self._request(
+            "GET", "/connections", params={"limit": limit, "offset": offset}
+        )
+
+    def get_connection(self, conn_id: str) -> dict:
+        """Fetch one connection; ``AirflowError(status=404)`` when absent.
+
+        Airflow masks secrets on read (the password, and sensitive-looking keys
+        inside ``extra``), so a fetched connection must never be written back
+        wholesale — see ``connections.REDACTED``.
+        """
+        return self._request("GET", f"/connections/{_quote_key(conn_id)}")
+
+    def create_connection(self, conn_id: str, conn_type: str, **fields) -> dict:
+        """Create a connection. ``connection_id`` and ``conn_type`` are the only
+        required fields; the rest (``description``/``host``/``login``/``schema``/
+        ``port``/``password``/``extra``) are optional and omitted when ``None``.
+        ``extra`` must be a JSON **string**, not an object."""
+        return self._request(
+            "POST", "/connections", json=_connection_body(conn_id, conn_type, fields)
+        )
+
+    def update_connection(self, conn_id: str, conn_type: str, **fields) -> dict:
+        """Update a connection. Like the variables endpoint, Airflow wants a
+        complete body whose id matches the path — so this cannot rename a
+        connection; a rename is delete + create."""
+        return self._request(
+            "PATCH",
+            f"/connections/{_quote_key(conn_id)}",
+            json=_connection_body(conn_id, conn_type, fields),
+        )
+
+    def delete_connection(self, conn_id: str) -> dict:
+        """Delete a connection (204/empty on success, 404 when absent)."""
+        return self._request("DELETE", f"/connections/{_quote_key(conn_id)}")
+
+
+_CONNECTION_FIELDS = ("description", "host", "login", "schema", "port", "password", "extra")
+
+
+def _connection_body(conn_id: str, conn_type: str, fields: dict) -> dict:
+    """Build a `ConnectionBody`. Only `connection_id`/`conn_type` are required;
+    an optional field is **omitted** when ``None`` rather than sent as null, so a
+    caller that doesn't know a value never clears the stored one. ``port`` is
+    coerced to int (the schema types it as an integer), ``extra`` to a string
+    (the schema types it as a string — an object would be rejected)."""
+    body = {"connection_id": conn_id, "conn_type": conn_type}
+    for name in _CONNECTION_FIELDS:
+        value = fields.get(name)
+        if value is None or value == "":
+            continue
+        if name == "port":
+            try:
+                body[name] = int(value)
+            except (TypeError, ValueError):
+                continue
+        elif name == "extra" and not isinstance(value, str):
+            # Aliased import: `json` is a *parameter* name throughout this
+            # module's request helpers, so the module is bound under a
+            # non-colliding name.
+            body[name] = _json_mod.dumps(value)
+        else:
+            body[name] = str(value)
+    return body
 
 
 def _quote_key(key: str) -> str:

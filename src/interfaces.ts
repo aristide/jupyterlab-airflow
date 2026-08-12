@@ -372,3 +372,69 @@ export interface IVariableDeleteRes {
   key: string;
   deleted: boolean;
 }
+
+// -- Connections (PRD §6.11) ------------------------------------------------
+
+// One connection in the target Airflow, as offered by the picker. Only
+// non-secret identity fields — never the password or extra.
+export interface IAirflowConnection {
+  conn_id: string;
+  conn_type?: string | null;
+  description?: string;
+  owner?: string | null;
+  declared?: boolean;
+}
+
+// A flow's declaration reconciled against the live Airflow.
+export interface IConnectionStatus {
+  conn_id: string;
+  scope: 'local' | 'remote';
+  conn_type?: string;
+  description?: string;
+  host?: string;
+  login?: string;
+  password?: string;
+  schema?: string;
+  port?: string;
+  extra?: string;
+  /** Where the id is referenced ("task 'x' (aws_conn_id)"). Non-empty means
+   * removing it would break the flow, so the UI refuses. */
+  used_by: string[];
+  exists: boolean;
+  owned: boolean;
+  /** Airflow withheld the password (it masks secrets on read). */
+  redacted?: boolean;
+  airflow_conn_type?: string | null;
+}
+
+// A conn_id a task uses that the flow does not declare. A warning, never a
+// deploy blocker — flows predating §6.11 reference conn_ids that exist fine.
+export interface IUndeclaredConnection {
+  conn_id: string;
+  where: string[];
+  /** Came from the operator's registry default, not typed by the author. */
+  implicit: boolean;
+  exists_in_airflow: boolean;
+}
+
+export interface IConnectionsInspectRes {
+  connections: IConnectionStatus[];
+  available: IAirflowConnection[];
+  undeclared: IUndeclaredConnection[];
+  unused: string[];
+  airflow_reachable: boolean;
+}
+
+export interface IConnectionsListRes {
+  connections: IAirflowConnection[];
+}
+
+export interface IConnectionSetRes {
+  conn_id: string;
+  created: boolean;
+}
+
+export interface IConnectionDeleteRes {
+  conn_id: string;
+  deleted: boolean;
+}

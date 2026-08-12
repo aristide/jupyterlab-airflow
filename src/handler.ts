@@ -24,6 +24,10 @@ import {
   ITaskInstancesRes,
   ITaskLogsRes,
   IValidateRes,
+  IConnectionDeleteRes,
+  IConnectionSetRes,
+  IConnectionsInspectRes,
+  IConnectionsListRes,
   IVariableDeleteRes,
   IVariableSetRes,
   IVariablesInspectRes,
@@ -285,3 +289,34 @@ export const deleteVariable = (
   key: string
 ): Promise<IApiRes<IVariableDeleteRes>> =>
   POST<IVariableDeleteRes>('variables/delete', { dag_id: dagId, key });
+
+/** Every connection in the target Airflow (PRD §6.11) — the picker's source. */
+export const listConnections = (): Promise<IApiRes<IConnectionsListRes>> =>
+  GET<IConnectionsListRes>('connections');
+
+/** Reconcile a flow's connection declarations + actual conn_id usage against
+ * the live Airflow. Takes the IR because it inspects an unsaved document. */
+export const inspectConnections = (
+  ir: IAfdagIR
+): Promise<IApiRes<IConnectionsInspectRes>> =>
+  POST<IConnectionsInspectRes>(
+    'connections/inspect',
+    ir as unknown as Record<string, unknown>
+  );
+
+/** Create/update one connection owned by this flow (409 when not owned). */
+export const setConnection = (
+  dagId: string,
+  conn: Record<string, unknown>
+): Promise<IApiRes<IConnectionSetRes>> =>
+  POST<IConnectionSetRes>('connections/set', { dag_id: dagId, ...conn });
+
+/** Delete one connection, only when this flow owns it. */
+export const deleteConnection = (
+  dagId: string,
+  connId: string
+): Promise<IApiRes<IConnectionDeleteRes>> =>
+  POST<IConnectionDeleteRes>('connections/delete', {
+    dag_id: dagId,
+    conn_id: connId
+  });

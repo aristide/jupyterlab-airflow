@@ -60,6 +60,7 @@ import {
   AfdagCallbacksValue,
   IAfdagCallbackEntry,
   IAfdagIR,
+  IAfdagConnection,
   IAfdagVariable,
   SyntaxStyle,
   createEmptyIR,
@@ -652,6 +653,23 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         base.variables = next;
       } else {
         delete base.variables;
+      }
+      baseRef.current = base;
+      setVariablesRev(rev => rev + 1);
+      commit();
+    },
+    [commit]
+  );
+
+  // Same shape for connection declarations (PRD §6.11): they live on the IR
+  // root, so the write goes through `baseRef` and then commits.
+  const onConnectionsChange = React.useCallback(
+    (next: IAfdagConnection[]): void => {
+      const base = { ...baseRef.current };
+      if (next.length > 0) {
+        base.connections = next;
+      } else {
+        delete base.connections;
       }
       baseRef.current = base;
       setVariablesRev(rev => rev + 1);
@@ -1436,6 +1454,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
             onNodeChange={updateNode}
             onVariablesChange={onVariablesChange}
+            onConnectionsChange={onConnectionsChange}
           />
         </div>
       </div>

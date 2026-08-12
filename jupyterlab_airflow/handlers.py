@@ -7,7 +7,7 @@ import tornado
 from jupyter_server.base.handlers import APIHandler
 from jupyter_server.utils import url_path_join
 
-from . import variables
+from . import connections, variables
 from .audit import audit_event
 from .client import AirflowError, get_client
 from .codegen import generate_dag
@@ -109,10 +109,13 @@ class _AirflowHandler(APIHandler):
             self.set_status(502)
             self.finish(json.dumps({"error": str(err), "detail": err.detail}))
             return
-        except variables.VariableOwnershipError as err:
-            # A deliberate refusal (the flow doesn't own that variable), not a
-            # server fault: audit it as `rejected` and answer 409 with the
-            # explanation, rather than a 500 + traceback.
+        except (
+            variables.VariableOwnershipError,
+            connections.ConnectionOwnershipError,
+        ) as err:
+            # A deliberate refusal (the flow doesn't own that variable /
+            # connection), not a server fault: audit it as `rejected` and answer
+            # 409 with the explanation, rather than a 500 + traceback.
             _audit("rejected", audit_dag_id, detail=str(err))
             self.set_status(409)
             self.finish(json.dumps({"error": str(err)}))
@@ -549,6 +552,101 @@ class VariableDeleteHandler(_AirflowHandler):
         )
 
 
+class ConnectionsHandler(_AirflowHandler):
+    """Every connection in the target Airflow (PRD §6.11) — the picker's source.
+    Only non-secret identity fields are returned: never the password or extra."""
+
+    @tornado.web.authenticated
+    async def get(self):
+        def _list():
+            payload = get_client().list_connections()
+            entries = payload.get("connections") or []
+            return {
+                "connections": [
+                    {
+                        "conn_id": entry.get("connection_id"),
+                        "conn_type": entry.get("conn_type"),
+                        "description": connections.strip_marker(
+                            entry.get("description")
+                        ),
+                        "owner": connections.owner_of(entry.get("description")),
+                    }
+                    for entry in entries
+                    if isinstance(entry, dict) and entry.get("connection_id")
+                ]
+            }
+
+        await self.respond(_list)
+
+
+class ConnectionsInspectHandler(_AirflowHandler):
+    """Reconcile a flow's connection declarations + actual conn_id usage against
+    the live Airflow. POST because it inspects an unsaved IR."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        ir = self._json_body_object()
+        if ir is None:
+            return
+        await self.respond(connections.annotated, ir)
+
+
+class ConnectionSetHandler(_AirflowHandler):
+    """Create/update one connection owned by this flow. Refuses to touch a
+    connection the flow does not own (409)."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self._json_body_object()
+        if body is None:
+            return
+        dag_id = body.get("dag_id")
+        conn_id = body.get("conn_id")
+        conn_type = body.get("conn_type")
+        if not dag_id or not conn_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id and conn_id required"}))
+            return
+        fields = {
+            name: body.get(name)
+            for name in ("host", "login", "password", "schema", "port", "extra")
+            if body.get(name) not in (None, "")
+        }
+        fields["description"] = str(body.get("description") or "")
+        await self.respond(
+            connections.set_one,
+            dag_id,
+            conn_id,
+            conn_type,
+            fields,
+            audit_action="connection_set",
+            audit_dag_id=dag_id,
+        )
+
+
+class ConnectionDeleteHandler(_AirflowHandler):
+    """Delete one connection, only when this flow owns it."""
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self._json_body_object()
+        if body is None:
+            return
+        dag_id = body.get("dag_id")
+        conn_id = body.get("conn_id")
+        if not dag_id or not conn_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "dag_id and conn_id required"}))
+            return
+        await self.respond(
+            connections.delete_one,
+            dag_id,
+            conn_id,
+            audit_action="connection_delete",
+            audit_dag_id=dag_id,
+        )
+
+
 class DagRollbackHandler(_AirflowHandler):
     """Roll a deployed DAG back to its previous version (PRD §6.5.5 / §7): restore
     the `.bak` saved on the last overwrite-deploy. File-only; the dag-processor
@@ -638,5 +736,9 @@ def setup_handlers(web_app):
         (_url(base_url, "variables/inspect"), VariablesInspectHandler),
         (_url(base_url, "variables/set"), VariableSetHandler),
         (_url(base_url, "variables/delete"), VariableDeleteHandler),
+        (_url(base_url, "connections"), ConnectionsHandler),
+        (_url(base_url, "connections/inspect"), ConnectionsInspectHandler),
+        (_url(base_url, "connections/set"), ConnectionSetHandler),
+        (_url(base_url, "connections/delete"), ConnectionDeleteHandler),
     ]
     web_app.add_handlers(host_pattern, handlers)

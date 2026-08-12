@@ -877,16 +877,17 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
     # referenced remote variable that has since vanished, or a flow variable
     # whose key is already taken by one this flow doesn't own (deploying would
     # clobber another flow's value). Also a no-op when Airflow is unreachable.
+    from . import connections as connections_mod
     from . import variables as variables_mod
 
-    variable_errors = variables_mod.block_errors(ir)
-    if variable_errors:
+    gate_errors = variables_mod.block_errors(ir) + connections_mod.block_errors(ir)
+    if gate_errors:
         return {
             "deployed": False,
             "dag_id": dag_id,
             "correlation_id": correlation_id,
             "warnings": [],
-            "errors": variable_errors,
+            "errors": gate_errors,
             "dagbag": result["dagbag"],
         }
 
@@ -905,6 +906,12 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
     # not errors: they are reported without hiding what did land.
     synced, sync_warnings = variables_mod.sync(ir)
     warnings.extend(sync_warnings)
+    synced_connections, conn_warnings = connections_mod.sync(ir)
+    warnings.extend(conn_warnings)
+    # Non-blocking: a conn_id a task uses that is neither declared here nor
+    # present in the target. The DAG is valid — that task just fails when it
+    # runs — so this informs rather than refuses (PRD §6.11).
+    warnings.extend(connections_mod.deploy_warnings(ir))
 
     filename = _safe_filename(dag_id)
     target.ensure_airflowignore()
@@ -924,6 +931,7 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
         "correlation_id": correlation_id,
         "backed_up": backed_up,
         "variables": synced,
+        "connections": synced_connections,
         "warnings": warnings,
         "errors": [],
         "dagbag": result["dagbag"],
@@ -949,6 +957,7 @@ def purge_dag(dag_id: str, target: Optional[DeployTarget] = None) -> Dict[str, A
     purge its history via ``DELETE /api/v2/dags/{id}``, then drop the variables
     this flow created (PRD §6.10). Tolerates a missing file or a DAG that Airflow
     hasn't recorded yet (404)."""
+    from . import connections as connections_mod
     from . import variables as variables_mod
     from .client import AirflowError, get_client
 
@@ -978,12 +987,14 @@ def purge_dag(dag_id: str, target: Optional[DeployTarget] = None) -> Dict[str, A
     # ownership marker, so a variable Studio did not create is never touched —
     # which is also why this works from `dag_id` alone (purge never sees the IR).
     removed_variables = variables_mod.purge(dag_id)
+    removed_connections = connections_mod.purge(dag_id)
 
     return {
         "dag_id": dag_id,
         "removed_file": removed_file,
         "purged_history": purged_history,
         "removed_variables": removed_variables,
+        "removed_connections": removed_connections,
     }
 
 
@@ -1046,6 +1057,7 @@ def retire_old_dag(
     if purge:
         return purge_dag(dag_id, target)
 
+    from . import connections as connections_mod
     from . import variables as variables_mod
     from .client import AirflowError, get_client
 

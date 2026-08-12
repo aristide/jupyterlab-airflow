@@ -188,6 +188,7 @@ class _FakeClient:
         self.paused = []
         self.deleted = []
         self.variables = dict(variables or {})
+        self.conns = {}
         self.deleted_variables = []
 
     def get_dag(self, dag_id):
@@ -241,6 +242,39 @@ class _FakeClient:
             raise AirflowError("not found", status=404)
         del self.variables[key]
         self.deleted_variables.append(key)
+        return {}
+
+    # -- connections -------------------------------------------------------
+
+    def list_connections(self, limit=1000, offset=0):
+        return {
+            "connections": list(self.conns.values()),
+            "total_entries": len(self.conns),
+        }
+
+    def get_connection(self, conn_id):
+        if conn_id not in self.conns:
+            raise AirflowError("not found", status=404)
+        return self.conns[conn_id]
+
+    def create_connection(self, conn_id, conn_type, **fields):
+        if conn_id in self.conns:
+            raise AirflowError("exists", status=409)
+        entry = {"connection_id": conn_id, "conn_type": conn_type}
+        entry.update({k: v for k, v in fields.items() if v not in (None, "")})
+        self.conns[conn_id] = entry
+        return entry
+
+    def update_connection(self, conn_id, conn_type, **fields):
+        entry = self.conns.setdefault(conn_id, {"connection_id": conn_id})
+        entry["conn_type"] = conn_type
+        entry.update({k: v for k, v in fields.items() if v not in (None, "")})
+        return entry
+
+    def delete_connection(self, conn_id):
+        if conn_id not in self.conns:
+            raise AirflowError("not found", status=404)
+        del self.conns[conn_id]
         return {}
 
 

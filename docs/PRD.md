@@ -374,6 +374,22 @@ Tasks need configuration that shouldn't be hard‑coded into operator fields (en
 
 **Deferred 🔭:** a `widget: variable` operator‑param picker (insert a reference without typing Jinja); variable **usage in notifier params**; and Airflow's bulk `PATCH /variables` endpoint (single‑key CRUD is sufficient at this scale).
 
+### 6.11 Airflow Connections — flow‑scoped vs. pre‑existing — shipped ✅ (2026‑08‑12)
+
+The sibling of §6.10, with the same two‑scope model (`local` = this flow owns it, created on deploy and removed on undeploy; `remote` = already in Airflow, reference‑only, verified to still exist) and the **same shared ownership marker** — `[airflow-studio dag_id=<id>]` in the Airflow `description`, now factored into `managed.py` so `sync` and `purge` can never drift apart across the two object types. Declarations live on `ir.connections[]` (IR root, beside `variables`/`notes`).
+
+Two things make connections genuinely different from variables:
+
+**Usage is structural, not textual.** A variable is referenced by text (`{{ var.value.k }}`); a connection is referenced by an operator **parameter**. So usage is read out of the **operator registry** — any param named `conn_id` or `*_conn_id` (40 such params across 32 of the bundled operators) — which is exact and self‑maintaining: a new operator YAML is covered with no change to the connections code. Jinja `{{ conn.x.host }}` and `BaseHook.get_connection("x")` in code bodies are scanned too, for the code‑first nodes. Crucially, **a blank field is still a usage**: the operator falls back to its registry `default` (`aws_default`, `http_default`, `slack_api_default`, …) and the task fails at run time if that connection is absent — so the *effective* conn_id is tracked, tagged `implicit` so the UI and gates can treat a default more gently than something the author typed.
+
+**Undeclared is a warning, not an error** — the deliberate divergence from §6.10. Every `.afdag` written before this feature carries conn_ids and no declarations, and those connections usually exist in Airflow perfectly well; making the declaration mandatory would stop pipelines that deploy fine today. So the hard gates are only the ones that indicate real breakage — a **declared remote** connection missing from Airflow, and a **local** id already taken by a connection this flow does not own (deploying would clobber another flow's credentials) — while an undeclared/implicit conn_id that is absent from the target surfaces as a deploy **warning** naming the task that will fail. A flow with no `connections` key at all is completely inert.
+
+**Secrets.** A local connection's `password`/`extra` are stored **in plaintext in the `.afdag`** (and therefore git) — the user‑chosen trade‑off, warned inline; the `remote` scope is the sanctioned path for anything sensitive (§9). Three verified‑against‑3.0.2 hazards are handled: Airflow **masks** the password *and* sensitive‑looking keys inside `extra` to `"***"` on read, so Studio always writes from the IR and **never** round‑trips a fetched connection (writing the mask back would literally store `***` as the password — reproduced, then guarded); `extra` must be a JSON **object** string, since a dict, an array or non‑JSON each make Airflow answer a bare `text/plain` **500**, so all three are caught up front with a readable message; and `connection_id` must match `^[\w.-]+$` (≤200 chars), so spaces/slashes are rejected with an explanation instead of a raw 422. The duplicate‑create **409** returns a dict containing the raw `INSERT` statement — never surfaced; it is translated into the ownership language.
+
+**Server surface.** `GET connections` (picker; identity fields only — never password/extra), `POST connections/inspect`, `POST connections/set` / `connections/delete` (ownership‑enforced server‑side, refusal = `409` audited as `rejected`). Audit gains `connection_set`/`connection_delete`. Note `description` is **not** delivered to tasks (the Task SDK wire model omits it), so the marker is Studio bookkeeping over REST only — a running DAG never sees it. Wireframe **§15.16**.
+
+**Deferred 🔭:** the `POST /connections/test` endpoint (present but `403` unless `core.test_connection=Enabled`, so it needs an admin opt‑in and a clear "ask your admin" state); a `widget: connection` param picker so a task's conn_id field offers the declared set; and Airflow's bulk `PATCH /connections`.
+
 ---
 
 ## 7. UX / UI specification
@@ -584,7 +600,7 @@ The 3‑pane document: full‑width top bar, then collapsible **palette « · ca
 │ ✦ Airflow Studio   my_dag.afdag · 4 nodes · ✓ no errors                         │
 │        [ Traditional │▣TaskFlow ]  ≣ Tidy  ↶ ↷  Reset  Save  ⚙ Generate DAG  ▶ Deploy │
 ├──── OPERATORS ───«─┬─────────────── CANVAS ───────────────┬─»── INSPECTOR ───────┤
-│ 🔍 Search…         │                                      │ [DAG] NODE INFO VARS NOTIFY CODE SAVED │
+│ 🔍 Search…         │                                      │ [DAG] NODE INFO VARS CONNS NOTIFY CODE SAVED │
 │ ▾ PYTHON / BASH    │        ┌────────────────────┐        │ ─────────────────────│
 │   Bash operator    │        │ PYTHON_BASH        │        │ DAG CONFIGURATION    │
 │   Branch operator  │        │ ▷ Bash operator  ✕ │ ● green│ DAG ID    [ my_dag ] │
@@ -958,6 +974,50 @@ The **VARS** inspector tab: declare the Airflow variables the flow depends on, a
   └──────────────────────────────────────┘
 ```
 ✅ built (§6.10). Declarations live on **`ir.variables[]`** (IR root, beside `notes` — never a node/edge). Each row shows its **scope badge** (`Flow`/`Airflow`) plus a **`missing`** badge when the key isn't in Airflow (an error for `Airflow` scope, just "not yet created" for `Flow`). The two **reference snippets** are generated per row — `var.json` for a JSON‑typed variable, and the `.get("…")` form when the key isn't a plain identifier — so the author never has to remember the Jinja shape. **Remove is disabled while a variable is still referenced**, with the using tasks named in the tooltip. **Used‑but‑not‑defined** raises a blocking banner with a one‑click *define* button per key. The tab re‑inspects (debounced) against `POST variables/inspect`, and degrades to "Airflow unreachable — the deploy will re‑check" rather than guessing. A value Airflow redacts (sensitive‑looking key) shows as hidden and is never written back.
+
+### 15.16 Studio editor — Connections tab ✅
+
+The **CONNS** inspector tab: declare the Airflow connections the flow depends on. Same two scopes as VARS, but usage is read from the operator registry, so Studio knows exactly which task field points at which connection.
+
+```
+│ … palette …  │ … canvas … │ DAG NODE INFO VARS [CONNS] NOTIFY CODE SAVED │
+│              │            │ ──────────────────────────────────────────── │
+│              │            │ Connections this flow depends on. A Flow     │
+│              │            │ connection is created on deploy and removed  │
+│              │            │ on undeploy; an Airflow one already exists.  │
+│              │            │ ⚠ A flow connection's password and Extra are │
+│              │            │   plaintext in the .afdag.                   │
+│              │            │ ┌────────────────────────────────────────┐   │
+│              │            │ │ Used but not declared here — deploying │   │ ← warning,
+│              │            │ │ still works:                           │   │   never blocks
+│              │            │ │  `aws_default` (operator default)      │   │
+│              │            │ │      — not in Airflow      [＋ declare]│   │
+│              │            │ └────────────────────────────────────────┘   │
+│              │            │ ┌────────────────────────────────────────┐   │
+│              │            │ │ [warehouse      ] (Flow)            ✕ │   │
+│              │            │ │ Scope [Flow connection ▾]              │   │
+│              │            │ │ Type [postgres  ]  Host [db.internal ] │   │
+│              │            │ │ Port [5432]        Login [etl_user   ] │   │
+│              │            │ │ Password [••••••]  Schema [public    ] │   │
+│              │            │ │ Extra (JSON) {"sslmode": "require"}    │   │
+│              │            │ │ Description [ … ]                      │   │
+│              │            │ │ Used by task 'load' (postgres_conn_id) │   │ ← ✕ disabled
+│              │            │ └────────────────────────────────────────┘   │
+│              │            │ ┌────────────────────────────────────────┐   │
+│              │            │ │ [shared_api    ] (Airflow) (missing) ✕ │   │ ← blocks deploy
+│              │            │ │ Scope [Airflow connection ▾]           │   │
+│              │            │ │ Description [ managed by platform ]    │   │ ← no settings:
+│              │            │ └────────────────────────────────────────┘   │   it lives in Airflow
+│              │            │ ＋ Flow connection  ＋ Airflow connection (4) │
+└──────────────┴────────────┴──────────────────────────────────────────────┘
+
+  “＋ Airflow connection” opens a picker of every connection in the target:
+  ┌────────────────────────────────────────────┐
+  │ warehouse_ro · postgres     owned by etl_a │ ← another flow's → reference only
+  │ slack_api_default · slack                  │ ← created outside Studio
+  └────────────────────────────────────────────┘
+```
+✅ built (§6.11). A **flow** connection shows the full field set (type/host/port/login/password/schema/Extra); an **Airflow** one shows only id + description, because its settings live in Airflow and are never copied into the `.afdag`. Badges mirror §15.15 (`Flow`/`Airflow` + `missing`/`not yet created`). **Remove is disabled while the connection is still referenced**, and the tooltip names the task *and the exact param* (`task 'load' (postgres_conn_id)`) — the registry-driven scan makes that precise. The **“used but not declared”** panel is a warning with a one-click *declare* (pre-set to `Airflow` scope when the id already exists there, `Flow` when it doesn't), never a deploy blocker — flows predating this feature keep working. A password Airflow masks on read is shown as hidden and never written back.
 
 ---
 

@@ -1,9 +1,10 @@
 import * as React from 'react';
 
 import { AfdagFlowNode, IAfdagNodeData } from '../graph';
-import { IAfdagIR, IAfdagVariable } from '../ir';
+import { IAfdagConnection, IAfdagIR, IAfdagVariable } from '../ir';
 import { IStudioServices } from '../services';
 import { CodePanel } from './CodePanel';
+import { ConnectionsTab } from './ConnectionsTab';
 import { DagTab } from './DagTab';
 import { InfoTab } from './InfoTab';
 import { NodeTab } from './NodeTab';
@@ -16,6 +17,7 @@ export type InspectorTab =
   | 'node'
   | 'info'
   | 'vars'
+  | 'conns'
   | 'notify'
   | 'code'
   | 'saved';
@@ -38,6 +40,9 @@ export interface IInspectorProps {
   /** Replace the flow's variable declarations (PRD §6.10). Separate from
    * `onDagChange` because variables live on the IR root, not on `ir.dag`. */
   onVariablesChange: (next: IAfdagVariable[]) => void;
+  /** Replace the flow's connection declarations (PRD §6.11). Like variables,
+   * these live on the IR root rather than on `ir.dag`. */
+  onConnectionsChange: (next: IAfdagConnection[]) => void;
 }
 
 const TABS: Array<{ id: InspectorTab; label: string }> = [
@@ -45,6 +50,7 @@ const TABS: Array<{ id: InspectorTab; label: string }> = [
   { id: 'node', label: 'NODE' },
   { id: 'info', label: 'INFO' },
   { id: 'vars', label: 'VARS' },
+  { id: 'conns', label: 'CONNS' },
   { id: 'notify', label: 'NOTIFY' },
   { id: 'code', label: 'CODE' },
   { id: 'saved', label: 'SAVED' }
@@ -134,6 +140,13 @@ export function Inspector(props: IInspectorProps): JSX.Element {
           ir={props.ir}
           variables={props.ir.variables ?? []}
           onVariablesChange={props.onVariablesChange}
+        />
+      )}
+      {tab === 'conns' && (
+        <ConnectionsTab
+          ir={props.ir}
+          connections={props.ir.connections ?? []}
+          onConnectionsChange={props.onConnectionsChange}
         />
       )}
       {tab === 'notify' && (

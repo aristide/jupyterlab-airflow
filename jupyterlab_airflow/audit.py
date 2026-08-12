@@ -45,6 +45,8 @@ ACTIONS = frozenset(
         "retire",
         "variable_set",
         "variable_delete",
+        "connection_set",
+        "connection_delete",
     }
 )
 

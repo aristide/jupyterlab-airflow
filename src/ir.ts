@@ -146,6 +146,32 @@ export interface IAfdagVariable {
   default?: string;
 }
 
+/**
+ * A connection this flow depends on (PRD §6.11). Sibling of
+ * {@link IAfdagVariable}, with the same `local`/`remote` ownership model — but
+ * referenced through operator `conn_id` params rather than Jinja, so usage is
+ * detected structurally from the operator registry.
+ *
+ * A `local` connection's `password`/`extra` are stored in this `.afdag` in
+ * plaintext (and therefore in git). For anything sensitive prefer a `remote`
+ * connection — created in Airflow, referenced here, never copied in. See §9.
+ */
+export interface IAfdagConnection {
+  conn_id: string;
+  scope: 'local' | 'remote';
+  /** Airflow requires one on create (postgres, http, aws, …). `local` only. */
+  conn_type?: string;
+  description?: string;
+  host?: string;
+  login?: string;
+  password?: string;
+  schema?: string;
+  /** Kept as a string for the form; coerced to an int server-side. */
+  port?: string;
+  /** Provider-specific JSON blob (Airflow stores it as a string). */
+  extra?: string;
+}
+
 export interface IAfdagIR {
   schema_version: string;
   provenance: IAfdagProvenance;
@@ -157,6 +183,8 @@ export interface IAfdagIR {
   notes?: IAfdagNote[];
   /** Variable declarations (optional; absent on pre-variables `.afdag` files). */
   variables?: IAfdagVariable[];
+  /** Connection declarations (optional; absent on pre-connections `.afdag`). */
+  connections?: IAfdagConnection[];
 }
 
 export const AFDAG_SCHEMA_VERSION = '1.0';
