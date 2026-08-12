@@ -57,6 +57,20 @@ The container runs as **root** (`user: root`): the base image's default non-root
 | jupyter | `nikolaik/python-nodejs:python3.12-nodejs22` | 8889→8888, 9998→9999 | (always on) | JupyterLab dev container |
 | airflow | `apache/airflow:3.0.2`                       | 8081→8080    | airflow     | Local Airflow 3.x (standalone)  |
 
+## Airflow provider packages (why every palette node is enabled)
+
+Studio dims an operator in the palette — and hard-blocks a deploy that uses it — when its provider package isn't installed in the **target** Airflow (PRD §6.2.1; the check reads `GET /api/v2/providers` from the `airflow` container, not from Jupyter).
+
+`apache/airflow:3.0.2` already ships ten of the providers the registry needs (`amazon`, `cncf-kubernetes`, `common-sql`, `ftp`, `google`, `http`, `sftp`, `slack`, `smtp`, `standard`). The remaining seven are installed at container start via `_PIP_ADDITIONAL_REQUIREMENTS` in `docker-compose.yml` — no image build:
+
+`apache-spark` · `apprise` · `discord` · `imap` · `opsgenie` · `papermill` · `telegram`
+
+Versions are pinned to what the official 3.0.2 constraints resolve to, so a rebuild-free `up` stays reproducible instead of drifting onto a future incompatible release. With these in place all **47** gated operators/notifiers report `available` and none are dimmed. (The two third-party ops — Great Expectations and OpenMetadata — sit outside Airflow's constraints and are *by design* never gated: they show a pinned-install hint and are never deploy-blocked, so they need nothing installed here. See PRD §13 Q13.)
+
+To add another provider, append a pinned entry to `_PIP_ADDITIONAL_REQUIREMENTS` and `docker compose up -d airflow`.
+
+> **Why a bind-mounted pip cache.** These packages reinstall on every container **recreate** (a plain `restart` keeps the writable layer, so pip just reports "already satisfied"). One of them pulls `pyspark`, which ships no matching wheel and is built from source — measured at ~1630s to recreate on an empty cache versus ~236s once the built wheel is cached. `docker/airflow-pip-cache/` is bind-mounted to `/tmp/.cache` for that reason. Two details worth knowing if you touch it: the image sets `PIP_CACHE_DIR=/tmp/.cache/pip`, so mounting the usual `~/.cache` caches nothing; and it must be a **bind** mount, because a fresh *named* volume is created root-owned while the container runs as uid 50000 and cannot write into it. The folder's contents are gitignored.
+
 ## Enable / disable Airflow
 
 The Airflow service is controlled via a Docker Compose **profile**. Edit `.env` at the repo root:

@@ -43,10 +43,47 @@ services:
       AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/config/passwords.json
       # Stable JWT signing secret so tokens survive restarts.
       AIRFLOW__API_AUTH__JWT_SECRET: dev-jwt-secret-change-me
+      # Provider packages the operator registry needs but the base image omits,
+      # so every palette node is enabled instead of dimmed (PRD §6.2.1 gating
+      # reads GET /api/v2/providers from THIS container). The other ten the
+      # registry requires — amazon, cncf-kubernetes, common-sql, ftp, google,
+      # http, sftp, slack, smtp, standard — already ship in apache/airflow:3.0.2.
+      #
+      # Versions are pinned to what the official 3.0.2 constraints resolve to
+      # (constraints-3.0.2/constraints-3.12.txt), so a rebuild-free `up` stays
+      # reproducible instead of drifting onto a future incompatible release.
+      # The image entrypoint installs these at container start — no image build.
+      # Cost lands on a container RECREATE, not a `restart` (which keeps the
+      # writable layer, so pip just reports "already satisfied"); see the pip
+      # cache mount below for the measured numbers.
+      _PIP_ADDITIONAL_REQUIREMENTS: >-
+        apache-airflow-providers-apache-spark==5.3.0
+        apache-airflow-providers-apprise==2.1.0
+        apache-airflow-providers-discord==3.10.0
+        apache-airflow-providers-imap==3.9.0
+        apache-airflow-providers-opsgenie==5.9.0
+        apache-airflow-providers-papermill==3.11.0
+        apache-airflow-providers-telegram==4.8.0
     volumes:
       - ./docker/airflow-dags:/opt/airflow/dags
       - ./docker/airflow-config:/opt/airflow/config
       - airflow-db:/opt/airflow
+      # pip's download+wheel cache. The providers above reinstall whenever the
+      # container is RECREATED (a plain restart keeps the writable layer, so
+      # pip just says "already satisfied"), and one of them — apache-spark —
+      # pulls pyspark, which ships no matching wheel and is BUILT from source.
+      # Measured here: ~1630s to recreate on an empty cache vs ~236s once the
+      # built wheel is cached.
+      #
+      # Two non-obvious details, both learned by watching it silently cache
+      # nothing: the path is NOT ~/.cache — this image sets
+      # PIP_CACHE_DIR=/tmp/.cache/pip — and it must be a BIND mount, because a
+      # fresh named volume is created root-owned while the container runs as
+      # uid 50000, which then cannot write into it. A bind mount takes the host
+      # directory's permissions instead. It is a pure cache, so it shadows
+      # nothing (unlike mounting a site-packages/prefix path, which is why
+      # Airflow's own install dir is deliberately left alone).
+      - ./docker/airflow-pip-cache:/tmp/.cache
     healthcheck:
       test: ['CMD-SHELL', "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/')\""]
       interval: 15s
