@@ -3,14 +3,18 @@ import { DescriptionFieldProps, RJSFSchema, UiSchema } from '@rjsf/utils';
 import validator from '@rjsf/validator-ajv8';
 import * as React from 'react';
 
-import { afdagWidgets } from './rjsfWidgets';
+import { afdagBaseInput, afdagWidgets } from './rjsfWidgets';
 import { InfoBubble } from './InfoBubble';
+import { IAfdagVariable } from '../ir';
 
 export interface IAfdagFormProps {
   schema: RJSFSchema;
   uiSchema: UiSchema;
   formData: Record<string, unknown>;
   onChange: (formData: Record<string, unknown>) => void;
+  /** The flow's declared variables (PRD §6.10), handed to every field through
+   * RJSF's `formContext` so the per-field variable picker can offer them. */
+  variables?: IAfdagVariable[];
 }
 
 /**
@@ -32,7 +36,11 @@ function AfdagDescriptionField(
   return <InfoBubble text={description} id={id} />;
 }
 
-const afdagTemplates = { DescriptionFieldTemplate: AfdagDescriptionField };
+const afdagTemplates = {
+  DescriptionFieldTemplate: AfdagDescriptionField,
+  // One seam that reaches every plain input in every operator form.
+  BaseInputTemplate: afdagBaseInput
+};
 
 /**
  * A thin RJSF wrapper with the Airflow Studio custom widgets, live validation,
@@ -49,6 +57,7 @@ export function AfdagForm(props: IAfdagFormProps): JSX.Element {
       validator={validator}
       widgets={afdagWidgets}
       templates={afdagTemplates}
+      formContext={{ variables: props.variables ?? [] }}
       liveValidate
       showErrorList={false}
       onChange={event =>

@@ -15,12 +15,20 @@ export type CodeMirrorLanguage = 'python' | 'json';
 // read-only CODE-tab preview. Built once: the style is theme-aware via CSS vars.
 const syntaxHighlight = syntaxHighlighting(jupyterHighlightStyle);
 
+/** Imperative handle for callers that need to write into the editor at the
+ * caret — the variable picker (PRD §6.10). Kept deliberately narrow: the value
+ * still flows out through `onChange`, so React remains the source of truth. */
+export interface ICodeMirrorHandle {
+  insert: (text: string) => void;
+}
+
 export interface ICodeMirrorFieldProps {
   value: string;
   language: CodeMirrorLanguage;
   placeholder?: string;
   readOnly?: boolean;
   onChange?: (value: string) => void;
+  handleRef?: React.RefObject<ICodeMirrorHandle>;
 }
 
 function languageExtension(language: CodeMirrorLanguage) {
@@ -73,6 +81,29 @@ export function CodeMirrorField(props: ICodeMirrorFieldProps): JSX.Element {
     };
     // Mount-once: language and value updates are handled by the effects below.
   }, []);
+
+  // Expose the caret-insert used by the variable picker. CodeMirror owns its
+  // own selection, so this dispatches a transaction rather than reaching for
+  // the DOM; the resulting doc change flows back out through `onChange` like
+  // any keystroke.
+  React.useImperativeHandle(
+    props.handleRef,
+    () => ({
+      insert(text: string) {
+        const view = viewRef.current;
+        if (!view) {
+          return;
+        }
+        const { from, to } = view.state.selection.main;
+        view.dispatch({
+          changes: { from, to, insert: text },
+          selection: { anchor: from + text.length }
+        });
+        view.focus();
+      }
+    }),
+    []
+  );
 
   // Reconfigure the language when it changes (e.g. switching selected node).
   React.useEffect(() => {

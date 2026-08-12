@@ -3,6 +3,7 @@ import * as React from 'react';
 import { inspectVariables } from '../handler';
 import { IVariableStatus, IVariablesInspectRes } from '../interfaces';
 import { IAfdagIR, IAfdagVariable } from '../ir';
+import { codeSnippet, referenceSnippet } from '../variableRefs';
 
 export interface IVariablesTabProps {
   ir: IAfdagIR;
@@ -19,30 +20,6 @@ function emptyVariable(): IAfdagVariable {
     description: '',
     var_type: 'string'
   };
-}
-
-/** The reference snippet to paste into an operator field. Airflow resolves it at
- * task run time; `var.json` deserializes, `var.value` returns the raw string.
- * A key that is not a plain identifier can't use attribute access, so it falls
- * back to the `.get('…')` form. */
-export function referenceSnippet(entry: IAfdagVariable): string {
-  const accessor = entry.var_type === 'json' ? 'var.json' : 'var.value';
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.key)
-    ? `{{ ${accessor}.${entry.key} }}`
-    : `{{ ${accessor}.get(${JSON.stringify(entry.key)}) }}`;
-}
-
-/** The Python equivalent, for a code-node body. Airflow 3's SDK parameter is
- * `default` — NOT the old ORM's `default_var`. */
-export function codeSnippet(entry: IAfdagVariable): string {
-  const args = [JSON.stringify(entry.key)];
-  if (entry.var_type === 'json') {
-    args.push('deserialize_json=True');
-  }
-  if (entry.default) {
-    args.push(`default=${JSON.stringify(entry.default)}`);
-  }
-  return `Variable.get(${args.join(', ')})`;
 }
 
 function StatusBadge(props: {

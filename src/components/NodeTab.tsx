@@ -3,7 +3,11 @@ import * as React from 'react';
 import { formDataToNode, nodeForm, nodeToFormData } from '../forms';
 import { AfdagFlowNode, IAfdagNodeData } from '../graph';
 import { IOperatorDef } from '../interfaces';
-import { AfdagCallbacksValue, IAfdagTaskCallbacks } from '../ir';
+import {
+  AfdagCallbacksValue,
+  IAfdagTaskCallbacks,
+  IAfdagVariable
+} from '../ir';
 import { getOperator } from '../operators';
 import { AfdagForm } from './AfdagForm';
 import { CallbacksEditor, ICallbackEvent } from './CallbacksEditor';
@@ -23,6 +27,8 @@ export interface INodeTabProps {
   /** Bumped on an external IR reload so the keyed children reseed local state. */
   reloadKey: number;
   onNodeChange: (id: string, patch: Partial<IAfdagNodeData>) => void;
+  /** Declared variables, offered by the per-field picker (PRD §6.10). */
+  variables?: IAfdagVariable[];
 }
 
 /**
@@ -63,6 +69,7 @@ export function NodeTab(props: INodeTabProps): JSX.Element {
         node={node}
         def={def}
         onNodeChange={onNodeChange}
+        variables={props.variables}
       />
       <NodeCallbacksSection
         key={`${reloadKey}:cb:${node.id}`}
@@ -113,6 +120,7 @@ interface INodeFormProps {
   node: AfdagFlowNode;
   def: IOperatorDef;
   onNodeChange: (id: string, patch: Partial<IAfdagNodeData>) => void;
+  variables?: IAfdagVariable[];
 }
 
 function NodeForm(props: INodeFormProps): JSX.Element {
@@ -143,6 +151,7 @@ function NodeForm(props: INodeFormProps): JSX.Element {
       uiSchema={uiSchema}
       formData={formData}
       onChange={handleChange}
+      variables={props.variables}
     />
   );
 }

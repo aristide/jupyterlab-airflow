@@ -372,7 +372,11 @@ Tasks need configuration that shouldn't be hard‑coded into operator fields (en
 
 **Server surface.** `GET variables` (the picker), `POST variables/inspect` (reconcile an unsaved IR against the live Airflow), `POST variables/set` / `POST variables/delete` (single‑variable CRUD, **ownership‑enforced server‑side** — a refusal is a `409`, audited as `rejected`, not a 500). Airflow's variable keys are near‑unconstrained (`/`, `%`, `#`, spaces, unicode all accepted), so every key is percent‑encoded into the request path. Audit gains `variable_set`/`variable_delete`. Wireframe **§15.15**.
 
-**Deferred 🔭:** a `widget: variable` operator‑param picker (insert a reference without typing Jinja); variable **usage in notifier params**; and Airflow's bulk `PATCH /variables` endpoint (single‑key CRUD is sufficient at this scale).
+**Per‑field variable picker ✅ (2026‑08‑12).** Every templatable operator field carries a `{ }` button that inserts a reference at the caret, so nobody has to remember the Jinja shape. It is wired through **one seam** — RJSF's `BaseInputTemplate` (which every plain input funnels through) plus `TextareaWidget` and the `code` widget — composing RJSF's *own* defaults rather than reimplementing them, so **no operator YAML changed** and the underlying inputs keep every upstream behaviour. The snippets come from the same `variableRefs` module the VARIABLES tab uses, which is exactly what the server's usage scanner recognises, so an inserted reference is guaranteed to register as a real usage (verified end‑to‑end: inserted in the browser → saved → `references()` reports it).
+
+The picker is deliberately **narrow**, because a reference dropped where Airflow doesn't template is stored as a literal and silently never renders — the precise failure this feature exists to prevent. It is therefore hidden on: non‑string and enum fields; `task_id` (must be a Python identifier — opted out via `ui:options.variablePicker: false`, a hook any registry param can reuse); and **all DAG‑level scalars** (`owner`/`start_date`/`tags`/`description`/… are read at parse time, never templated) by simply not handing the DAG form any variables. A `code` body gets the Python form (`Variable.get(…)`) instead of Jinja, inserted through a narrow imperative handle on the CodeMirror field since CodeMirror owns its own selection. With no variables declared the picker renders nothing at all.
+
+**Deferred 🔭:** variable **usage in notifier params**; per‑param `templated` metadata in the registry (today the picker trusts "string operator param ⇒ templatable", which is true of the overwhelming majority but not universal); and Airflow's bulk `PATCH /variables` endpoint (single‑key CRUD is sufficient at this scale).
 
 ### 6.11 Airflow Connections — flow‑scoped vs. pre‑existing — shipped ✅ (2026‑08‑12)
 
@@ -1014,6 +1018,25 @@ The **VARS** inspector tab: declare the Airflow variables the flow depends on, a
   └──────────────────────────────────────┘
 ```
 ✅ built (§6.10). Declarations live on **`ir.variables[]`** (IR root, beside `notes` — never a node/edge). Each row shows its **scope badge** (`Flow`/`Airflow`) plus a **`missing`** badge when the key isn't in Airflow (an error for `Airflow` scope, just "not yet created" for `Flow`). The two **reference snippets** are generated per row — `var.json` for a JSON‑typed variable, and the `.get("…")` form when the key isn't a plain identifier — so the author never has to remember the Jinja shape. **Remove is disabled while a variable is still referenced**, with the using tasks named in the tooltip. **Used‑but‑not‑defined** raises a blocking banner with a one‑click *define* button per key. The tab re‑inspects (debounced) against `POST variables/inspect`, and degrades to "Airflow unreachable — the deploy will re‑check" rather than guessing. A value Airflow redacts (sensitive‑looking key) shows as hidden and is never written back.
+
+#### 15.3a NODE tab — per-field variable picker ✅
+
+Every templatable operator field carries a `{ }` button; it inserts a reference at the caret so the Jinja shape never has to be recalled (§6.10).
+
+```
+│ NODE                                              │
+│ task_id      [ fetch                       ]      │ ← no picker: must be an identifier
+│ Bash Command [ echo "{{ var.value.api_base }}" {}]│
+│                                              ↑    │
+│                              ┌───────────────────┐│
+│                              │ api_base          ││
+│                              │ {{ var.value.api… ││
+│                              │ tuning_cfg        ││
+│                              │ {{ var.json.tuni… ││ ← var.json for a JSON variable
+│                              └───────────────────┘│
+│ Environment Vars { }                              │
+```
+✅ built. Wired through **one seam** (RJSF's `BaseInputTemplate` + `TextareaWidget` + the `code` widget), composing RJSF's own defaults — **no operator YAML changed**, and it reaches all 44 operators at once. A `code` body offers the Python form `Variable.get("k")` instead. Hidden where a template could never render: non-strings/enums, `task_id`, and every DAG-level scalar. Nothing renders at all until the flow declares a variable.
 
 ### 15.16 Studio editor — Connections tab ✅
 

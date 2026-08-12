@@ -132,6 +132,7 @@ export function Inspector(props: IInspectorProps): JSX.Element {
           node={props.node}
           reloadKey={props.reloadKey}
           onNodeChange={props.onNodeChange}
+          variables={props.ir.variables}
         />
       )}
       {tab === 'info' && <InfoTab node={props.node} />}

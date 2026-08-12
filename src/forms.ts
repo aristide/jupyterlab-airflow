@@ -147,7 +147,11 @@ export function nodeForm(op: IOperatorDef): IFormSpec {
   };
   const required: string[] = ['task_id'];
   const order = ['task_id', ...op.params.map(p => p.name)];
-  const uiSchema: UiSchema = {};
+  const uiSchema: UiSchema = {
+    // A task_id must be a Python identifier (codegen enforces it), so a Jinja
+    // variable reference could never be valid here — hide the picker (§6.10).
+    task_id: { 'ui:options': { variablePicker: false } }
+  };
 
   for (const param of op.params) {
     properties[param.name] = paramSchema(param);

@@ -1,4 +1,4 @@
-import { codeSnippet, referenceSnippet } from '../components/VariablesTab';
+import { codeSnippet, insertAtCaret, referenceSnippet } from '../variableRefs';
 import { IAfdagVariable } from '../ir';
 
 const entry = (patch: Partial<IAfdagVariable> = {}): IAfdagVariable => ({
@@ -65,5 +65,43 @@ describe('codeSnippet', () => {
     expect(codeSnippet(entry({ default: '' }))).toBe(
       'Variable.get("api_base")'
     );
+  });
+});
+
+describe('insertAtCaret', () => {
+  const field = (value: string, start: number, end = start) =>
+    ({ selectionStart: start, selectionEnd: end }) as HTMLInputElement;
+
+  it('splices the snippet at the caret', () => {
+    expect(insertAtCaret('echo hello', 'X', field('echo hello', 5))).toBe(
+      'echo Xhello'
+    );
+  });
+
+  it('replaces the current selection', () => {
+    expect(insertAtCaret('echo hello', 'X', field('echo hello', 5, 10))).toBe(
+      'echo X'
+    );
+  });
+
+  it('inserts into an empty field', () => {
+    expect(insertAtCaret('', '{{ var.value.k }}', field('', 0))).toBe(
+      '{{ var.value.k }}'
+    );
+  });
+
+  it('appends with a separating space when there is no live caret', () => {
+    // An unfocused field has no selection; appending beats silently dropping
+    // the reference or clobbering what the user already typed.
+    expect(insertAtCaret('echo hi', 'X', null)).toBe('echo hi X');
+    expect(insertAtCaret('echo hi ', 'X', null)).toBe('echo hi X');
+    expect(insertAtCaret('', 'X', null)).toBe('X');
+  });
+
+  it('keeps the value unchanged apart from the insertion', () => {
+    const before = 'a b c';
+    const after = insertAtCaret(before, '{{ var.value.k }}', field(before, 2));
+    expect(after).toBe('a {{ var.value.k }}b c');
+    expect(after.replace('{{ var.value.k }}', '')).toBe(before);
   });
 });

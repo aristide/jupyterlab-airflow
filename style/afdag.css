@@ -1559,3 +1559,85 @@
   color: var(--jp-ui-font-color1);
   font-size: var(--jp-ui-font-size0);
 }
+
+/* -- per-field variable picker (PRD §6.10) ------------------------------- */
+
+/* The field and its picker share a row; the input keeps all the flex space so
+   adding the picker never shrinks an existing form field noticeably. */
+.jp-afdag-field-withpick {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.jp-afdag-field-withpick > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.jp-afdag-varpick {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.jp-afdag-varpick-btn {
+  padding: 2px 5px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-ui-font-size0);
+  line-height: 1.4;
+}
+
+.jp-afdag-varpick-btn:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-afdag-varpick-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  background: var(--jp-layout-color0);
+  box-shadow: var(--jp-elevation-z4);
+}
+
+.jp-afdag-varpick-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border: none;
+  border-bottom: 1px solid var(--jp-border-color2);
+  background: none;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  text-align: left;
+}
+
+.jp-afdag-varpick-item:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-afdag-varpick-key {
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-afdag-varpick-snippet {
+  color: var(--jp-ui-font-color3);
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-ui-font-size0);
+  overflow-wrap: anywhere;
+}
