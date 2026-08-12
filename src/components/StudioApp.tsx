@@ -83,7 +83,17 @@ import { Palette } from './Palette';
 
 // Deploy poll cadence: a few minutes total, backing off from 2s to 8s. Airflow
 // re-parses on min_file_process_interval (~30s) so sub-second polling is wasteful.
-const POLL_TIMEOUT_MS = 180000;
+// Must exceed Airflow's *new-file* discovery interval, not just its re-parse
+// interval. On the 3.0.2 target `dag_processor.refresh_interval` (and
+// `scheduler.dag_dir_list_interval`) default to **300s**, while an already-known
+// file is re-read on `min_file_process_interval` (~30s). A first deploy and a
+// rename both create a NEW file, and how long that takes depends on where the
+// write lands in the scan cycle — anywhere from seconds to the full 300s
+// (measured here: 171s for one probe). So the old 180s budget didn't fail
+// every time, it failed *unpredictably* — roughly whenever the deploy landed in
+// the back half of a cycle — leaving the deploy looking hung and a rename with
+// its old DAG stranded. 7 minutes covers a full scan plus parse/serialize.
+const POLL_TIMEOUT_MS = 420000;
 const POLL_START_MS = 2000;
 const POLL_MAX_MS = 8000;
 // Run-on-deploy (§6.5.4): a deployed run is polled to completion, with a longer
@@ -903,15 +913,21 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       }
 
       if (!token.cancelled) {
-        // Timed out before the renamed DAG registered → don't retire the old.
-        pendingRetireRef.current = null;
+        // Timed out. `pendingRetireRef` is deliberately NOT cleared: retiring is
+        // gated on actually observing `registered`, so keeping the intent is
+        // safe and lets "Keep waiting" finish a migration that was merely slow.
+        // Clearing it here used to strand the old DAG permanently — the rename
+        // half-completed with no way to finish it.
         setDeploy({
           phase: 'processing',
           dagId,
           filename,
-          message:
-            'Still processing — Airflow has not picked up the file yet. ' +
-            'This can take a few minutes.'
+          message: pendingRetireRef.current
+            ? `Still processing — Airflow has not picked up “${dagId}” yet, so ` +
+              `“${pendingRetireRef.current.oldDagId}” has not been retired. ` +
+              'Keep waiting to finish the rename.'
+            : 'Still processing — Airflow has not picked up the file yet. ' +
+              'This can take a few minutes.'
         });
       }
     },
@@ -940,7 +956,11 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         filename,
         // Carried into a later `failed` so the banner can offer Roll back (§7).
         backedUp: res.data.backed_up,
-        message: 'Waiting for Airflow to pick it up… (up to a few minutes)'
+        // A brand-new file (first deploy or a rename) waits on Airflow's 300s
+        // directory scan, so say so rather than letting it look hung.
+        message:
+          'Waiting for Airflow to pick it up… A new DAG file can take up to ' +
+          '5 minutes to be discovered.'
       });
       void pollLifecycle(dagId, filename);
     },
