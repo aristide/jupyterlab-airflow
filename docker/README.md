@@ -52,10 +52,15 @@ The container runs as **root** (`user: root`): the base image's default non-root
 
 ## Services
 
-| Service | Image                                       | Ports        | Profile     | Purpose                        |
-| ------- | -------------------------------------------- | ------------ | ----------- | ------------------------------- |
+| Service | Image | Ports | Profile | Purpose |
+| ------- | ----- | ----- | ------- | ------- |
 | jupyter | `nikolaik/python-nodejs:python3.12-nodejs22` | 8889→8888, 9998→9999 | (always on) | JupyterLab dev container |
-| airflow | `apache/airflow:3.0.2`                       | 8081→8080    | airflow     | Local Airflow 3.x (standalone)  |
+| airflow | `apache/airflow:3.0.2` | 8081→8080 | airflow | Local Airflow 3.x (standalone) |
+| airflow-db | `postgres:16` | — | airflow | Airflow's metadata database |
+
+> **Why Postgres and not the default SQLite.** SQLite allows a single writer, and with `LocalExecutor` the scheduler, dag-processor and api-server all contend for it. That contention killed the scheduler here with `sqlite3.OperationalError: database is locked`, and `standalone` did not restart it — so for hours DAGs deployed and registered but **silently never ran**. Worse, the container still reported `healthy`, because the healthcheck only pinged the API server. The healthcheck now also runs `airflow jobs check --job-type SchedulerJob`, so a dead scheduler shows up as `Up (unhealthy)` instead of hiding. If you ever do see runs stuck in `queued`, that is the symptom to check first.
+>
+> Switching the metadata DB **resets Airflow's own state** (DAG run history). Your `.afdag` files and the deployed `.py` are untouched, and DAGs re-register from the dags folder on the next scan.
 
 ## Airflow provider packages (why every palette node is enabled)
 

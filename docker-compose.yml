@@ -23,18 +23,52 @@
 # See docker/README.md for details.
 
 services:
+  # Airflow's metadata database. NOT a convenience — a correctness fix. Airflow
+  # standalone defaults to SQLite, which allows a single writer, and with
+  # LocalExecutor the scheduler, dag-processor and api-server all contend for
+  # it. Under real editing load that contention killed the scheduler here with
+  # `sqlite3.OperationalError: database is locked`; standalone did not restart
+  # it, so for ~14h DAGs deployed and registered but silently never ran, while
+  # the container still reported healthy. Postgres removes the contention.
+  airflow-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      # First start runs initdb and then waits for the server to come up. The
+      # image's default 60s was not enough on Docker Desktop's named-volume I/O
+      # here — initdb succeeded but `pg_ctl` timed out and the container exited.
+      PGCTLTIMEOUT: '300'
+    volumes:
+      - airflow-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U airflow -d airflow']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    profiles:
+      - airflow
+
   airflow:
     image: apache/airflow:3.0.2
     command: standalone
+    depends_on:
+      airflow-db:
+        condition: service_healthy
     ports:
       # Host 8080 is often taken (e.g. an MCP server); map the UI to 8081 on the
       # host. Inside the compose network Airflow is still reached at airflow:8080.
       - 0.0.0.0:8081:8080
     environment:
-      # Dev-only: SQLite metadata DB. Example DAGs are OFF: several of Airflow
-      # 3.0.2's bundled examples import a test-only `tests_common` module that is
-      # not in the published wheel, which surfaces as a spurious import error.
-      # The mounted demo DAG (docker/airflow-dags/) is the "something to show" instead.
+      # Point Airflow at the Postgres above instead of the default SQLite (see
+      # the airflow-db service for why). LocalExecutor is only safe to run this
+      # way with a real concurrent-writer database.
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      # Example DAGs are OFF: several of Airflow 3.0.2's bundled examples import
+      # a test-only `tests_common` module that is not in the published wheel,
+      # which surfaces as a spurious import error. The deployed DAGs in
+      # docker/airflow-dags/ are the "something to show" instead.
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       # Deterministic credentials for the SimpleAuthManager (admin / admin).
@@ -67,7 +101,11 @@ services:
     volumes:
       - ./docker/airflow-dags:/opt/airflow/dags
       - ./docker/airflow-config:/opt/airflow/config
-      - airflow-db:/opt/airflow
+      # Airflow's home (logs, config it writes). Named `airflow-home`, not
+      # `airflow-db` as before — the metadata DB now lives in Postgres, and a
+      # volume sharing a name with the `airflow-db` *service* reads as if this
+      # were that database.
+      - airflow-home:/opt/airflow
       # pip's download+wheel cache. The providers above reinstall whenever the
       # container is RECREATED (a plain restart keeps the writable layer, so
       # pip just says "already satisfied"), and one of them — apache-spark —
@@ -85,11 +123,21 @@ services:
       # Airflow's own install dir is deliberately left alone).
       - ./docker/airflow-pip-cache:/tmp/.cache
     healthcheck:
-      test: ['CMD-SHELL', "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/')\""]
+      # Checks the API server AND the scheduler. The API-server-only check used
+      # to report "healthy" while the scheduler was dead — the worst possible
+      # signal, because DAGs still deploy and register, they just never run.
+      # `airflow jobs check` fails when no SchedulerJob has heartbeated
+      # recently, so that state now shows up as `Up (unhealthy)`.
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://localhost:8080/')" &&
+          airflow jobs check --job-type SchedulerJob --limit 1
       interval: 15s
-      timeout: 10s
+      timeout: 20s
       retries: 20
-      start_period: 90s
+      start_period: 120s
     profiles:
       - airflow
 
@@ -147,6 +195,7 @@ services:
         required: false
 
 volumes:
-  airflow-db:
+  airflow-pgdata:
+  airflow-home:
   node_modules:
   usr-local:
