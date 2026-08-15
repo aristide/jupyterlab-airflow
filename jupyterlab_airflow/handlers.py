@@ -10,6 +10,7 @@ from jupyter_server.utils import url_path_join
 from . import connections, variables
 from .audit import audit_event
 from .client import AirflowError, get_client
+from .config import can_edit, studio_role
 from .codegen import generate_dag
 from .deploy import (
     deploy_dag,
@@ -102,6 +103,35 @@ class _AirflowHandler(APIHandler):
             except Exception:  # noqa: BLE001
                 self.log.exception("audit emission failed (action=%s)", audit_action)
 
+        # Authorization gate (PRD §9). The privileged set is defined as exactly
+        # the AUDITED set — `audit_action` is the single marker for "this
+        # mutates shared Airflow state". Deriving the gate from it, here in the
+        # one place every handler already funnels through, means the two can
+        # never drift: a future mutating handler cannot be added without either
+        # auditing it (and so gating it) or deliberately doing neither.
+        #
+        # This runs BEFORE `fn`, so a denied request mutates nothing. It is the
+        # real enforcement point — the frontend's read-only mode is a courtesy,
+        # since these routes are reachable directly.
+        #
+        # A refusal is itself audited, as `denied`: an attempted privileged
+        # action by a view-only user is precisely what an audit trail is for.
+        if audit_action and not can_edit():
+            _audit("denied", audit_dag_id, detail=f"role={studio_role()}")
+            self.set_status(403)
+            self.finish(
+                json.dumps(
+                    {
+                        "error": "You have view-only access to Airflow Studio.",
+                        "detail": (
+                            "This action changes Airflow, which your role does "
+                            "not permit. Ask an administrator for edit access."
+                        ),
+                    }
+                )
+            )
+            return
+
         try:
             data = await self.run(fn, *args, **kwargs)
         except AirflowError as err:
@@ -152,6 +182,24 @@ class HealthHandler(_AirflowHandler):
     @tornado.web.authenticated
     async def get(self):
         await self.respond(get_client().health)
+
+
+class CapabilitiesHandler(_AirflowHandler):
+    """What this user may do (PRD §9), so the UI can present a coherent
+    view-only mode instead of offering actions that will 403.
+
+    Advisory only — the authorization decision is enforced in
+    :meth:`_AirflowHandler.respond`, never here. A client that ignores this
+    endpoint gains nothing.
+    """
+
+    @tornado.web.authenticated
+    async def get(self):
+        # Answered directly rather than via `respond`: it reads no Airflow state,
+        # so there is nothing to run off the event loop.
+        self.finish(
+            json.dumps({"data": {"role": studio_role(), "can_edit": can_edit()}})
+        )
 
 
 class OperatorsHandler(_AirflowHandler):
@@ -709,6 +757,7 @@ def setup_handlers(web_app):
     base_url = web_app.settings["base_url"]
     handlers = [
         (_url(base_url, "health"), HealthHandler),
+        (_url(base_url, "capabilities"), CapabilitiesHandler),
         (_url(base_url, "operators"), OperatorsHandler),
         (_url(base_url, "notifiers"), NotifiersHandler),
         (_url(base_url, "generate"), GenerateHandler),

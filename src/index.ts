@@ -11,6 +11,7 @@ import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 
 import { AirflowPanel } from './AirflowPanel';
 import { AfdagDocWidget, AfdagWidgetFactory } from './factory';
+import { getCapabilities } from './handler';
 import { airflowIcon } from './icons';
 import { AfdagModelFactory } from './model';
 
@@ -172,10 +173,24 @@ const editorPlugin: JupyterFrontEndPlugin<void> = {
       });
     }
 
+    // Creating a flow is an edit (PRD §9). Fetched once at activation and
+    // cached: `isEnabled` is called synchronously by the palette/launcher on
+    // every render, so it cannot await. Defaults to enabled until the answer
+    // arrives — the same optimistic stance as the React context, and a viewer
+    // who slips through gets a 403 from the server with a clear reason.
+    let canCreate = true;
+    void getCapabilities().then(res => {
+      if (res.status === 'OK' && res.data) {
+        canCreate = res.data.can_edit;
+        app.commands.notifyCommandChanged(CommandIDs.createDag);
+      }
+    });
+
     app.commands.addCommand(CommandIDs.createDag, {
       label: trans.__('Airflow DAG'),
       caption: trans.__('Create a new Airflow DAG in Airflow Studio'),
       icon: airflowIcon,
+      isEnabled: () => canCreate,
       execute: async args => {
         const cwd =
           (args['cwd'] as string) ??

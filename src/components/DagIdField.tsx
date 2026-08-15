@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { validateDagId } from '../ir';
+import { useCanEdit, VIEW_ONLY_HINT } from './capabilitiesContext';
 
 export interface IDagIdFieldProps {
   dagId: string;
@@ -25,6 +26,7 @@ export interface IDagIdFieldProps {
  */
 export function DagIdField(props: IDagIdFieldProps): JSX.Element {
   const { dagId, onCommit } = props;
+  const canEdit = useCanEdit();
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(dagId);
   const [error, setError] = React.useState<string | null>(null);
@@ -74,7 +76,14 @@ export function DagIdField(props: IDagIdFieldProps): JSX.Element {
       <button
         type="button"
         className="jp-afdag-dagid jp-afdag-dagid-btn"
-        title="Click to rename the dag_id (a guided migration for a deployed DAG)"
+        title={
+          canEdit
+            ? 'Click to rename the dag_id (a guided migration for a deployed DAG)'
+            : VIEW_ONLY_HINT
+        }
+        // Renaming a deployed dag_id is a migration that redeploys and retires
+        // the old DAG, so it is squarely a privileged action.
+        disabled={!canEdit}
         onClick={start}
       >
         {dagId || 'untitled'}

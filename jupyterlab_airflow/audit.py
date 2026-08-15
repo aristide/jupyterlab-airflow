@@ -62,10 +62,12 @@ def audit_event(
 ) -> Dict[str, Any]:
     """Emit one audit record for a mutating action and return it.
 
-    ``outcome`` is ``"ok"`` (the action completed and mutated), ``"rejected"`` (it
-    ran but mutated nothing — e.g. a deploy refused by validation / a missing
-    provider), or ``"error"`` (it raised); ``detail`` carries a short
-    error/reason message for rejected/error (never the request body).
+    ``outcome`` is ``"ok"`` (the action completed and mutated), ``"rejected"``
+    (it ran but mutated nothing — e.g. a deploy refused by validation / a
+    missing provider), ``"denied"`` (authorization refused it before it ran —
+    a view-only role attempting a privileged action, PRD §9), or ``"error"``
+    (it raised); ``detail`` carries a short error/reason message for
+    rejected/denied/error (never the request body).
     The record is logged as a single JSON line at ``INFO`` on the
     ``jupyterlab_airflow.audit`` logger.
     """

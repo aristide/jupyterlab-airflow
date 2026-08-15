@@ -3,6 +3,7 @@ import { ServerConnection } from '@jupyterlab/services';
 
 import {
   IApiRes,
+  ICapabilities,
   IClearRes,
   IDagDetails,
   IDagListRes,
@@ -96,8 +97,27 @@ async function POST<T>(
   });
 }
 
+/**
+ * One human-readable message from a failed response.
+ *
+ * The server splits a failure into `error` (what happened) and `detail` (what
+ * to do about it), but every call site used to show only the first half. That
+ * is worst exactly where it matters most: a 403 reads "You have view-only
+ * access to Airflow Studio." with the actionable "Ask an administrator for
+ * edit access." silently dropped.
+ */
+export function apiError<T>(res: IApiRes<T>, fallback: string): string {
+  const head = res.error ?? fallback;
+  return res.detail ? `${head} ${res.detail}` : head;
+}
+
 export const getHealth = (): Promise<IApiRes<IHealth>> =>
   GET<IHealth>('health');
+
+// Whether this user may run privileged actions (PRD §9). Advisory — the server
+// enforces it on every mutating endpoint regardless of the answer here.
+export const getCapabilities = (): Promise<IApiRes<ICapabilities>> =>
+  GET<ICapabilities>('capabilities');
 
 // `refresh` forces a fresh read of the target Airflow's installed providers
 // (the availability annotations); otherwise the server serves its short-TTL cache.

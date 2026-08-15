@@ -37,6 +37,7 @@ import {
   isNoteNode
 } from '../graph';
 import {
+  apiError,
   deleteDag,
   deployDag,
   deployStatus,
@@ -73,6 +74,11 @@ import {
 import { IStudioServices } from '../services';
 import { AfdagEdge } from './AfdagEdge';
 import { AfdagNode } from './AfdagNode';
+import {
+  CanEditContext,
+  useFetchCanEdit,
+  VIEW_ONLY_HINT
+} from './capabilitiesContext';
 import { Coachmark, CoachStep } from './Coachmark';
 import { DagIdField } from './DagIdField';
 import { DeployBanner, IDeployState } from './DeployBanner';
@@ -143,6 +149,11 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const { context, resized } = props;
   const services = props.services ?? null;
   const model = context.model as AfdagModel;
+
+  // Whether this user may run privileged actions (PRD §9). Advisory: the server
+  // rejects a privileged request from a viewer regardless, so this only shapes
+  // what the UI offers.
+  const canEdit = useFetchCanEdit();
 
   const [ready, setReady] = React.useState(false);
   const [operators, setOperators] =
@@ -942,8 +953,12 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       setDeploy({ phase: 'writing', message: 'Writing the DAG file…' });
       const res = await deployDag(ir);
       if (res.status !== 'OK' || !res.data?.deployed) {
+        // Validation errors (when the server got far enough to produce them)
+        // are the most specific thing to show; otherwise fall back to the
+        // transport-level message, which for a 403 carries the view-only
+        // explanation plus what to do about it.
         const detail =
-          res.data?.errors?.join('; ') || res.error || 'Deploy failed';
+          res.data?.errors?.join('; ') || apiError(res, 'Deploy failed');
         // A failed (re)deploy aborts any pending rename migration.
         pendingRetireRef.current = null;
         setDeploy({ phase: 'error', message: detail });
@@ -1247,196 +1262,220 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   }
 
   return (
-    <EditorActionsContext.Provider value={editorActions}>
-      <div className="jp-afdag-root">
-        <div className="jp-afdag-topbar">
-          <span className="jp-afdag-brand">Airflow Studio</span>
-          <DagIdField
-            dagId={dag.dag_id}
-            onCommit={next => void onRenameDagId(next)}
-          />
-          <span className="jp-afdag-count">
-            {taskNodes.length} {taskNodes.length === 1 ? 'node' : 'nodes'}
-          </span>
-          <span
-            className={
-              errorCount
-                ? 'jp-afdag-errors jp-mod-error'
-                : 'jp-afdag-errors jp-mod-ok'
-            }
-          >
-            {errorCount
-              ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
-              : '✓ no errors'}
-          </span>
-          <div
-            className="jp-afdag-syntax-toggle"
-            role="group"
-            aria-label="Generated code syntax"
-          >
-            <button
+    <CanEditContext.Provider value={canEdit}>
+      <EditorActionsContext.Provider value={editorActions}>
+        <div className="jp-afdag-root">
+          <div className="jp-afdag-topbar">
+            <span className="jp-afdag-brand">Airflow Studio</span>
+            <DagIdField
+              dagId={dag.dag_id}
+              onCommit={next => void onRenameDagId(next)}
+            />
+            <span className="jp-afdag-count">
+              {taskNodes.length} {taskNodes.length === 1 ? 'node' : 'nodes'}
+            </span>
+            <span
               className={
-                syntaxStyle === 'taskflow'
-                  ? 'jp-afdag-syntax-opt jp-mod-active'
-                  : 'jp-afdag-syntax-opt'
+                errorCount
+                  ? 'jp-afdag-errors jp-mod-error'
+                  : 'jp-afdag-errors jp-mod-ok'
               }
-              aria-pressed={syntaxStyle === 'taskflow'}
-              title="TaskFlow — @dag / @task decorators (Airflow-3 idiomatic)"
-              onClick={() => onToggleSyntax('taskflow')}
             >
-              TaskFlow
-            </button>
-            <button
-              className={
-                syntaxStyle === 'traditional'
-                  ? 'jp-afdag-syntax-opt jp-mod-active'
-                  : 'jp-afdag-syntax-opt'
-              }
-              aria-pressed={syntaxStyle === 'traditional'}
-              title="Traditional — with DAG(…) + operator instances + >> wiring"
-              onClick={() => onToggleSyntax('traditional')}
+              {errorCount
+                ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
+                : '✓ no errors'}
+            </span>
+            <div
+              className="jp-afdag-syntax-toggle"
+              role="group"
+              aria-label="Generated code syntax"
             >
-              Traditional
-            </button>
-          </div>
-          <span className="jp-afdag-spacer" />
-          <button
-            className="jp-afdag-btn"
-            title="Auto-arrange the tasks (top-to-bottom layered layout)"
-            disabled={taskNodes.length === 0}
-            onClick={onTidyLayout}
-          >
-            ≣ Tidy
-          </button>
-          <button
-            className="jp-afdag-btn"
-            title="Save (.afdag)"
-            onClick={() => void context.save()}
-          >
-            Save
-          </button>
-          <button
-            className="jp-afdag-btn jp-afdag-btn-primary"
-            title={
-              errorCount
-                ? 'Fix validation errors before deploying'
-                : 'Validate and deploy the DAG to Airflow'
-            }
-            disabled={
-              deploy.phase === 'writing' ||
-              deploy.phase === 'waiting' ||
-              errorCount > 0 ||
-              taskNodes.length === 0
-            }
-            onClick={() => void onDeploy()}
-          >
-            {deploy.phase === 'writing' || deploy.phase === 'waiting'
-              ? 'Deploying…'
-              : 'Deploy'}
-          </button>
-        </div>
-        <DeployBanner
-          state={deploy}
-          explanation={deployExplanation}
-          onDismiss={onDismissDeploy}
-          onUnpauseTrigger={onUnpauseTrigger}
-          onStopRun={() => void onStopRun()}
-          onKeepWaiting={onKeepWaiting}
-          onUndeploy={() => void onUndeploy()}
-          onRollback={() => void onRollback()}
-        />
-        <div className="jp-afdag-body">
-          <Palette
-            operators={operators}
-            onAdd={addNode}
-            onAddNote={addNote}
-            onRefresh={refreshOperators}
-            collapsed={leftCollapsed}
-            onToggle={toggleLeft}
-          />
-          <div className="jp-afdag-canvas">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              defaultEdgeOptions={defaultEdgeOptions}
-              connectionLineType={ConnectionLineType.SmoothStep}
-              deleteKeyCode={['Delete', 'Backspace']}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              isValidConnection={isValidConnection}
-              onReconnect={onReconnect}
-              onNodesDelete={onNodesDelete}
-              onNodeDragStart={onNodeDragStart}
-              onNodeDragStop={onNodeDragStop}
-              onInit={instance => {
-                rfRef.current = instance;
-                instance.fitView();
-              }}
-              onNodeClick={(_, node) =>
-                setSelectedId(isNoteNode(node) ? null : node.id)
-              }
-              onPaneClick={() => setSelectedId(null)}
-              fitView
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background />
-              <MiniMap pannable zoomable />
-              <Controls />
-            </ReactFlow>
-            {nodes.length === 0 && (
-              <div className="jp-afdag-empty">
-                Add operators from the left panel to get started.
-              </div>
-            )}
-            {coachStep !== 0 && (
-              <Coachmark
-                step={coachStep as CoachStep}
-                onSkip={completeOnboarding}
-                onNext={() =>
-                  coachStep >= 3
-                    ? completeOnboarding()
-                    : setCoachStep(coachStep + 1)
+              <button
+                className={
+                  syntaxStyle === 'taskflow'
+                    ? 'jp-afdag-syntax-opt jp-mod-active'
+                    : 'jp-afdag-syntax-opt'
                 }
-              />
-            )}
+                aria-pressed={syntaxStyle === 'taskflow'}
+                title="TaskFlow — @dag / @task decorators (Airflow-3 idiomatic)"
+                onClick={() => onToggleSyntax('taskflow')}
+              >
+                TaskFlow
+              </button>
+              <button
+                className={
+                  syntaxStyle === 'traditional'
+                    ? 'jp-afdag-syntax-opt jp-mod-active'
+                    : 'jp-afdag-syntax-opt'
+                }
+                aria-pressed={syntaxStyle === 'traditional'}
+                title="Traditional — with DAG(…) + operator instances + >> wiring"
+                onClick={() => onToggleSyntax('traditional')}
+              >
+                Traditional
+              </button>
+            </div>
+            <span className="jp-afdag-spacer" />
+            {/* Disabled rather than hidden: a toolbar that silently loses three
+              buttons reads as a broken build, while a greyed-out one with a
+              reason reads as a permission. */}
+            <button
+              className="jp-afdag-btn"
+              title={
+                canEdit
+                  ? 'Auto-arrange the tasks (top-to-bottom layered layout)'
+                  : VIEW_ONLY_HINT
+              }
+              disabled={!canEdit || taskNodes.length === 0}
+              onClick={onTidyLayout}
+            >
+              ≣ Tidy
+            </button>
+            <button
+              className="jp-afdag-btn"
+              title={canEdit ? 'Save (.afdag)' : VIEW_ONLY_HINT}
+              disabled={!canEdit}
+              onClick={() => void context.save()}
+            >
+              Save
+            </button>
+            <button
+              className="jp-afdag-btn jp-afdag-btn-primary"
+              title={
+                !canEdit
+                  ? VIEW_ONLY_HINT
+                  : errorCount
+                    ? 'Fix validation errors before deploying'
+                    : 'Validate and deploy the DAG to Airflow'
+              }
+              disabled={
+                !canEdit ||
+                deploy.phase === 'writing' ||
+                deploy.phase === 'waiting' ||
+                errorCount > 0 ||
+                taskNodes.length === 0
+              }
+              onClick={() => void onDeploy()}
+            >
+              {deploy.phase === 'writing' || deploy.phase === 'waiting'
+                ? 'Deploying…'
+                : 'Deploy'}
+            </button>
           </div>
-          <Inspector
-            dag={dag}
-            node={selected}
-            ir={currentIR}
-            services={services}
-            currentPath={context.path}
-            clientErrors={clientErrors}
-            reloadKey={reloadKey}
-            collapsed={rightCollapsed}
-            onToggle={toggleRight}
-            onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
-            onNodeChange={updateNode}
-            onVariablesChange={onVariablesChange}
-            onConnectionsChange={onConnectionsChange}
+          {!canEdit && (
+            <div className="jp-afdag-viewonly" role="status">
+              <span className="jp-afdag-viewonly-badge">View only</span>
+              <span>
+                You can open, read and generate the code for this flow, but not
+                change or deploy it. Ask an administrator for edit access.
+              </span>
+            </div>
+          )}
+          <DeployBanner
+            state={deploy}
+            explanation={deployExplanation}
+            onDismiss={onDismissDeploy}
+            onUnpauseTrigger={onUnpauseTrigger}
+            onStopRun={() => void onStopRun()}
+            onKeepWaiting={onKeepWaiting}
+            onUndeploy={() => void onUndeploy()}
+            onRollback={() => void onRollback()}
           />
+          <div className="jp-afdag-body">
+            <Palette
+              operators={operators}
+              onAdd={addNode}
+              onAddNote={addNote}
+              onRefresh={refreshOperators}
+              collapsed={leftCollapsed}
+              onToggle={toggleLeft}
+            />
+            <div className="jp-afdag-canvas">
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                defaultEdgeOptions={defaultEdgeOptions}
+                connectionLineType={ConnectionLineType.SmoothStep}
+                deleteKeyCode={['Delete', 'Backspace']}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                isValidConnection={isValidConnection}
+                onReconnect={onReconnect}
+                onNodesDelete={onNodesDelete}
+                onNodeDragStart={onNodeDragStart}
+                onNodeDragStop={onNodeDragStop}
+                onInit={instance => {
+                  rfRef.current = instance;
+                  instance.fitView();
+                }}
+                onNodeClick={(_, node) =>
+                  setSelectedId(isNoteNode(node) ? null : node.id)
+                }
+                onPaneClick={() => setSelectedId(null)}
+                fitView
+                proOptions={{ hideAttribution: true }}
+              >
+                <Background />
+                <MiniMap pannable zoomable />
+                <Controls />
+              </ReactFlow>
+              {nodes.length === 0 && (
+                <div className="jp-afdag-empty">
+                  Add operators from the left panel to get started.
+                </div>
+              )}
+              {coachStep !== 0 && (
+                <Coachmark
+                  step={coachStep as CoachStep}
+                  onSkip={completeOnboarding}
+                  onNext={() =>
+                    coachStep >= 3
+                      ? completeOnboarding()
+                      : setCoachStep(coachStep + 1)
+                  }
+                />
+              )}
+            </div>
+            <Inspector
+              dag={dag}
+              node={selected}
+              ir={currentIR}
+              services={services}
+              currentPath={context.path}
+              clientErrors={clientErrors}
+              reloadKey={reloadKey}
+              collapsed={rightCollapsed}
+              onToggle={toggleRight}
+              onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
+              onNodeChange={updateNode}
+              onVariablesChange={onVariablesChange}
+              onConnectionsChange={onConnectionsChange}
+            />
+          </div>
+          <div className="jp-afdag-statusbar">
+            <span className="jp-afdag-statusbar-file">
+              {context.path.split('/').pop() ?? context.path}
+            </span>
+            <span className="jp-afdag-statusbar-sep">·</span>
+            <span>
+              {syntaxStyle === 'taskflow' ? 'TaskFlow' : 'Traditional'}
+            </span>
+            <span className="jp-afdag-statusbar-sep">·</span>
+            <span className="jp-afdag-statusbar-state">
+              {STATUS_LABEL[deploy.phase] ??
+                (errorCount
+                  ? `${errorCount} unresolved ${
+                      errorCount === 1 ? 'field' : 'fields'
+                    }`
+                  : 'Saved')}
+            </span>
+          </div>
         </div>
-        <div className="jp-afdag-statusbar">
-          <span className="jp-afdag-statusbar-file">
-            {context.path.split('/').pop() ?? context.path}
-          </span>
-          <span className="jp-afdag-statusbar-sep">·</span>
-          <span>{syntaxStyle === 'taskflow' ? 'TaskFlow' : 'Traditional'}</span>
-          <span className="jp-afdag-statusbar-sep">·</span>
-          <span className="jp-afdag-statusbar-state">
-            {STATUS_LABEL[deploy.phase] ??
-              (errorCount
-                ? `${errorCount} unresolved ${
-                    errorCount === 1 ? 'field' : 'fields'
-                  }`
-                : 'Saved')}
-          </span>
-        </div>
-      </div>
-    </EditorActionsContext.Provider>
+      </EditorActionsContext.Provider>
+    </CanEditContext.Provider>
   );
 }
 

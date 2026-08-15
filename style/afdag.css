@@ -213,6 +213,37 @@
   margin-top: 12px;
 }
 
+/* -- view-only notice (PRD §9) ------------------------------------------- */
+
+/* Informational teal, not a warning: read-only access is a normal state of the
+   product, not something that has gone wrong. Sits directly under the top bar
+   so the explanation is adjacent to the controls it explains. */
+.jp-afdag-viewonly {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--d4n-info-border);
+  background: var(--d4n-info-bg);
+  color: var(--d4n-fg-2);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
+}
+
+.jp-afdag-viewonly-badge {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: var(--d4n-r-pill);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-info-strong);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
+}
+
 /* ------------------------------------------------- Deploy lifecycle banner */
 
 .jp-afdag-deploybanner {

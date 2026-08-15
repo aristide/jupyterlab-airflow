@@ -116,6 +116,22 @@ To point the extension at a **remote** Airflow instead, disable the `airflow`
 profile and override these variables (e.g. set `AIRFLOW_API_TOKEN` to a
 pre-minted JWT).
 
+## Read-only (viewer) mode
+
+`JUPYTERLAB_AIRFLOW_ROLE` controls whether this server may change Airflow:
+
+```env
+JUPYTERLAB_AIRFLOW_ROLE=viewer   # unset or "editor" = full access (the default)
+```
+
+A **viewer** can read everything — the DAG list, runs, task logs, import errors, the generated CODE tab, live validation — but every privileged action is refused with a `403`: deploy/undeploy/retire/rollback, trigger/pause/stop-run/clear/delete, and writing Variables or Connections. The refusal happens **server-side, before anything runs**, so a denied deploy writes no file; the UI's read-only mode is a courtesy on top, not the control. Each refusal is written to the audit log with `outcome="denied"`.
+
+To try it: set the variable in `.env` and `docker compose restart jupyter`.
+
+> Unset defaults to `editor`, so nothing changes unless you opt in. An unrecognised value falls back to `viewer` and logs a warning — a typo in a permission setting should never hand out the rights it was meant to withhold.
+>
+> On **JupyterHub** each user gets their own server process, so set this per user at spawn (`c.Spawner.environment`) — the same hook you would use to inject per-user Airflow credentials. Note that a `.afdag` is a normal file in the user's own workspace: a viewer can still edit it in a text editor. What is enforced is that nothing they change can reach Airflow.
+
 ## DAGs
 
 Airflow's bundled example DAGs are **off** (`AIRFLOW__CORE__LOAD_EXAMPLES=false`):

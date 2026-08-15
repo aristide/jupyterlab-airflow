@@ -59,6 +59,22 @@
   text-transform: uppercase;
 }
 
+/* View-only pill beside the panel title (PRD §9). Teal/informational, matching
+   the Studio's own notice — restricted access is a normal state, not a fault. */
+.jp-airflow-viewonly {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: var(--d4n-r-pill);
+  background: var(--d4n-info-bg);
+  color: var(--d4n-info-strong);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
+  cursor: help;
+}
+
 .jp-airflow-title {
   font-family: var(--d4n-font-display);
   font-size: var(--d4n-fs-19);

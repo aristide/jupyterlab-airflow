@@ -189,6 +189,11 @@ services:
       # Deploy target: the same host docker/airflow-dags/ folder Airflow reads
       # from /opt/airflow/dags, reachable here under the mounted workspace.
       AIRFLOW_DAGS_DIR: /workspace/docker/airflow-dags
+      # Studio authorization (PRD §9): "editor" (default) or "viewer".
+      # Passed through from .env so you can flip to read-only with a restart
+      # rather than a rebuild; compose does not forward host variables that
+      # aren't named here. See docker/README.md.
+      JUPYTERLAB_AIRFLOW_ROLE: ${JUPYTERLAB_AIRFLOW_ROLE:-editor}
     depends_on:
       airflow:
         condition: service_started

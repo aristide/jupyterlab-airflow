@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { IOperatorDef } from '../operators';
+import { useCanEdit, VIEW_ONLY_HINT } from './capabilitiesContext';
 
 export interface IPaletteProps {
   operators: IOperatorDef[];
@@ -54,6 +55,7 @@ function thirdPartyHint(op: IOperatorDef): string {
 export function Palette(props: IPaletteProps): JSX.Element {
   const { operators, onAdd, onAddNote, onRefresh, collapsed, onToggle } = props;
   const [query, setQuery] = React.useState('');
+  const canEdit = useCanEdit();
 
   const groups = React.useMemo(() => {
     const map = new Map<string, IOperatorDef[]>();
@@ -128,7 +130,8 @@ export function Palette(props: IPaletteProps): JSX.Element {
         </div>
         <button
           className="jp-afdag-addnote-btn"
-          title="Add a note card to the canvas"
+          title={canEdit ? 'Add a note card to the canvas' : VIEW_ONLY_HINT}
+          disabled={!canEdit}
           onClick={onAddNote}
         >
           + Add note
@@ -140,11 +143,16 @@ export function Palette(props: IPaletteProps): JSX.Element {
           {items.map(op => {
             const unavailable = isUnavailable(op);
             const thirdParty = isThirdParty(op);
-            const title = unavailable
-              ? unavailableHint(op)
-              : thirdParty
-                ? thirdPartyHint(op)
-                : `Add ${op.label}`;
+            // A viewer still gets the provider/third-party hints — the palette
+            // stays a readable catalogue of what this Airflow supports, it just
+            // cannot put anything on the canvas.
+            const title = !canEdit
+              ? VIEW_ONLY_HINT
+              : unavailable
+                ? unavailableHint(op)
+                : thirdParty
+                  ? thirdPartyHint(op)
+                  : `Add ${op.label}`;
             return (
               <button
                 key={op.id}
@@ -154,6 +162,7 @@ export function Palette(props: IPaletteProps): JSX.Element {
                     : 'jp-afdag-palette-item'
                 }
                 title={title}
+                disabled={!canEdit}
                 onClick={() => onAdd(op.id)}
               >
                 <span className="jp-afdag-palette-item-label">{op.label}</span>

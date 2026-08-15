@@ -5,6 +5,7 @@ import * as React from 'react';
 
 import { afdagBaseInput, afdagWidgets } from './rjsfWidgets';
 import { InfoBubble } from './InfoBubble';
+import { useCanEdit } from './capabilitiesContext';
 import { IAfdagVariable } from '../ir';
 
 export interface IAfdagFormProps {
@@ -48,6 +49,13 @@ const afdagTemplates = {
  * no explicit submit). The empty-fragment child suppresses RJSF's submit button.
  */
 export function AfdagForm(props: IAfdagFormProps): JSX.Element {
+  // Read the capability here rather than threading a `readonly` prop through
+  // DagTab / NodeTab / every future tab: this is the single place every Studio
+  // form is constructed, and RJSF's own `readonly` on <Form> propagates to
+  // every field and widget beneath it (rjsfWidgets already honours
+  // `props.readonly`). One line covers forms that do not exist yet.
+  const canEdit = useCanEdit();
+
   return (
     <Form
       className="jp-afdag-rjsf"
@@ -58,6 +66,7 @@ export function AfdagForm(props: IAfdagFormProps): JSX.Element {
       widgets={afdagWidgets}
       templates={afdagTemplates}
       formContext={{ variables: props.variables ?? [] }}
+      readonly={!canEdit}
       liveValidate
       showErrorList={false}
       onChange={event =>

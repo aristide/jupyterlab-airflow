@@ -3,6 +3,7 @@ import type { EdgeProps } from '@xyflow/react';
 import * as React from 'react';
 
 import { useEditorActions } from './editorContext';
+import { useCanEdit } from './capabilitiesContext';
 
 // Rounded-corner orthogonal dependency edge (PRD §6.1.1): a smoothstep path with
 // an arrowhead, plus a delete (×) control at its midpoint shown when the edge is
@@ -24,6 +25,7 @@ function AfdagEdgeImpl(props: EdgeProps): JSX.Element {
     selected
   } = props;
   const { deleteEdge } = useEditorActions();
+  const canEdit = useCanEdit();
 
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -38,7 +40,7 @@ function AfdagEdgeImpl(props: EdgeProps): JSX.Element {
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} />
-      {selected && (
+      {selected && canEdit && (
         <EdgeLabelRenderer>
           <button
             className="jp-afdag-edge-del nodrag nopan"

@@ -5,6 +5,7 @@ import * as React from 'react';
 import type { IAfdagNodeData } from '../graph';
 import { getOperator, validateNodeParams } from '../operators';
 import { useEditorActions } from './editorContext';
+import { useCanEdit } from './capabilitiesContext';
 
 // Operator category -> the `--d4n-cat-*` accent tokens defined in
 // style/afdag.css, which colour the category eyebrow so operator families are
@@ -33,6 +34,7 @@ function AfdagNodeImpl(props: NodeProps): JSX.Element {
   const def = getOperator(data.op);
   const result = validateNodeParams(data.op, data.params);
   const { deleteNode } = useEditorActions();
+  const canEdit = useCanEdit();
   const className = [
     'jp-afdag-node',
     props.selected ? 'jp-mod-selected' : '',
@@ -44,17 +46,22 @@ function AfdagNodeImpl(props: NodeProps): JSX.Element {
   return (
     <div className={className}>
       <Handle type="target" position={Position.Left} />
-      <button
-        className="jp-afdag-node-del nodrag nopan"
-        title="Delete task"
-        aria-label={`Delete task ${data.task_id}`}
-        onClick={event => {
-          event.stopPropagation();
-          deleteNode(props.id);
-        }}
-      >
-        ×
-      </button>
+      {/* Hidden rather than disabled for a viewer: it is a hover-revealed
+          affordance, so a greyed-out one would only appear at the moment you
+          reached for it. */}
+      {canEdit && (
+        <button
+          className="jp-afdag-node-del nodrag nopan"
+          title="Delete task"
+          aria-label={`Delete task ${data.task_id}`}
+          onClick={event => {
+            event.stopPropagation();
+            deleteNode(props.id);
+          }}
+        >
+          ×
+        </button>
+      )}
       <div
         className="jp-afdag-node-cat"
         data-cat={def ? CATEGORY_ACCENT[def.category] : undefined}

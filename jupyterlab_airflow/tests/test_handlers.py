@@ -91,6 +91,14 @@ class FakeClient:
     def trigger_dag(self, dag_id, conf=None, logical_date=None):
         return {"dag_run_id": "manual__1", "dag_id": dag_id, "state": "queued"}
 
+    def set_paused(self, dag_id, is_paused):
+        # The handler passes `get_client().set_paused` as an ARGUMENT to
+        # respond(), so a missing attribute here raises inside post() before
+        # respond runs — surfacing as a 500 rather than whatever respond would
+        # have returned. The fake has to carry every method a gated handler
+        # names, or authorization tests can't reach the gate.
+        return {"dag_id": dag_id, "is_paused": is_paused}
+
     def deploy_status(self, dag_id, filename):
         return {
             "state": "registered",
@@ -539,3 +547,143 @@ async def test_deploy_correlation_id_links_audit_to_header(jp_fetch, tmp_path, m
 
     header = _parse_header((tmp_path / "ep_dag.py").read_text())
     assert header["correlation_id"] == cid  # header == audit
+
+
+# -- authorization: the viewer role (PRD §9) ---------------------------------
+#
+# The gate is derived from `audit_action`, so "privileged" and "audited" are the
+# same set by construction. These tests pin that equivalence from the outside:
+# every audited action must 403 for a viewer, and no read may.
+
+
+def _as_viewer(monkeypatch):
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_ROLE", "viewer")
+
+
+async def test_capabilities_reports_editor_by_default(jp_fetch):
+    # Unset role must keep every existing install working — this control is
+    # opt-in, so the default is `editor`.
+    resp = await jp_fetch("jupyterlab-airflow", "capabilities")
+    data = json.loads(resp.body)["data"]
+    assert data == {"role": "editor", "can_edit": True}
+
+
+async def test_capabilities_reports_viewer(jp_fetch, monkeypatch):
+    _as_viewer(monkeypatch)
+    resp = await jp_fetch("jupyterlab-airflow", "capabilities")
+    assert json.loads(resp.body)["data"] == {"role": "viewer", "can_edit": False}
+
+
+async def test_unrecognised_role_fails_closed(jp_fetch, monkeypatch):
+    # A typo in a permission setting must never grant the privilege.
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_ROLE", "administrator")
+    resp = await jp_fetch("jupyterlab-airflow", "capabilities")
+    assert json.loads(resp.body)["data"] == {"role": "viewer", "can_edit": False}
+
+
+@pytest.mark.parametrize(
+    "path, body",
+    [
+        (("dags", "trigger"), {"dag_id": "demo"}),
+        (("dags", "pause"), {"dag_id": "demo", "is_paused": True}),
+        (("dags", "delete"), {"dag_id": "demo"}),
+        (("dags", "rollback"), {"dag_id": "demo"}),
+        (("dags", "retire"), {"dag_id": "demo", "new_dag_id": "demo2"}),
+        (("dagruns", "state"), {"dag_id": "demo", "run_id": "r1", "state": "failed"}),
+        (("variables", "set"), {"key": "k", "value": "v", "dag_id": "demo"}),
+        (("variables", "delete"), {"key": "k", "dag_id": "demo"}),
+        (("connections", "set"), {"conn_id": "c", "conn_type": "http", "dag_id": "demo"}),
+        (("connections", "delete"), {"conn_id": "c", "dag_id": "demo"}),
+    ],
+)
+async def test_viewer_is_denied_every_mutating_endpoint(
+    jp_fetch, monkeypatch, path, body
+):
+    _as_viewer(monkeypatch)
+    with pytest.raises(HTTPClientError) as excinfo:
+        await jp_fetch("jupyterlab-airflow", *path, method="POST", body=json.dumps(body))
+    assert excinfo.value.code == 403
+
+
+async def test_viewer_is_denied_deploy_and_writes_nothing(
+    jp_fetch, tmp_path, monkeypatch
+):
+    # The one that matters most: deploy writes executable code into the dags
+    # folder. Denial must happen BEFORE the write, not after.
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    _as_viewer(monkeypatch)
+    with pytest.raises(HTTPClientError) as excinfo:
+        await jp_fetch(
+            "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_bash_ir())
+        )
+    assert excinfo.value.code == 403
+    assert not list(tmp_path.glob("*.py"))
+
+
+async def test_viewer_denial_is_audited(jp_fetch, monkeypatch, audit_records):
+    # An attempted privileged action by a view-only user is exactly what the
+    # audit trail exists to record.
+    _as_viewer(monkeypatch)
+    with pytest.raises(HTTPClientError):
+        await jp_fetch(
+            "jupyterlab-airflow", "dags", "trigger",
+            method="POST", body=json.dumps({"dag_id": "demo"}),
+        )
+    assert len(audit_records) == 1
+    rec = audit_records[0]
+    assert rec["action"] == "trigger"
+    assert rec["outcome"] == "denied"
+    assert rec["dag_id"] == "demo"
+    assert rec["detail"] == "role=viewer"
+    assert rec["user"]
+
+
+@pytest.mark.parametrize(
+    "path, params",
+    [
+        (("dags",), {"limit": "5"}),
+        (("operators",), {}),
+        (("notifiers",), {}),
+        (("health",), {}),
+        (("importerrors",), {}),
+        (("variables",), {}),
+        (("connections",), {}),
+    ],
+)
+async def test_viewer_can_still_read(jp_fetch, monkeypatch, path, params):
+    _as_viewer(monkeypatch)
+    resp = await jp_fetch("jupyterlab-airflow", *path, params=params)
+    assert resp.code == 200
+
+
+async def test_viewer_may_still_preview_generated_code(jp_fetch, monkeypatch):
+    # Codegen and validation are pure functions over the request body — they
+    # touch no Airflow state, so a viewer keeps the CODE tab and live
+    # validation. Gating them would break reading a flow for no security gain.
+    _as_viewer(monkeypatch)
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "generate", method="POST", body=json.dumps(_bash_ir())
+    )
+    assert resp.code == 200
+    assert "code" in json.loads(resp.body)["data"]
+
+
+async def test_viewer_clear_preview_allowed_real_clear_denied(jp_fetch, monkeypatch):
+    # The dry-run preview is not audited and mutates nothing, so it stays
+    # available; the real clear is audited and therefore gated.
+    _as_viewer(monkeypatch)
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "taskinstances", "clear",
+        method="POST",
+        body=json.dumps({"dag_id": "demo", "dag_run_id": "r1", "task_ids": ["t"]}),
+    )
+    assert resp.code == 200
+    with pytest.raises(HTTPClientError) as excinfo:
+        await jp_fetch(
+            "jupyterlab-airflow", "taskinstances", "clear",
+            method="POST",
+            body=json.dumps(
+                {"dag_id": "demo", "dag_run_id": "r1", "task_ids": ["t"], "dry_run": False}
+            ),
+        )
+    assert excinfo.value.code == 403

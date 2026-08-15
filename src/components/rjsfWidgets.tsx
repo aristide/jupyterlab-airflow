@@ -164,9 +164,17 @@ function ScheduleWidget(props: WidgetProps): JSX.Element {
   const isPreset = SCHEDULE_PRESETS.includes(value);
   const [custom, setCustom] = React.useState(!isPreset);
 
+  // A custom widget has to honour `readonly`/`disabled` itself — RJSF only
+  // passes them down, it cannot enforce them on markup it does not render.
+  // Note this must be `disabled`, not `readOnly`: the HTML readonly attribute
+  // is ignored on <select> (and on checkboxes), so a read-only form would
+  // otherwise leave the schedule preset freely changeable.
+  const locked = props.readonly || props.disabled;
+
   return (
     <div className="jp-afdag-schedule">
       <select
+        disabled={locked}
         value={custom ? '__custom__' : value}
         onChange={event => {
           const next = event.target.value;
@@ -190,6 +198,7 @@ function ScheduleWidget(props: WidgetProps): JSX.Element {
         <input
           className="jp-afdag-schedule-cron"
           placeholder="0 9 * * *"
+          readOnly={locked}
           value={isPreset ? '' : value}
           onChange={event => props.onChange(event.target.value)}
         />

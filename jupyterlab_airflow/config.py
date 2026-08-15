@@ -35,6 +35,18 @@ these are provided by the repo-root ``docker-compose.yml``.
     AIRFLOW_S3_ENDPOINT_URL  S3 endpoint for an S3-compatible store (e.g. MinIO);
                           unset → AWS S3.
 
+    Authorization (PRD §9):
+    JUPYTERLAB_AIRFLOW_ROLE  "editor" (default) or "viewer". A viewer may read
+                          everything but cannot run any privileged action —
+                          deploy/undeploy/retire/rollback, trigger/pause/stop/
+                          clear/delete, or write Variables/Connections. Unset
+                          keeps the previous behaviour (editor), so this is
+                          opt-in; an unrecognised value falls back to "viewer"
+                          so a typo in a permission setting never grants rights.
+                          On JupyterHub set it per user at spawn via
+                          ``c.Spawner.environment`` — the same injection point
+                          recommended below for per-user Airflow credentials.
+
 Security / multi-user trust model (PRD §9):
     The server uses **one Airflow service account** per JupyterLab server process
     (the env creds above) — there is no per-request Airflow identity inside a
@@ -51,10 +63,26 @@ Security / multi-user trust model (PRD §9):
     structured ``{ts, user, action, dag_id, correlation_id, outcome}`` JSON line
     on the ``jupyterlab_airflow.audit`` logger, stamped with the authenticated
     Jupyter user. Route that logger to a file/SIEM via normal logging config.
+
+    The **authorization gate is derived from that same audit marker**: a handler
+    is privileged exactly when it is audited. Both live in one place
+    (``_AirflowHandler.respond``), so the two sets cannot drift apart — a new
+    mutating handler cannot be gated-but-unaudited or audited-but-ungated.
+    A refused action is itself audited, with ``outcome="denied"``.
 """
 
+import logging
 import os
 from dataclasses import dataclass
+
+_log = logging.getLogger(__name__)
+
+#: Studio authorization roles (PRD §9). ``editor`` may run privileged actions;
+#: ``viewer`` may only read.
+ROLE_EDITOR = "editor"
+ROLE_VIEWER = "viewer"
+ROLE_ENV_VAR = "JUPYTERLAB_AIRFLOW_ROLE"
+_ROLES = (ROLE_EDITOR, ROLE_VIEWER)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -62,6 +90,47 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def studio_role() -> str:
+    """The current server process's Studio role, from ``JUPYTERLAB_AIRFLOW_ROLE``.
+
+    Read per call rather than cached at import: it costs nothing, keeps tests
+    honest (no module reload dance), and means a role change takes effect on
+    server restart rather than needing a rebuild.
+
+    **Unset defaults to ``editor``** so every existing single-user and dev
+    install keeps working exactly as before — this control is opt-in.
+
+    An **unrecognised** value falls back to ``viewer``, not ``editor``. That is
+    deliberate: a typo in a permission setting must not silently grant the
+    privilege it was meant to withhold. It is logged as a warning so the
+    misconfiguration is visible rather than mysterious.
+
+    On JupyterHub each user gets their own server process, so set this per user
+    at spawn (``c.Spawner.environment``) — the same injection point §9 already
+    recommends for per-user Airflow credentials.
+    """
+    raw = os.environ.get(ROLE_ENV_VAR)
+    if raw is None:
+        return ROLE_EDITOR
+    role = raw.strip().lower()
+    if role in _ROLES:
+        return role
+    _log.warning(
+        "%s=%r is not one of %s — falling back to %r (a permission setting "
+        "fails closed, so a typo never grants edit rights).",
+        ROLE_ENV_VAR,
+        raw,
+        list(_ROLES),
+        ROLE_VIEWER,
+    )
+    return ROLE_VIEWER
+
+
+def can_edit() -> bool:
+    """Whether this server may run privileged (mutating) Studio actions."""
+    return studio_role() == ROLE_EDITOR
 
 
 @dataclass

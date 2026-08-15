@@ -5,6 +5,7 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 
 import {
+  apiError,
   clearTasks,
   deleteDag,
   findDagSource,
@@ -28,6 +29,11 @@ import {
   ITaskInstance
 } from '../interfaces';
 import { explainImportError } from '../importErrors';
+import {
+  CanEditContext,
+  useCanEdit,
+  useFetchCanEdit
+} from './capabilitiesContext';
 import { ILogViewerData, LogViewer } from './LogViewer';
 import { TriggerDialog } from './TriggerDialog';
 
@@ -55,6 +61,8 @@ const runKey = (dagId: string, runId: string): string => `${dagId}::${runId}`;
 
 export function ManagerApp(props: IManagerAppProps): JSX.Element {
   const { trans, openPath } = props;
+  // Advisory (PRD §9) — the server enforces it on every mutating endpoint.
+  const canEdit = useFetchCanEdit();
   const [dags, setDags] = React.useState<IDag[]>([]);
   const [importErrors, setImportErrors] = React.useState<IImportError[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -142,7 +150,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         )
       );
     } else {
-      setError(res.error ?? 'Failed to update DAG');
+      setError(apiError(res, 'Failed to update DAG'));
     }
   };
 
@@ -165,7 +173,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   ): Promise<string | null> => {
     const res = await triggerDag(dagId, conf, logicalDate);
     if (res.status === 'ERR') {
-      return res.error ?? trans.__('Failed to trigger DAG');
+      return apiError(res, trans.__('Failed to trigger DAG'));
     }
     setBusy(trans.__('Triggered %1', dagId));
     window.setTimeout(() => setBusy(null), 2500);
@@ -292,7 +300,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         setConfirm(null);
         const res = await clearTasks(dagId, runId, [ti.task_id], false);
         if (res.status === 'ERR') {
-          setError(res.error ?? 'Failed to clear');
+          setError(apiError(res, 'Failed to clear'));
           return;
         }
         await toggleRun(dagId, runId);
@@ -314,7 +322,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         setConfirm(null);
         const res = await deleteDag(dag.dag_id);
         if (res.status === 'ERR') {
-          setError(res.error ?? 'Failed to delete DAG');
+          setError(apiError(res, 'Failed to delete DAG'));
           return;
         }
         await refresh();
@@ -338,7 +346,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         setConfirm(null);
         const res = await setDagRunState(dagId, run.dag_run_id, 'failed');
         if (res.status === 'ERR') {
-          setError(res.error ?? 'Failed to stop run');
+          setError(apiError(res, 'Failed to stop run'));
           return;
         }
         await loadRuns(dagId);
@@ -361,7 +369,7 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         setConfirm(null);
         const res = await deleteDag(orphan.dag_id);
         if (res.status === 'ERR') {
-          setError(res.error ?? 'Failed to undeploy DAG');
+          setError(apiError(res, 'Failed to undeploy DAG'));
           return;
         }
         keptOrphans.current.delete(orphan.dag_id);
@@ -402,216 +410,239 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   };
 
   return (
-    <div className="jp-airflow-root">
-      <div className="jp-airflow-header">
-        <div className="jp-airflow-eyebrow">{trans.__('Apache Airflow')}</div>
-        <span className="jp-airflow-title">{trans.__('Airflow DAGs')}</span>
-      </div>
+    <CanEditContext.Provider value={canEdit}>
+      <div className="jp-airflow-root">
+        <div className="jp-airflow-header">
+          <div className="jp-airflow-eyebrow">{trans.__('Apache Airflow')}</div>
+          <span className="jp-airflow-title">{trans.__('Airflow DAGs')}</span>
+          {!canEdit && (
+            <span
+              className="jp-airflow-viewonly"
+              title={trans.__(
+                'You can browse DAGs, runs and logs, but not trigger, pause or delete them.'
+              )}
+            >
+              {trans.__('View only')}
+            </span>
+          )}
+        </div>
 
-      <input
-        className="jp-airflow-search"
-        placeholder={trans.__('Filter by dag_id…')}
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-      />
+        <input
+          className="jp-airflow-search"
+          placeholder={trans.__('Filter by dag_id…')}
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+        />
 
-      {busy && <div className="jp-airflow-toast">{busy}</div>}
+        {busy && <div className="jp-airflow-toast">{busy}</div>}
 
-      {importErrors.length > 0 && (
-        <div className="jp-airflow-importerrors">
-          <button
-            className="jp-airflow-importerrors-head"
-            onClick={() => setShowErrors(s => !s)}
-          >
-            {showErrors ? '▾' : '▸'} {trans.__('Import errors')} (
-            {importErrors.length})
-          </button>
-          {showErrors &&
-            importErrors.map((err, i) => {
-              const explained = explainImportError(err.stack_trace);
-              return (
-                <div
-                  key={err.import_error_id ?? i}
-                  className="jp-airflow-ie jp-airflow-ie-card"
-                >
-                  <div className="jp-airflow-ie-file">
-                    {basename(err.filename)}
+        {importErrors.length > 0 && (
+          <div className="jp-airflow-importerrors">
+            <button
+              className="jp-airflow-importerrors-head"
+              onClick={() => setShowErrors(s => !s)}
+            >
+              {showErrors ? '▾' : '▸'} {trans.__('Import errors')} (
+              {importErrors.length})
+            </button>
+            {showErrors &&
+              importErrors.map((err, i) => {
+                const explained = explainImportError(err.stack_trace);
+                return (
+                  <div
+                    key={err.import_error_id ?? i}
+                    className="jp-airflow-ie jp-airflow-ie-card"
+                  >
+                    <div className="jp-airflow-ie-file">
+                      {basename(err.filename)}
+                    </div>
+                    <div className="jp-airflow-ie-title">{explained.title}</div>
+                    <div className="jp-airflow-ie-summary">
+                      {explained.summary}
+                    </div>
+                    {explained.hint && (
+                      <div className="jp-airflow-ie-hint">{explained.hint}</div>
+                    )}
+                    {openPath && (
+                      <button
+                        className="jp-airflow-linkbtn"
+                        onClick={() => void openInStudio(err)}
+                      >
+                        {trans.__('Open in Studio to fix')}
+                      </button>
+                    )}
+                    <details className="jp-airflow-ie-trace">
+                      <summary>{trans.__('Show technical details')}</summary>
+                      <pre>{err.stack_trace ?? trans.__('(no details)')}</pre>
+                    </details>
                   </div>
-                  <div className="jp-airflow-ie-title">{explained.title}</div>
-                  <div className="jp-airflow-ie-summary">
-                    {explained.summary}
-                  </div>
-                  {explained.hint && (
-                    <div className="jp-airflow-ie-hint">{explained.hint}</div>
-                  )}
-                  {openPath && (
+                );
+              })}
+          </div>
+        )}
+
+        {orphans.length > 0 && (
+          <div className="jp-airflow-importerrors jp-mod-warn">
+            <button
+              className="jp-airflow-importerrors-head"
+              onClick={() => setShowOrphans(s => !s)}
+            >
+              {showOrphans ? '▾' : '▸'}{' '}
+              {trans.__('Orphaned DAGs — source .afdag deleted')} (
+              {orphans.length})
+            </button>
+            {showOrphans &&
+              orphans.map(o => (
+                <div key={o.dag_id} className="jp-airflow-orphan">
+                  <span className="jp-airflow-orphan-name" title={o.filename}>
+                    {o.dag_id}
+                  </span>
+                  {/* "Keep" only dismisses the notice locally, so it stays
+                    available to a viewer; the purge does not. */}
+                  {canEdit && (
                     <button
-                      className="jp-airflow-linkbtn"
-                      onClick={() => void openInStudio(err)}
+                      className="jp-airflow-linkbtn jp-mod-danger"
+                      onClick={() => undeployOrphan(o)}
                     >
-                      {trans.__('Open in Studio to fix')}
+                      {trans.__('Undeploy & purge')}
                     </button>
                   )}
-                  <details className="jp-airflow-ie-trace">
-                    <summary>{trans.__('Show technical details')}</summary>
-                    <pre>{err.stack_trace ?? trans.__('(no details)')}</pre>
-                  </details>
+                  <button
+                    className="jp-airflow-linkbtn"
+                    onClick={() => keepOrphan(o)}
+                  >
+                    {trans.__('Keep')}
+                  </button>
                 </div>
-              );
-            })}
-        </div>
-      )}
-
-      {orphans.length > 0 && (
-        <div className="jp-airflow-importerrors jp-mod-warn">
-          <button
-            className="jp-airflow-importerrors-head"
-            onClick={() => setShowOrphans(s => !s)}
-          >
-            {showOrphans ? '▾' : '▸'}{' '}
-            {trans.__('Orphaned DAGs — source .afdag deleted')} (
-            {orphans.length})
-          </button>
-          {showOrphans &&
-            orphans.map(o => (
-              <div key={o.dag_id} className="jp-airflow-orphan">
-                <span className="jp-airflow-orphan-name" title={o.filename}>
-                  {o.dag_id}
-                </span>
-                <button
-                  className="jp-airflow-linkbtn jp-mod-danger"
-                  onClick={() => undeployOrphan(o)}
-                >
-                  {trans.__('Undeploy & purge')}
-                </button>
-                <button
-                  className="jp-airflow-linkbtn"
-                  onClick={() => keepOrphan(o)}
-                >
-                  {trans.__('Keep')}
-                </button>
-              </div>
-            ))}
-        </div>
-      )}
-
-      {loading && (
-        <div className="jp-airflow-status">{trans.__('Loading…')}</div>
-      )}
-      {error && (
-        <div className="jp-airflow-error">
-          {error}
-          <div className="jp-airflow-hint">
-            {trans.__(
-              'Check the AIRFLOW_API_URL / AIRFLOW_USERNAME / AIRFLOW_PASSWORD environment variables on the Jupyter server.'
-            )}
+              ))}
           </div>
-        </div>
-      )}
-      {!loading && !error && dags.length === 0 && (
-        <div className="jp-airflow-status">{trans.__('No DAGs found.')}</div>
-      )}
+        )}
 
-      {dags.length > 0 && (
-        <div className="jp-airflow-count">
-          {dags.length} {dags.length === 1 ? trans.__('dag') : trans.__('dags')}
-        </div>
-      )}
-
-      <ul className="jp-airflow-list">
-        {dags.map(dag => (
-          <DagRow
-            key={dag.dag_id}
-            dag={dag}
-            trans={trans}
-            runs={runs}
-            tasks={tasks}
-            onToggleDag={toggleDag}
-            onToggleRun={toggleRun}
-            onPause={togglePause}
-            onTrigger={trigger}
-            onDelete={removeDag}
-            onStopRun={stopRun}
-            onViewLogs={viewLogs}
-            onClear={clearTask}
-          />
-        ))}
-      </ul>
-
-      {logs && (
-        <Overlay onClose={() => setLogs(null)}>
-          <LogViewer
-            data={logs}
-            trans={trans}
-            onSelectTry={t =>
-              void loadLogs(logs.dagId, logs.runId, logs.taskId, t, logs.maxTry)
-            }
-            onClose={() => setLogs(null)}
-          />
-        </Overlay>
-      )}
-
-      {triggerTarget && (
-        <Overlay onClose={() => setTriggerTarget(null)}>
-          <TriggerDialog
-            dagId={triggerTarget.dagId}
-            params={triggerTarget.params}
-            trans={trans}
-            onClose={() => setTriggerTarget(null)}
-            onSubmit={(conf, logicalDate) =>
-              runTrigger(triggerTarget.dagId, conf, logicalDate)
-            }
-          />
-        </Overlay>
-      )}
-
-      {confirm && (
-        <Overlay onClose={() => setConfirm(null)}>
-          <div className="jp-airflow-modal">
-            <div className="jp-airflow-modal-head">{confirm.title}</div>
-            <div className="jp-airflow-modal-body">{confirm.message}</div>
-            <div className="jp-airflow-modal-actions">
-              <button
-                className="jp-airflow-btn"
-                onClick={() => setConfirm(null)}
-              >
-                {trans.__('Cancel')}
-              </button>
-              <button
-                className={
-                  confirm.danger
-                    ? 'jp-airflow-btn jp-mod-danger'
-                    : 'jp-airflow-btn jp-mod-accent'
-                }
-                onClick={() => void confirm.onConfirm()}
-              >
-                {confirm.confirmLabel}
-              </button>
+        {loading && (
+          <div className="jp-airflow-status">{trans.__('Loading…')}</div>
+        )}
+        {error && (
+          <div className="jp-airflow-error">
+            {error}
+            <div className="jp-airflow-hint">
+              {trans.__(
+                'Check the AIRFLOW_API_URL / AIRFLOW_USERNAME / AIRFLOW_PASSWORD environment variables on the Jupyter server.'
+              )}
             </div>
           </div>
-        </Overlay>
-      )}
+        )}
+        {!loading && !error && dags.length === 0 && (
+          <div className="jp-airflow-status">{trans.__('No DAGs found.')}</div>
+        )}
 
-      {/* The mockup shows an "Auto-refresh 15s" note here, but nothing in this
+        {dags.length > 0 && (
+          <div className="jp-airflow-count">
+            {dags.length}{' '}
+            {dags.length === 1 ? trans.__('dag') : trans.__('dags')}
+          </div>
+        )}
+
+        <ul className="jp-airflow-list">
+          {dags.map(dag => (
+            <DagRow
+              key={dag.dag_id}
+              dag={dag}
+              trans={trans}
+              runs={runs}
+              tasks={tasks}
+              onToggleDag={toggleDag}
+              onToggleRun={toggleRun}
+              onPause={togglePause}
+              onTrigger={trigger}
+              onDelete={removeDag}
+              onStopRun={stopRun}
+              onViewLogs={viewLogs}
+              onClear={clearTask}
+            />
+          ))}
+        </ul>
+
+        {logs && (
+          <Overlay onClose={() => setLogs(null)}>
+            <LogViewer
+              data={logs}
+              trans={trans}
+              onSelectTry={t =>
+                void loadLogs(
+                  logs.dagId,
+                  logs.runId,
+                  logs.taskId,
+                  t,
+                  logs.maxTry
+                )
+              }
+              onClose={() => setLogs(null)}
+            />
+          </Overlay>
+        )}
+
+        {triggerTarget && (
+          <Overlay onClose={() => setTriggerTarget(null)}>
+            <TriggerDialog
+              dagId={triggerTarget.dagId}
+              params={triggerTarget.params}
+              trans={trans}
+              onClose={() => setTriggerTarget(null)}
+              onSubmit={(conf, logicalDate) =>
+                runTrigger(triggerTarget.dagId, conf, logicalDate)
+              }
+            />
+          </Overlay>
+        )}
+
+        {confirm && (
+          <Overlay onClose={() => setConfirm(null)}>
+            <div className="jp-airflow-modal">
+              <div className="jp-airflow-modal-head">{confirm.title}</div>
+              <div className="jp-airflow-modal-body">{confirm.message}</div>
+              <div className="jp-airflow-modal-actions">
+                <button
+                  className="jp-airflow-btn"
+                  onClick={() => setConfirm(null)}
+                >
+                  {trans.__('Cancel')}
+                </button>
+                <button
+                  className={
+                    confirm.danger
+                      ? 'jp-airflow-btn jp-mod-danger'
+                      : 'jp-airflow-btn jp-mod-accent'
+                  }
+                  onClick={() => void confirm.onConfirm()}
+                >
+                  {confirm.confirmLabel}
+                </button>
+              </div>
+            </div>
+          </Overlay>
+        )}
+
+        {/* The mockup shows an "Auto-refresh 15s" note here, but nothing in this
           panel polls — refreshing is the toolbar button and the `refresh`
           command. Saying otherwise would be a false claim about when the list
           was last read, so the footer states how it actually works. */}
-      {/* Refresh sits here rather than in the header: it is the action that
+        {/* Refresh sits here rather than in the header: it is the action that
           the adjacent "Refreshes on demand" label is about, so the control and
           the statement it acts on read as one thing. */}
-      <div className="jp-airflow-footer">
-        <button
-          className="jp-airflow-iconbtn jp-airflow-footer-refresh"
-          title={trans.__('Refresh')}
-          aria-label={trans.__('Refresh')}
-          onClick={() => void refresh()}
-        >
-          <refreshIcon.react tag="span" width="14px" height="14px" />
-        </button>
-        <span>{trans.__('Refreshes on demand')}</span>
-        <span className="jp-airflow-footer-api">/api/v2</span>
+        <div className="jp-airflow-footer">
+          <button
+            className="jp-airflow-iconbtn jp-airflow-footer-refresh"
+            title={trans.__('Refresh')}
+            aria-label={trans.__('Refresh')}
+            onClick={() => void refresh()}
+          >
+            <refreshIcon.react tag="span" width="14px" height="14px" />
+          </button>
+          <span>{trans.__('Refreshes on demand')}</span>
+          <span className="jp-airflow-footer-api">/api/v2</span>
+        </div>
       </div>
-    </div>
+    </CanEditContext.Provider>
   );
 }
 
@@ -632,6 +663,7 @@ interface IDagRowProps {
 
 function DagRow(props: IDagRowProps): JSX.Element {
   const { dag, trans, runs, tasks } = props;
+  const canEdit = useCanEdit();
   const dagRuns = runs[dag.dag_id];
   const schedule =
     dag.timetable_summary ||
@@ -693,39 +725,46 @@ function DagRow(props: IDagRowProps): JSX.Element {
             !
           </span>
         )}
+        {/* Every row action mutates shared Airflow state, so a viewer gets
+            none of them — the row stays fully readable and still expands to
+            its runs, tasks and logs. */}
         <div className="jp-airflow-dagactions">
-          {/* Outline triangle for Resume vs the filled one for Trigger: two
+          {!canEdit ? null : (
+            <>
+              {/* Outline triangle for Resume vs the filled one for Trigger: two
               adjacent play-ish glyphs need a shape difference, not just a
               tooltip, or the destructive-by-surprise click is one slip away. */}
-          <button
-            className="jp-airflow-iconbtn jp-airflow-rowbtn"
-            title={
-              dag.is_paused ? trans.__('Resume DAG') : trans.__('Pause DAG')
-            }
-            aria-label={
-              dag.is_paused ? trans.__('Resume DAG') : trans.__('Pause DAG')
-            }
-            aria-pressed={dag.is_paused}
-            onClick={() => props.onPause(dag)}
-          >
-            {dag.is_paused ? '▷' : '❙❙'}
-          </button>
-          <button
-            className="jp-airflow-iconbtn jp-airflow-rowbtn jp-mod-accent"
-            title={trans.__('Trigger DAG')}
-            aria-label={trans.__('Trigger DAG')}
-            onClick={() => props.onTrigger(dag)}
-          >
-            <runIcon.react tag="span" width="14px" height="14px" />
-          </button>
-          <button
-            className="jp-airflow-iconbtn jp-airflow-rowbtn jp-mod-danger"
-            title={trans.__('Delete DAG')}
-            aria-label={trans.__('Delete DAG')}
-            onClick={() => props.onDelete(dag)}
-          >
-            🗑
-          </button>
+              <button
+                className="jp-airflow-iconbtn jp-airflow-rowbtn"
+                title={
+                  dag.is_paused ? trans.__('Resume DAG') : trans.__('Pause DAG')
+                }
+                aria-label={
+                  dag.is_paused ? trans.__('Resume DAG') : trans.__('Pause DAG')
+                }
+                aria-pressed={dag.is_paused}
+                onClick={() => props.onPause(dag)}
+              >
+                {dag.is_paused ? '▷' : '❙❙'}
+              </button>
+              <button
+                className="jp-airflow-iconbtn jp-airflow-rowbtn jp-mod-accent"
+                title={trans.__('Trigger DAG')}
+                aria-label={trans.__('Trigger DAG')}
+                onClick={() => props.onTrigger(dag)}
+              >
+                <runIcon.react tag="span" width="14px" height="14px" />
+              </button>
+              <button
+                className="jp-airflow-iconbtn jp-airflow-rowbtn jp-mod-danger"
+                title={trans.__('Delete DAG')}
+                aria-label={trans.__('Delete DAG')}
+                onClick={() => props.onDelete(dag)}
+              >
+                🗑
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -757,15 +796,16 @@ function DagRow(props: IDagRowProps): JSX.Element {
                       {run.state}
                     </span>
                     <span className="jp-airflow-runid">{run.dag_run_id}</span>
-                    {(run.state === 'running' || run.state === 'queued') && (
-                      <button
-                        className="jp-airflow-linkbtn jp-mod-danger"
-                        title={trans.__('Stop this run')}
-                        onClick={() => props.onStopRun(dag.dag_id, run)}
-                      >
-                        {trans.__('stop')}
-                      </button>
-                    )}
+                    {canEdit &&
+                      (run.state === 'running' || run.state === 'queued') && (
+                        <button
+                          className="jp-airflow-linkbtn jp-mod-danger"
+                          title={trans.__('Stop this run')}
+                          onClick={() => props.onStopRun(dag.dag_id, run)}
+                        >
+                          {trans.__('stop')}
+                        </button>
+                      )}
                   </div>
                   {key in tasks && (
                     <ul className="jp-airflow-tasks">
@@ -796,14 +836,18 @@ function DagRow(props: IDagRowProps): JSX.Element {
                             >
                               {trans.__('logs')}
                             </button>
-                            <button
-                              className="jp-airflow-linkbtn"
-                              onClick={() =>
-                                props.onClear(dag.dag_id, run.dag_run_id, ti)
-                              }
-                            >
-                              {trans.__('clear')}
-                            </button>
+                            {/* `logs` above stays — reading a log is a read.
+                                `clear` re-runs the task, so it does not. */}
+                            {canEdit && (
+                              <button
+                                className="jp-airflow-linkbtn"
+                                onClick={() =>
+                                  props.onClear(dag.dag_id, run.dag_run_id, ti)
+                                }
+                              >
+                                {trans.__('clear')}
+                              </button>
+                            )}
                           </li>
                         ))
                       )}

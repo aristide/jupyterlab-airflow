@@ -140,6 +140,19 @@ export interface IHealth {
   username: string;
 }
 
+/**
+ * What this user may do (PRD §9), served by `GET capabilities`.
+ *
+ * Advisory only. Authorization is enforced server-side in every mutating
+ * handler, which answers 403 regardless of what the client believes — this
+ * exists so the UI can present a coherent view-only mode instead of offering
+ * actions that are guaranteed to fail.
+ */
+export interface ICapabilities {
+  role: 'editor' | 'viewer';
+  can_edit: boolean;
+}
+
 // Operator registry, served by `GET operators` (the server reads the bundled
 // + optional user operator YAML files). Drives the palette and node forms.
 export type OperatorWidget = 'text' | 'textarea' | 'code' | 'json';
