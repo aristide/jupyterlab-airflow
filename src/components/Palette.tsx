@@ -84,41 +84,56 @@ export function Palette(props: IPaletteProps): JSX.Element {
 
   return (
     <div className="jp-afdag-palette">
+      {/* Search and Add-note live INSIDE the header so they sit above its
+          bottom rule and stay put while the operator list scrolls under them.
+          As siblings of the header they were flex items of the scrolling
+          column with nothing to stop them shrinking, which squashed the input
+          to 17px and ran it edge-to-edge. */}
       <div className="jp-afdag-palette-header">
-        <span className="jp-afdag-palette-title">Operators</span>
-        {onRefresh && (
+        <div className="jp-afdag-palette-headrow">
+          <span className="jp-afdag-palette-title">Operators</span>
+          {onRefresh && (
+            <button
+              className="jp-afdag-palette-refresh"
+              title="Re-check which operators your Airflow supports"
+              aria-label="Refresh operator availability"
+              onClick={onRefresh}
+            >
+              ⟳
+            </button>
+          )}
           <button
-            className="jp-afdag-palette-refresh"
-            title="Re-check which operators your Airflow supports"
-            aria-label="Refresh operator availability"
-            onClick={onRefresh}
+            className="jp-afdag-collapse-btn"
+            title="Collapse operators"
+            aria-label="Collapse operators panel"
+            aria-expanded={true}
+            onClick={onToggle}
           >
-            ⟳
+            «
           </button>
-        )}
+        </div>
+        {/* The border lives on the wrapper, not the input, so the magnifier
+            sits inside the field the way a search box reads. */}
+        <div className="jp-afdag-search-wrap">
+          <span className="jp-afdag-search-icon" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            className="jp-afdag-search"
+            placeholder="Search operators…"
+            aria-label="Search operators"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+          />
+        </div>
         <button
-          className="jp-afdag-collapse-btn"
-          title="Collapse operators"
-          aria-label="Collapse operators panel"
-          aria-expanded={true}
-          onClick={onToggle}
+          className="jp-afdag-addnote-btn"
+          title="Add a note card to the canvas"
+          onClick={onAddNote}
         >
-          «
+          + Add note
         </button>
       </div>
-      <input
-        className="jp-afdag-search"
-        placeholder="Search…"
-        value={query}
-        onChange={event => setQuery(event.target.value)}
-      />
-      <button
-        className="jp-afdag-addnote-btn"
-        title="Add a note card to the canvas"
-        onClick={onAddNote}
-      >
-        + Add note
-      </button>
       {groups.map(([category, items]) => (
         <div key={category} className="jp-afdag-palette-group">
           <div className="jp-afdag-palette-cat">{category}</div>

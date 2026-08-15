@@ -404,14 +404,8 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   return (
     <div className="jp-airflow-root">
       <div className="jp-airflow-header">
+        <div className="jp-airflow-eyebrow">{trans.__('Apache Airflow')}</div>
         <span className="jp-airflow-title">{trans.__('Airflow DAGs')}</span>
-        <button
-          className="jp-airflow-iconbtn"
-          title={trans.__('Refresh')}
-          onClick={() => void refresh()}
-        >
-          <refreshIcon.react tag="span" width="16px" height="16px" />
-        </button>
       </div>
 
       <input
@@ -518,6 +512,12 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         <div className="jp-airflow-status">{trans.__('No DAGs found.')}</div>
       )}
 
+      {dags.length > 0 && (
+        <div className="jp-airflow-count">
+          {dags.length} {dags.length === 1 ? trans.__('dag') : trans.__('dags')}
+        </div>
+      )}
+
       <ul className="jp-airflow-list">
         {dags.map(dag => (
           <DagRow
@@ -591,6 +591,26 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
           </div>
         </Overlay>
       )}
+
+      {/* The mockup shows an "Auto-refresh 15s" note here, but nothing in this
+          panel polls — refreshing is the toolbar button and the `refresh`
+          command. Saying otherwise would be a false claim about when the list
+          was last read, so the footer states how it actually works. */}
+      {/* Refresh sits here rather than in the header: it is the action that
+          the adjacent "Refreshes on demand" label is about, so the control and
+          the statement it acts on read as one thing. */}
+      <div className="jp-airflow-footer">
+        <button
+          className="jp-airflow-iconbtn jp-airflow-footer-refresh"
+          title={trans.__('Refresh')}
+          aria-label={trans.__('Refresh')}
+          onClick={() => void refresh()}
+        >
+          <refreshIcon.react tag="span" width="14px" height="14px" />
+        </button>
+        <span>{trans.__('Refreshes on demand')}</span>
+        <span className="jp-airflow-footer-api">/api/v2</span>
+      </div>
     </div>
   );
 }
@@ -619,20 +639,52 @@ function DagRow(props: IDagRowProps): JSX.Element {
       ? dag.schedule_interval
       : dag.schedule_interval?.value) ||
     '—';
+  // Derived only from what /dags already returns — no extra request just to
+  // colour a dot. An import error outranks paused, because a DAG that cannot
+  // be parsed is the more urgent fact about it.
+  const dotState = dag.has_import_errors
+    ? 'error'
+    : dag.is_paused
+      ? 'paused'
+      : 'active';
 
   return (
     <li className="jp-airflow-dag">
-      <div className="jp-airflow-dagrow">
+      <div
+        className={
+          'jp-airflow-dagrow' + (dag.is_paused ? ' jp-mod-paused' : '')
+        }
+      >
+        {/* Name, state dot and meta are one click target: the whole left side
+            expands the row, which is a far bigger hit area than the caret was
+            and matches how the list reads — a card you open. */}
         <button
-          className="jp-airflow-expand"
+          className="jp-airflow-dagmain"
           onClick={() => props.onToggleDag(dag.dag_id)}
           title={trans.__('Show recent runs')}
+          aria-expanded={dag.dag_id in runs}
         >
-          {dag.dag_id in runs ? '▾' : '▸'}
+          <span className="jp-airflow-expand" aria-hidden="true">
+            {dag.dag_id in runs ? '▾' : '▸'}
+          </span>
+          {/* The dot is decorative — `aria-hidden` — because the same state is
+              spelled out in the meta line below, so nothing here is conveyed
+              by colour alone. */}
+          <span
+            className={'jp-airflow-dot jp-mod-' + dotState}
+            aria-hidden="true"
+          />
+          <span className="jp-airflow-dagtext">
+            <span className="jp-airflow-dagname" title={dag.description ?? ''}>
+              {dag.dag_display_name || dag.dag_id}
+            </span>
+            <span className="jp-airflow-dagmeta">
+              {schedule}
+              {' · '}
+              {dag.is_paused ? trans.__('Paused') : trans.__('Active')}
+            </span>
+          </span>
         </button>
-        <span className="jp-airflow-dagname" title={dag.description ?? ''}>
-          {dag.dag_display_name || dag.dag_id}
-        </span>
         {dag.has_import_errors && (
           <span
             className="jp-airflow-badge jp-mod-error"
@@ -641,31 +693,40 @@ function DagRow(props: IDagRowProps): JSX.Element {
             !
           </span>
         )}
-        <span className="jp-airflow-schedule">{schedule}</span>
-        <label
-          className="jp-airflow-pause"
-          title={dag.is_paused ? trans.__('Paused') : trans.__('Active')}
-        >
-          <input
-            type="checkbox"
-            checked={!dag.is_paused}
-            onChange={() => props.onPause(dag)}
-          />
-        </label>
-        <button
-          className="jp-airflow-iconbtn"
-          title={trans.__('Trigger DAG')}
-          onClick={() => props.onTrigger(dag)}
-        >
-          <runIcon.react tag="span" width="16px" height="16px" />
-        </button>
-        <button
-          className="jp-airflow-iconbtn jp-mod-danger"
-          title={trans.__('Delete DAG')}
-          onClick={() => props.onDelete(dag)}
-        >
-          ✕
-        </button>
+        <div className="jp-airflow-dagactions">
+          {/* Outline triangle for Resume vs the filled one for Trigger: two
+              adjacent play-ish glyphs need a shape difference, not just a
+              tooltip, or the destructive-by-surprise click is one slip away. */}
+          <button
+            className="jp-airflow-iconbtn jp-airflow-rowbtn"
+            title={
+              dag.is_paused ? trans.__('Resume DAG') : trans.__('Pause DAG')
+            }
+            aria-label={
+              dag.is_paused ? trans.__('Resume DAG') : trans.__('Pause DAG')
+            }
+            aria-pressed={dag.is_paused}
+            onClick={() => props.onPause(dag)}
+          >
+            {dag.is_paused ? '▷' : '❙❙'}
+          </button>
+          <button
+            className="jp-airflow-iconbtn jp-airflow-rowbtn jp-mod-accent"
+            title={trans.__('Trigger DAG')}
+            aria-label={trans.__('Trigger DAG')}
+            onClick={() => props.onTrigger(dag)}
+          >
+            <runIcon.react tag="span" width="14px" height="14px" />
+          </button>
+          <button
+            className="jp-airflow-iconbtn jp-airflow-rowbtn jp-mod-danger"
+            title={trans.__('Delete DAG')}
+            aria-label={trans.__('Delete DAG')}
+            onClick={() => props.onDelete(dag)}
+          >
+            🗑
+          </button>
+        </div>
       </div>
 
       {dag.dag_id in runs && (

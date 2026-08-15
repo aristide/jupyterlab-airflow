@@ -1419,10 +1419,42 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             onConnectionsChange={onConnectionsChange}
           />
         </div>
+        <div className="jp-afdag-statusbar">
+          <span className="jp-afdag-statusbar-file">
+            {context.path.split('/').pop() ?? context.path}
+          </span>
+          <span className="jp-afdag-statusbar-sep">·</span>
+          <span>{syntaxStyle === 'taskflow' ? 'TaskFlow' : 'Traditional'}</span>
+          <span className="jp-afdag-statusbar-sep">·</span>
+          <span className="jp-afdag-statusbar-state">
+            {STATUS_LABEL[deploy.phase] ??
+              (errorCount
+                ? `${errorCount} unresolved ${
+                    errorCount === 1 ? 'field' : 'fields'
+                  }`
+                : 'Saved')}
+          </span>
+        </div>
       </div>
     </EditorActionsContext.Provider>
   );
 }
+
+// Short status-bar wording per deploy phase. `idle` is deliberately absent so
+// it falls through to the validation/saved summary — with nothing deploying,
+// what the user wants to know is whether the flow is ready, not that it is
+// doing nothing. The deploy *target* is not shown: no target string exists
+// client-side, and fetching one just to label a footer is not worth a request.
+const STATUS_LABEL: Partial<Record<IDeployState['phase'], string>> = {
+  writing: 'Writing DAG file…',
+  waiting: 'Waiting for Airflow…',
+  processing: 'Still processing…',
+  registered: 'Registered',
+  running: 'Running',
+  finished: 'Deployed · run finished',
+  failed: 'Import error',
+  error: 'Deploy failed'
+};
 
 function uniqueTaskId(prefix: string, nodes: AfdagFlowNode[]): string {
   const used = new Set(nodes.map(n => n.data.task_id));

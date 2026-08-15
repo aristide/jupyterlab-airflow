@@ -1,0 +1,9 @@
+Montserrat	500	montserrat-500.woff2
+Montserrat	600	montserrat-600.woff2
+Montserrat	700	montserrat-700.woff2
+Roboto	300	roboto-300.woff2
+Roboto	400	roboto-400.woff2
+Roboto	500	roboto-500.woff2
+Roboto	700	roboto-700.woff2
+JetBrains Mono	400	jetbrains-mono-400.woff2
+JetBrains Mono	500	jetbrains-mono-500.woff2

@@ -1,213 +1,240 @@
-/*
-    See the JupyterLab Developer Guide for useful CSS Patterns:
-    https://jupyterlab.readthedocs.io/en/stable/developer/css.html
-*/
+/* ============================================================================
+   Manager sidebar, dialogs and log viewer — Data4Now visual language.
+
+   Every colour here is a `var(--d4n-*)` token from style/d4n-tokens.css. No
+   literal colour values: re-theming happens in that one file, and the tokens
+   already carry the light/dark split, so nothing in here needs a theme guard.
+
+   Class names and the `jp-mod-*` modifier convention are load-bearing —
+   ManagerApp.tsx, TriggerDialog.tsx and LogViewer.tsx build several of them
+   dynamically (`jp-airflow-state-${state}`, `jp-airflow-log-${level}`).
+   ========================================================================= */
+
+/* ---------------------------------------------------------------------------
+   Panel shell
+   ------------------------------------------------------------------------ */
 
 .jp-airflow-panel {
   min-width: 240px;
-  color: var(--jp-ui-font-color1);
-  background: var(--jp-layout-color1);
   overflow-y: auto;
+  font-family: var(--d4n-font-body);
+  color: var(--d4n-fg-1);
+  background: var(--d4n-bg-surface);
 }
 
 .jp-airflow-root {
-  font-size: var(--jp-ui-font-size1);
+  font-size: var(--d4n-fs-13);
+  line-height: var(--d4n-lh-normal);
 }
 
+/* ---------------------------------------------------------------------------
+   Header — sticky so the title and refresh stay reachable while scrolling a
+   long DAG list.
+   ------------------------------------------------------------------------ */
+
 .jp-airflow-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--jp-border-color2);
   position: sticky;
   top: 0;
-  background: var(--jp-layout-color1);
   z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px 8px;
+  padding: 16px 16px 12px;
+  background: var(--d4n-bg-surface);
+  border-bottom: 1px solid var(--d4n-border-1);
+}
+
+/* Claims a full row so the title and refresh button stay on one line beneath
+   it, rather than the eyebrow becoming a third item in the flex row. */
+.jp-airflow-eyebrow {
+  flex: 0 0 100%;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
+  text-transform: uppercase;
 }
 
 .jp-airflow-title {
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-19);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-size: var(--jp-ui-font-size0);
+  line-height: var(--d4n-lh-tight);
+  letter-spacing: var(--d4n-ls-display);
+  color: var(--d4n-fg-heading);
 }
 
+/* Square bordered icon button — the header refresh, and the modal close.
+   Bordered rather than bare so it reads as an affordance next to a large
+   display-weight title. */
 .jp-airflow-iconbtn {
   display: inline-flex;
   align-items: center;
-  border: none;
-  background: transparent;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: var(--d4n-fs-14);
+  color: var(--d4n-fg-3);
   cursor: pointer;
-  padding: 2px;
-  color: var(--jp-ui-font-color2);
+  background: var(--d4n-bg-surface);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  transition:
+    background var(--d4n-dur-base) var(--d4n-ease),
+    color var(--d4n-dur-base) var(--d4n-ease);
 }
 
 .jp-airflow-iconbtn:hover {
-  color: var(--jp-ui-font-color1);
+  color: var(--d4n-fg-heading);
+  background: var(--d4n-bg-hover);
 }
+
+/* Destructive row action (delete a DAG) tints magenta on hover only — at rest
+   it must not compete with the row's own content. */
+.jp-airflow-iconbtn.jp-mod-danger:hover {
+  color: var(--d4n-danger);
+  background: var(--d4n-danger-bg);
+}
+
+/* Row-level variant of the icon button: borderless and 24px. Three bordered
+   boxes on every DAG row turned the list into a grid of chrome and competed
+   with the dag_id for attention. Declared after the base rule because it
+   shares its specificity and relies on source order to win. */
+.jp-airflow-rowbtn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-size: var(--d4n-fs-12);
+}
+
+/* Each action gets its own hover tint, so the destructive one is identifiable
+   from the pointer alone rather than only from its tooltip. */
+.jp-airflow-rowbtn.jp-mod-accent {
+  color: var(--d4n-info-strong);
+}
+
+.jp-airflow-rowbtn.jp-mod-accent:hover {
+  color: var(--d4n-info-strong);
+  background: var(--d4n-info-bg);
+}
+
+.jp-airflow-rowbtn.jp-mod-danger {
+  color: var(--d4n-fg-4);
+}
+
+/* ---------------------------------------------------------------------------
+   Status / error / hint text
+   ------------------------------------------------------------------------ */
 
 .jp-airflow-status,
 .jp-airflow-error {
-  padding: 8px 10px;
+  padding: 10px 16px;
+}
+
+.jp-airflow-status {
+  font-size: var(--d4n-fs-12);
+  color: var(--d4n-fg-3);
 }
 
 .jp-airflow-error {
-  color: var(--jp-error-color1, #e63558);
+  color: var(--d4n-danger-strong);
 }
 
 .jp-airflow-hint {
   margin-top: 4px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  font-size: var(--d4n-fs-12);
+  color: var(--d4n-fg-3);
 }
 
-.jp-airflow-list,
-.jp-airflow-runs {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
+/* ---------------------------------------------------------------------------
+   Search + transient toast
+   ------------------------------------------------------------------------ */
 
-.jp-airflow-dag {
-  border-bottom: 1px solid var(--jp-border-color3);
-}
-
-.jp-airflow-dagrow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-}
-
-.jp-airflow-expand {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  width: 16px;
-  color: var(--jp-ui-font-color2);
-}
-
-.jp-airflow-dagname {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.jp-airflow-schedule {
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
-  font-variant-numeric: tabular-nums;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.jp-airflow-pause {
-  display: inline-flex;
-  align-items: center;
-}
-
-.jp-airflow-runs {
-  padding: 0 8px 6px 30px;
-}
-
-.jp-airflow-run {
-  display: block;
-  font-size: var(--jp-ui-font-size0);
-}
-
-.jp-airflow-runid {
-  color: var(--jp-ui-font-color2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.jp-airflow-state {
-  flex: 0 0 auto;
-  padding: 1px 6px;
-  border-radius: 8px;
-  text-transform: capitalize;
-  font-size: 11px;
-  color: #fff;
-  background: var(--jp-ui-font-color3);
-}
-
-.jp-airflow-state-success {
-  background: var(--jp-success-color1, #3a9c52);
-}
-
-.jp-airflow-state-running,
-.jp-airflow-state-queued {
-  background: var(--jp-warn-color1, #e6a817);
-}
-
-.jp-airflow-state-failed {
-  background: var(--jp-error-color1, #e63558);
-}
-
-/* --- Resource Manager: search, import errors, task drill-down, modals --- */
 .jp-airflow-search {
   box-sizing: border-box;
-  width: calc(100% - 16px);
-  margin: 0 8px 6px;
-  padding: 3px 6px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 3px;
-  background: var(--jp-input-active-background, var(--jp-layout-color0));
-  color: var(--jp-ui-font-color0);
-  font-size: var(--jp-ui-font-size1);
+  width: calc(100% - 32px);
+  height: 34px;
+  margin: 12px 16px 8px;
+  padding: 0 10px;
+  font-family: var(--d4n-font-body);
+  font-size: var(--d4n-fs-13);
+  color: var(--d4n-fg-1);
+  background: var(--d4n-bg-surface);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  outline: none;
+  transition: border-color var(--d4n-dur-base) var(--d4n-ease);
+}
+
+.jp-airflow-search::placeholder {
+  color: var(--d4n-fg-4);
+}
+
+.jp-airflow-search:focus {
+  border-color: var(--d4n-border-focus);
 }
 
 .jp-airflow-toast {
-  margin: 0 8px 6px;
-  padding: 3px 8px;
-  border-radius: 3px;
-  background: var(--jp-success-color3, var(--jp-layout-color2));
-  color: var(--jp-success-color1);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 16px 8px;
+  padding: 6px 10px;
+  font-size: var(--d4n-fs-12);
+  color: var(--d4n-info-strong);
+  background: var(--d4n-info-bg);
+  border: 1px solid var(--d4n-info-border);
+  border-radius: var(--d4n-r-md);
 }
 
+/* ---------------------------------------------------------------------------
+   Import-error and orphan cards
+
+   Both are the same card; only the tint differs. They lead with a
+   plain-language explanation and a copyable remediation line, because the
+   audience for this panel is not expected to read a Python traceback.
+   ------------------------------------------------------------------------ */
+
 .jp-airflow-importerrors {
-  margin: 0 8px 8px;
-  border: 1px solid var(--jp-error-color1);
-  border-radius: 3px;
-  background: var(--jp-error-color3, rgb(230 53 88 / 8%));
+  margin: 0 16px 10px;
+  background: var(--d4n-danger-bg);
+  border: 1px solid var(--d4n-danger-border);
+  border-radius: var(--d4n-r-lg);
 }
 
 .jp-airflow-importerrors-head {
   width: 100%;
-  padding: 4px 8px;
-  border: none;
-  background: transparent;
-  color: var(--jp-error-color1);
-  font-size: var(--jp-ui-font-size0);
+  padding: 12px 13px;
+  font-family: var(--d4n-font-display);
+  font-size: 12.5px;
   font-weight: 600;
+  color: var(--d4n-fg-heading);
   text-align: left;
   cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+/* Warning variant: a deployed DAG whose .afdag source was deleted (PRD
+   §6.5.6). Not an error — the DAG still runs, it just has no source to edit. */
+.jp-airflow-importerrors.jp-mod-warn {
+  background: var(--d4n-warning-bg);
+  border-color: var(--d4n-warning-border);
 }
 
 .jp-airflow-ie {
-  padding: 2px 8px 6px;
-  font-size: var(--jp-ui-font-size0);
-}
-
-.jp-airflow-ie pre {
-  margin: 4px 0 0;
-  max-height: 160px;
-  overflow: auto;
-  white-space: pre-wrap;
-  color: var(--jp-error-color1);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
+  padding: 0 13px 12px;
+  font-size: 12.5px;
 }
 
 .jp-airflow-ie-card {
-  border-top: 1px solid var(--jp-error-color1);
-  padding-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--d4n-danger-border);
 }
 
 .jp-airflow-ie-card:first-of-type {
@@ -215,129 +242,403 @@
 }
 
 .jp-airflow-ie-file {
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
-  color: var(--jp-error-color1);
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  color: var(--d4n-fg-3);
   word-break: break-all;
 }
 
 .jp-airflow-ie-title {
+  margin-top: 4px;
+  font-family: var(--d4n-font-display);
   font-weight: 600;
-  margin-top: 2px;
+  color: var(--d4n-fg-heading);
 }
 
 .jp-airflow-ie-summary {
-  margin-top: 2px;
+  margin-top: 4px;
+  line-height: var(--d4n-lh-normal);
+  color: var(--d4n-fg-2);
 }
 
+/* The remediation line — nearly always a `pip install …`. Boxed on the
+   surface colour so it reads as something to copy, not prose. */
 .jp-airflow-ie-hint {
-  margin-top: 3px;
-  opacity: 0.9;
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
+  color: var(--d4n-fg-1);
+  background: var(--d4n-bg-surface);
+  border: 1px solid var(--d4n-danger-border);
+  border-radius: var(--d4n-r-sm);
+}
+
+.jp-airflow-ie-trace {
+  margin-top: 8px;
 }
 
 .jp-airflow-ie-trace summary {
-  margin-top: 4px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-11);
+  font-weight: 600;
+  color: var(--d4n-fg-3);
   cursor: pointer;
-  opacity: 0.8;
 }
 
+.jp-airflow-ie pre {
+  max-height: 160px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
+  line-height: var(--d4n-lh-normal);
+  color: var(--d4n-code-fg);
+  white-space: pre-wrap;
+  background: var(--d4n-code-bg);
+  border-radius: var(--d4n-r-sm);
+}
+
+/* ---------------------------------------------------------------------------
+   Orphan row
+   ------------------------------------------------------------------------ */
+
+.jp-airflow-orphan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 13px 12px;
+  font-size: 12.5px;
+}
+
+.jp-airflow-orphan-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-12);
+  color: var(--d4n-fg-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   DAG list
+   ------------------------------------------------------------------------ */
+
+.jp-airflow-list,
+.jp-airflow-runs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* "5 dags" — a count eyebrow above the list, so the number of results after a
+   filter is visible without counting rows. */
+.jp-airflow-count {
+  padding: 6px 16px 2px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-fg-4);
+  text-transform: uppercase;
+}
+
+.jp-airflow-list {
+  padding: 4px 12px 24px;
+}
+
+/* Rows are separated by whitespace and hover, not rules — a divider under
+   every row turns a long list into a ladder. */
+.jp-airflow-dag {
+  margin-bottom: 2px;
+}
+
+.jp-airflow-dagrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--d4n-r-md);
+  transition:
+    background var(--d4n-dur-base) var(--d4n-ease),
+    border-color var(--d4n-dur-base) var(--d4n-ease);
+}
+
+.jp-airflow-dagrow:hover {
+  background: var(--d4n-bg-page);
+  border-color: var(--d4n-border-1);
+}
+
+/* Name, dot and meta are one click target — a far bigger hit area than the
+   bare caret, and it matches how the row reads: a card you open.
+   Declared BEFORE the `.jp-mod-paused` rule that follows, which targets the
+   same element at higher specificity (no-descending-specificity). */
+.jp-airflow-dagmain {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* A paused DAG is dimmed as a whole, so the list answers "what is live here?"
+   at a glance instead of making you read a control on every row. */
+.jp-airflow-dagrow.jp-mod-paused .jp-airflow-dagmain {
+  opacity: 0.62;
+}
+
+.jp-airflow-expand {
+  flex: none;
+  width: 12px;
+  padding: 0;
+  font-size: var(--d4n-fs-11);
+  color: var(--d4n-fg-3);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+/* State dot — decorative, since the meta line spells the same state out in
+   words. Nothing here is carried by colour alone. */
+.jp-airflow-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--d4n-r-pill);
+  background: var(--d4n-fg-4);
+}
+
+.jp-airflow-dot.jp-mod-active {
+  background: var(--d4n-teal);
+}
+
+.jp-airflow-dot.jp-mod-paused {
+  background: var(--d4n-fg-4);
+}
+
+.jp-airflow-dot.jp-mod-error {
+  background: var(--d4n-danger);
+}
+
+.jp-airflow-dagtext {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.jp-airflow-dagname {
+  display: block;
+  overflow: hidden;
+  font-family: var(--d4n-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--d4n-fg-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-airflow-dagmeta {
+  display: block;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--d4n-fg-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-airflow-schedule {
+  max-width: 90px;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--d4n-fg-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.jp-airflow-dagactions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Count badge on a DAG with import errors. Solid rather than tinted so it
+   still registers at 16px. */
 .jp-airflow-badge {
-  flex: 0 0 auto;
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
-  font-size: 11px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-11);
   font-weight: 700;
-  color: #fff;
+  color: var(--d4n-fg-on-solid);
+  border-radius: 50%;
 }
 
 .jp-airflow-badge.jp-mod-error {
-  background: var(--jp-error-color1);
+  background: var(--d4n-danger);
 }
 
-.jp-airflow-iconbtn.jp-mod-danger:hover {
-  color: var(--jp-error-color1);
+/* ---------------------------------------------------------------------------
+   Run / task drill-down
+
+   The teal left rule ties the expanded detail back to its parent row and
+   keeps nesting legible without further indentation.
+   ------------------------------------------------------------------------ */
+
+.jp-airflow-runs {
+  margin: 4px 0 8px 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--d4n-teal);
 }
 
-/* Run row now contains a header + nested task list */
+.jp-airflow-run {
+  display: block;
+  font-size: 11.5px;
+}
+
 .jp-airflow-runrow {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 0;
+  padding: 4px 0;
+}
+
+.jp-airflow-runid {
+  overflow: hidden;
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  color: var(--d4n-fg-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .jp-airflow-tasks {
-  padding: 0 0 4px 26px;
-  list-style: none;
   margin: 0;
+  padding: 0 0 4px;
+  list-style: none;
 }
 
 .jp-airflow-task {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px 0;
-  font-size: var(--jp-ui-font-size0);
+  padding: 5px 8px;
+  margin-bottom: 3px;
+  font-size: 11.5px;
+  background: var(--d4n-bg-page);
+  border-radius: var(--d4n-r-md);
 }
 
 .jp-airflow-taskid {
   flex: 1 1 auto;
   overflow: hidden;
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  color: var(--d4n-fg-1);
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--jp-ui-font-color1);
 }
+
+/* ---------------------------------------------------------------------------
+   Run / task state pills
+
+   Tinted rather than solid-on-white: a list of saturated chips reads as an
+   alarm board, and most states are unremarkable. The base rule covers every
+   state Airflow can emit — the modifiers below only override the ones with a
+   meaning worth colouring.
+   ------------------------------------------------------------------------ */
+
+.jp-airflow-state {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  color: var(--d4n-fg-3);
+  text-transform: uppercase;
+  background: var(--d4n-bg-sunken);
+  border-radius: var(--d4n-r-pill);
+}
+
+.jp-airflow-state-success {
+  color: var(--d4n-success);
+  background: var(--d4n-success-bg);
+}
+
+.jp-airflow-state-queued {
+  color: var(--d4n-info-strong);
+  background: var(--d4n-info-bg);
+}
+
+/* A running task is the one thing in this panel that changes on its own —
+   the pulse is what tells you the list is live without a spinner. */
+.jp-airflow-state-running {
+  color: var(--d4n-info-strong);
+  background: var(--d4n-info-bg);
+  animation: jp-d4n-pulse 1.6s ease-in-out infinite;
+}
+
+.jp-airflow-state-failed {
+  color: var(--d4n-danger-strong);
+  background: var(--d4n-danger-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   Inline link buttons ("logs", "stop", "undeploy")
+
+   Pill-shaped rather than underlined text: they sit at the end of dense rows
+   where an underline would collide with the mono task id beside it.
+   ------------------------------------------------------------------------ */
 
 .jp-airflow-linkbtn {
   flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  padding: 0 2px;
-  color: var(--jp-content-link-color, var(--jp-brand-color1));
-  font-size: var(--jp-ui-font-size0);
+  padding: 3px 8px;
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--d4n-fg-link);
   cursor: pointer;
+  background: var(--d4n-bg-surface);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-pill);
+  transition:
+    background var(--d4n-dur-base) var(--d4n-ease),
+    border-color var(--d4n-dur-base) var(--d4n-ease);
 }
 
 .jp-airflow-linkbtn:hover {
-  text-decoration: underline;
+  background: var(--d4n-info-bg);
+  border-color: var(--d4n-info-border);
 }
 
 .jp-airflow-linkbtn.jp-mod-danger {
-  color: var(--jp-error-color1);
+  color: var(--d4n-danger-strong);
 }
 
-/* Orphan-reconciliation banner (deployed DAG whose .afdag was deleted, §6.5.6).
-   A warning (not error) variant of the import-errors banner. */
-.jp-airflow-importerrors.jp-mod-warn {
-  border-color: var(--jp-warn-color1, #e8a33d);
-  background: var(--jp-warn-color3, rgb(232 163 61 / 10%));
+.jp-airflow-linkbtn.jp-mod-danger:hover {
+  background: var(--d4n-danger-bg);
+  border-color: var(--d4n-danger-border);
 }
 
-.jp-airflow-importerrors.jp-mod-warn .jp-airflow-importerrors-head {
-  color: var(--jp-warn-color1, #e8a33d);
-}
+/* ---------------------------------------------------------------------------
+   Modals — log viewer and confirmations
+   ------------------------------------------------------------------------ */
 
-.jp-airflow-orphan {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px 4px;
-  font-size: var(--jp-ui-font-size0);
-}
-
-.jp-airflow-orphan-name {
-  flex: 1 1 auto;
-  overflow: hidden;
-  font-family: var(--jp-code-font-family);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Modals (logs viewer + confirmations) */
 .jp-airflow-overlay {
   position: fixed;
   inset: 0;
@@ -349,7 +650,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgb(0 0 0 / 35%);
+  background: var(--d4n-scrim);
 }
 
 /* Pure event-handling wrapper (stops backdrop-close on modal clicks); not a
@@ -361,12 +662,15 @@
 .jp-airflow-modal {
   display: flex;
   flex-direction: column;
+  min-width: 280px;
   max-width: 640px;
   max-height: 80vh;
-  min-width: 280px;
-  border-radius: 4px;
-  background: var(--jp-layout-color1);
-  box-shadow: var(--jp-elevation-z6, 0 4px 16px rgb(0 0 0 / 30%));
+  overflow: hidden;
+  font-family: var(--d4n-font-body);
+  color: var(--d4n-fg-1);
+  background: var(--d4n-bg-surface);
+  border-radius: var(--d4n-r-lg);
+  box-shadow: var(--d4n-shadow-xl);
 }
 
 .jp-airflow-modal-head {
@@ -374,51 +678,85 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--jp-border-color2);
+  padding: 14px 16px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-15);
   font-weight: 600;
+  color: var(--d4n-fg-heading);
+  border-bottom: 1px solid var(--d4n-border-1);
 }
 
 .jp-airflow-modal-body {
-  padding: 12px;
-  font-size: var(--jp-ui-font-size1);
+  padding: 16px;
+  font-size: var(--d4n-fs-13);
 }
 
 .jp-airflow-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--jp-border-color2);
+  padding: 10px 16px;
+  background: var(--d4n-bg-page);
+  border-top: 1px solid var(--d4n-border-1);
 }
+
+/* ---------------------------------------------------------------------------
+   Buttons
+   ------------------------------------------------------------------------ */
 
 .jp-airflow-btn {
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  padding: 3px 12px;
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
+  height: 32px;
+  padding: 0 14px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-12);
+  font-weight: 600;
+  color: var(--d4n-fg-2);
   cursor: pointer;
+  background: var(--d4n-bg-surface);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  transition:
+    background var(--d4n-dur-base) var(--d4n-ease),
+    border-color var(--d4n-dur-base) var(--d4n-ease);
 }
 
+.jp-airflow-btn:hover {
+  background: var(--d4n-bg-hover);
+}
+
+/* Only one solid button per dialog — the confirming action. */
 .jp-airflow-btn.jp-mod-accent {
-  border-color: var(--jp-brand-color1);
-  background: var(--jp-brand-color1);
-  color: #fff;
+  color: var(--d4n-fg-on-solid);
+  background: var(--d4n-solid-bg);
+  border-color: var(--d4n-solid-bg);
 }
 
+.jp-airflow-btn.jp-mod-accent:hover {
+  background: var(--d4n-solid-bg-hover);
+  border-color: var(--d4n-solid-bg-hover);
+}
+
+/* Destructive confirm is outlined, not solid: a magenta slab next to a navy
+   one reads as the primary action, which is exactly backwards. */
 .jp-airflow-btn.jp-mod-danger {
-  border-color: var(--jp-error-color1);
-  background: var(--jp-error-color1);
-  color: #fff;
+  color: var(--d4n-danger-strong);
+  background: var(--d4n-bg-surface);
+  border-color: var(--d4n-danger);
+}
+
+.jp-airflow-btn.jp-mod-danger:hover {
+  background: var(--d4n-danger-bg);
 }
 
 .jp-airflow-btn:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
-/* Trigger-with-conf dialog (PRD §15.10) */
+/* ---------------------------------------------------------------------------
+   Trigger-with-conf dialog (PRD §15.10)
+   ------------------------------------------------------------------------ */
+
 .jp-airflow-trigger {
   width: 420px;
 }
@@ -428,68 +766,88 @@
 }
 
 .jp-airflow-conf-intro {
-  margin-bottom: 8px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
+  color: var(--d4n-fg-3);
 }
 
 .jp-airflow-conf-field {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 
 .jp-airflow-conf-label {
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size1);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
   font-weight: 600;
+  letter-spacing: var(--d4n-ls-label);
+  color: var(--d4n-fg-2);
+  text-transform: uppercase;
 }
 
 .jp-airflow-conf-input {
   box-sizing: border-box;
   width: 100%;
-  padding: 3px 6px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 3px;
-  background: var(--jp-input-active-background, var(--jp-layout-color0));
-  color: var(--jp-ui-font-color0);
-  font-size: var(--jp-ui-font-size1);
+  height: 34px;
+  padding: 0 10px;
+  font-family: var(--d4n-font-body);
+  font-size: var(--d4n-fs-13);
+  color: var(--d4n-fg-1);
+  background: var(--d4n-bg-surface);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  outline: none;
+  transition: border-color var(--d4n-dur-base) var(--d4n-ease);
 }
 
+.jp-airflow-conf-input:focus {
+  border-color: var(--d4n-border-focus);
+}
+
+/* The conf editor is free-form JSON, so it gets the mono face and room to
+   grow rather than the single-line control height. */
 .jp-airflow-conf-json {
-  font-family: var(--jp-code-font-family);
+  height: auto;
+  padding: 8px 10px;
+  font-family: var(--d4n-font-mono);
+  font-size: 12.5px;
   resize: vertical;
 }
 
 .jp-airflow-conf-field input[type='checkbox'] {
   align-self: flex-start;
+  accent-color: var(--d4n-teal);
 }
 
 .jp-airflow-field-help {
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  font-size: var(--d4n-fs-11);
+  line-height: var(--d4n-lh-normal);
+  color: var(--d4n-fg-3);
 }
 
 .jp-airflow-field-err {
-  color: var(--jp-error-color1);
-  font-size: var(--jp-ui-font-size0);
+  font-size: var(--d4n-fs-11);
+  color: var(--d4n-danger-strong);
 }
 
 /* In-dialog server-side rejection (keeps the form open so conf isn't lost). */
 .jp-airflow-conf-servererror {
-  margin: 0 12px 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--jp-error-color1);
-  border-radius: 3px;
-  background: var(--jp-error-color3, rgb(230 53 88 / 8%));
-  color: var(--jp-error-color1);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 16px 10px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
+  color: var(--d4n-fg-2);
+  background: var(--d4n-danger-bg);
+  border: 1px solid var(--d4n-danger-border);
+  border-radius: var(--d4n-r-md);
 }
 
 .jp-airflow-conf-sep {
-  margin: 4px 0 10px;
-  border-top: 1px solid var(--jp-border-color2);
+  margin: 4px 0 14px;
+  border-top: 1px solid var(--d4n-border-1);
 }
 
 .jp-airflow-logicaldate {
@@ -503,20 +861,31 @@
   width: 100%;
 }
 
-.jp-airflow-radio {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--jp-ui-font-size1);
-}
-
 .jp-airflow-logicaldate .jp-airflow-conf-input {
   flex: 1;
   min-width: 140px;
 }
 
+.jp-airflow-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--d4n-fg-2);
+  accent-color: var(--d4n-teal);
+}
+
+/* ---------------------------------------------------------------------------
+   Log viewer
+
+   The log body is dark in BOTH themes — the design treats a log as an inset
+   terminal, not a document. That is why everything inside it is styled from
+   the theme-constant `--d4n-code-*` / `--d4n-log-*` tokens and never from the
+   surface tokens: a pale status tint would punch a white hole in it.
+   ------------------------------------------------------------------------ */
+
 .jp-airflow-logs {
-  width: min(820px, 90vw);
+  width: min(860px, 92vw);
 }
 
 .jp-airflow-logtitle {
@@ -526,77 +895,94 @@
 }
 
 .jp-airflow-logerrcount {
-  color: var(--jp-error-color1);
+  margin-left: 6px;
+  font-family: var(--d4n-font-body);
+  font-size: var(--d4n-fs-12);
   font-weight: 400;
+  color: var(--d4n-danger-strong);
 }
 
-/* Log-viewer toolbar: attempt selector · search · errors-only · wrap/copy/download */
+/* Toolbar: attempt selector · search · errors-only · wrap/copy/download */
 .jp-airflow-logtoolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--jp-border-color2);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--d4n-border-1);
 }
 
 .jp-airflow-logtry,
 .jp-airflow-logchk {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  gap: 5px;
+  font-size: var(--d4n-fs-12);
+  color: var(--d4n-fg-2);
+}
+
+.jp-airflow-logchk {
+  accent-color: var(--d4n-magenta);
 }
 
 .jp-airflow-logsearch {
   flex: 1;
   min-width: 120px;
-  padding: 2px 6px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 3px;
-  background: var(--jp-input-active-background, var(--jp-layout-color0));
-  color: var(--jp-ui-font-color0);
-  font-size: var(--jp-ui-font-size1);
+  height: 29px;
+  padding: 0 9px;
+  font-family: var(--d4n-font-body);
+  font-size: var(--d4n-fs-12);
+  color: var(--d4n-fg-1);
+  background: var(--d4n-bg-surface);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  outline: none;
+}
+
+/* "log still streaming / truncated" note above the body (PRD §6.6). Sits on
+   the light modal chrome, above the dark body, so it uses surface tokens. */
+.jp-airflow-logtruncated {
+  padding: 8px 16px;
+  font-size: var(--d4n-fs-12);
+  color: var(--d4n-fg-2);
+  background: var(--d4n-warning-bg);
+  border-bottom: 1px solid var(--d4n-warning-border);
 }
 
 .jp-airflow-logbody {
+  padding: 12px 0;
   overflow: auto;
-  padding: 8px 0;
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
-  line-height: 1.4;
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--d4n-code-fg);
+  background: var(--d4n-code-bg);
 }
 
+/* Empty/loading/error placeholders live inside the dark body, so they take
+   the code palette rather than the panel's. */
 .jp-airflow-logstate {
-  padding: 16px 12px;
-  color: var(--jp-ui-font-color2);
-  font-family: var(--jp-ui-font-family);
+  padding: 16px;
+  font-family: var(--d4n-font-body);
+  color: var(--d4n-code-comment);
 }
 
 .jp-airflow-logstate.jp-mod-err {
-  color: var(--jp-error-color1);
-}
-
-/* "log still streaming / truncated" note above the body (PRD §6.6). */
-.jp-airflow-logtruncated {
-  padding: 6px 12px;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color1);
-  background: var(--jp-warn-color3, var(--jp-layout-color2));
-  border-bottom: 1px solid var(--jp-warn-color1, var(--jp-border-color1));
+  color: var(--d4n-log-error);
 }
 
 .jp-airflow-logline {
   display: flex;
-  gap: 10px;
-  padding: 0 12px;
+  gap: 12px;
+  padding: 0 16px;
+  color: var(--d4n-code-fg);
   white-space: pre;
-  color: var(--jp-content-font-color1);
 }
 
+/* Declared here, ahead of the wrap rule below, so specificity stays ascending
+   through the file (stylelint's no-descending-specificity). */
 .jp-airflow-logline:hover {
-  background: var(--jp-layout-color2);
+  background: var(--d4n-navy-deep);
 }
 
 /* Wrap is on by default; the No-wrap toggle adds .jp-mod-nowrap for horizontal
@@ -609,8 +995,8 @@
 .jp-airflow-logln {
   flex: 0 0 auto;
   min-width: 2.5em;
+  color: var(--d4n-code-gutter);
   text-align: right;
-  color: var(--jp-ui-font-color3);
   user-select: none;
 }
 
@@ -619,22 +1005,60 @@
   min-width: 0;
 }
 
-/* Per-level emphasis. Error/critical also get a left bar (non-color-only). */
+/* Per-level emphasis is colour-only on purpose — a tinted row background
+   cannot work here, because the status tints are light-theme pastels and this
+   surface is dark in both themes. Error lines additionally get a left bar
+   below, so severity is never signalled by colour alone. */
 .jp-airflow-log-error,
 .jp-airflow-log-critical {
-  background: var(--jp-error-color3, rgb(255 0 0 / 8%));
-  color: var(--jp-error-color1);
-}
-
-.jp-airflow-logline.jp-mod-err {
-  padding-left: 9px;
-  border-left: 3px solid var(--jp-error-color1);
+  color: var(--d4n-log-error);
 }
 
 .jp-airflow-log-warning {
-  color: var(--jp-warn-color1);
+  color: var(--d4n-log-warning);
 }
 
 .jp-airflow-log-debug {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-log-debug);
+}
+
+.jp-airflow-logline.jp-mod-err {
+  padding-left: 13px;
+  border-left: 3px solid var(--d4n-danger);
+}
+
+/* ---------------------------------------------------------------------------
+   Footer — sticky to the bottom of the panel. Names how the list refreshes and
+   which Airflow API this is talking to; the version matters because Airflow 2
+   and 3 are different APIs and this extension only speaks v2 (Airflow 3.x).
+   ------------------------------------------------------------------------ */
+
+/* flex-start, not space-between: the refresh button and its label must stay
+   adjacent, and `/api/v2` is pushed right by its own auto margin. */
+.jp-airflow-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--d4n-border-1);
+  background: var(--d4n-bg-page);
+  color: var(--d4n-fg-3);
+  font-size: var(--d4n-fs-11);
+}
+
+/* Pushes `/api/v2` to the right edge, leaving the refresh button and its
+   label grouped together on the left. */
+.jp-airflow-footer-api {
+  margin-left: auto;
+  font-family: var(--d4n-font-mono);
+  color: var(--d4n-fg-4);
+}
+
+.jp-airflow-footer-refresh {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
 }

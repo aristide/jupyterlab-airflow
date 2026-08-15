@@ -1,0 +1,372 @@
+/* ============================================================================
+   Data4Now design tokens for the Airflow Studio extension.
+
+   Every colour, font, radius and easing used by base.css and afdag.css comes
+   from here. Those stylesheets should contain no literal colour values, so
+   that re-theming happens in exactly one file.
+
+   ---------------------------------------------------------------------------
+   HOW LIGHT/DARK WORKS
+
+   The design this implements is a fixed light theme with brand colours baked
+   in, but the extension lives inside JupyterLab, where the user picks the
+   theme. Rather than choose one or the other, the tokens split in two:
+
+     * BRAND colours (navy / teal / magenta) are CONSTANT. They are the brand;
+       they do not follow the theme. A teal focus ring is teal in both.
+
+     * NEUTRALS (surfaces, text, borders) have the design's exact values as
+       their light defaults, then flip to JupyterLab's own `--jp-*` variables
+       under `body[data-jp-theme-light='false']`.
+
+   So JupyterLab's light theme reproduces the design pixel-for-pixel, and any
+   dark theme keeps the layout and brand accents while adopting that theme's
+   surfaces. `data-jp-theme-light` is set on `<body>` by JupyterLab itself.
+
+   A few brand tokens DO need a dark variant, because navy is a dark colour:
+   navy text on a dark surface is unreadable. Those are grouped under
+   "brand, theme-sensitive" below rather than being silently left broken.
+
+   `--jp-*` references all carry a literal fallback so the extension still
+   renders sanely if it is ever mounted outside a themed JupyterLab.
+   ========================================================================= */
+
+:root {
+  /* --------------------------------------------------------------------
+     BRAND — constant across themes
+     Sampled from the Data4Now logo: navy letterforms, teal pillar, magenta
+     pie wedge. Magenta is a single point of emphasis — never a third
+     structural colour.
+     -------------------------------------------------------------------- */
+  --d4n-navy: #0f3d6e;
+  --d4n-navy-deep: #082b52;
+  --d4n-navy-soft: #3b5c87;
+  --d4n-teal: #1fa0a0;
+  --d4n-teal-deep: #167c7c;
+  --d4n-magenta: #e63558;
+  --d4n-magenta-deep: #c4274a;
+
+  /* --------------------------------------------------------------------
+     NEUTRALS — light defaults (exactly the design's values)
+     Cool greys with a slight navy tint; plain greys read as "unbranded"
+     next to the navy.
+     -------------------------------------------------------------------- */
+  --d4n-ink: #0b1f38; /* primary body text */
+  --d4n-graphite: #2c3e55; /* secondary body */
+  --d4n-slate: #5a6b82; /* tertiary, captions, icon buttons */
+  --d4n-steel: #8a99ae; /* placeholders, disabled, faint meta */
+  --d4n-mist: #c8d1dd; /* control borders */
+  --d4n-fog: #e4e9f0; /* hairlines, subtle fills, segmented track */
+  --d4n-paper: #f4f6fa; /* recessed background */
+  --d4n-surface: #fff; /* cards, panels, inputs */
+
+  /* --------------------------------------------------------------------
+     SEMANTIC SURFACES / TEXT — always use these in components, not the
+     raw ramp above, so the dark block only has to override one layer.
+     -------------------------------------------------------------------- */
+  --d4n-bg-page: var(--d4n-paper);
+  --d4n-bg-surface: var(--d4n-surface);
+  --d4n-bg-sunken: var(--d4n-fog);
+  --d4n-bg-hover: var(--d4n-fog);
+  --d4n-fg-1: var(--d4n-ink);
+  --d4n-fg-2: var(--d4n-graphite);
+  --d4n-fg-3: var(--d4n-slate);
+  --d4n-fg-4: var(--d4n-steel);
+  --d4n-fg-on-solid: #fff;
+  --d4n-fg-link: var(--d4n-teal-deep);
+  --d4n-border-1: var(--d4n-fog); /* internal dividers */
+  --d4n-border-2: var(--d4n-mist); /* control + card borders */
+  --d4n-border-focus: var(--d4n-teal);
+
+  /* --------------------------------------------------------------------
+     BRAND, THEME-SENSITIVE
+     Navy is dark. On a dark surface it has to lighten or it disappears.
+     -------------------------------------------------------------------- */
+  --d4n-fg-heading: var(--d4n-navy); /* panel + card titles */
+  --d4n-solid-bg: var(--d4n-navy); /* primary button, active tab */
+  --d4n-solid-bg-hover: var(--d4n-navy-deep);
+
+  /* --------------------------------------------------------------------
+     STATUS — hue is constant, tint background flips (a pale pink wash is
+     blinding on a dark shell, so dark uses a low-alpha wash of the same
+     hue instead of a pastel).
+     -------------------------------------------------------------------- */
+  --d4n-success: #1f8a5e;
+  --d4n-success-bg: #e3f4eb;
+  --d4n-success-border: #bee3d0;
+  --d4n-warning: #c97c0a;
+  --d4n-warning-bg: #fbefd8;
+  --d4n-warning-border: #ebd7ae;
+  --d4n-danger: var(--d4n-magenta);
+  --d4n-danger-strong: var(--d4n-magenta-deep);
+  --d4n-danger-bg: #fce3e9;
+  --d4n-danger-border: #f4c6d1;
+  --d4n-info: var(--d4n-teal);
+  --d4n-info-strong: var(--d4n-teal-deep);
+  --d4n-info-bg: #ddf1f1;
+  --d4n-info-border: #a8dbdb;
+
+  /* --------------------------------------------------------------------
+     CODE SURFACE — the generated-DAG panel and the log viewer are dark in
+     BOTH themes (the design treats code as an inset terminal), so these
+     do not flip.
+     -------------------------------------------------------------------- */
+  --d4n-code-bg: #0b1f38;
+  --d4n-code-fg: #e4e9f0;
+  --d4n-code-gutter: #5a6b82;
+  --d4n-code-comment: #8a99ae;
+  --d4n-code-keyword: #7fd1d1;
+  --d4n-code-string: #f6c6d2;
+  --d4n-code-decorator: #e0a340;
+
+  /* Log levels, tuned for the dark log surface above. */
+  --d4n-log-info: #8a99ae;
+  --d4n-log-debug: #5a6b82;
+  --d4n-log-warning: #e0a340;
+  --d4n-log-error: #ff8199;
+
+  /* --------------------------------------------------------------------
+     OPERATOR CATEGORY ACCENTS
+     The medallion/data-zone palette, reused to colour the category
+     eyebrow on each canvas node so families are scannable at a glance.
+     -------------------------------------------------------------------- */
+  --d4n-cat-default: var(--d4n-slate);
+  --d4n-cat-sensors: #3b5c87;
+  --d4n-cat-storage: #167c7c;
+  --d4n-cat-quality: #b8860b;
+  --d4n-cat-sql: #0f3d6e;
+  --d4n-cat-notifications: #a47148;
+  --d4n-cat-compute: #167c7c;
+  --d4n-cat-ingestion: #3b5c87;
+  --d4n-cat-flow: #5a6b82;
+
+  /* --------------------------------------------------------------------
+     TYPE
+     Bundled faces (style/fonts.css) first, then the JupyterLab family, so
+     the UI stays coherent if a face fails to load.
+     -------------------------------------------------------------------- */
+  --d4n-font-display:
+    'D4N Montserrat', var(--jp-ui-font-family, system-ui), sans-serif;
+  --d4n-font-body:
+    'D4N Roboto', var(--jp-ui-font-family, system-ui), sans-serif;
+  --d4n-font-mono:
+    'D4N JetBrains Mono', var(--jp-code-font-family, ui-monospace), monospace;
+
+  /* Sizes are px, not rem: this UI sits inside JupyterLab's own chrome and
+     has to line up with it, not with the document root's font size. */
+  --d4n-fs-9: 9px; /* node category eyebrow */
+  --d4n-fs-10: 10px; /* panel eyebrow */
+  --d4n-fs-11: 11px; /* pills, meta */
+  --d4n-fs-12: 12px; /* dense UI, mono ids */
+  --d4n-fs-13: 13px; /* small body */
+  --d4n-fs-14: 14px; /* body */
+  --d4n-fs-15: 15px;
+  --d4n-fs-17: 17px; /* inspector title */
+  --d4n-fs-19: 19px; /* panel title, dag_id */
+  --d4n-lh-tight: 1.15;
+  --d4n-lh-snug: 1.3;
+  --d4n-lh-normal: 1.5;
+  --d4n-lh-relaxed: 1.65;
+  --d4n-ls-display: -0.015em;
+  --d4n-ls-label: 0.08em;
+  --d4n-ls-pill: 0.06em;
+  --d4n-ls-eyebrow: 0.14em;
+
+  /* --------------------------------------------------------------------
+     RADII / SHADOWS / MOTION
+     Shadows are navy-tinted rather than neutral black — a plain black
+     shadow reads muddy against the cool greys.
+     -------------------------------------------------------------------- */
+  --d4n-r-sm: 4px;
+  --d4n-r-md: 6px; /* controls */
+  --d4n-r-lg: 10px; /* cards, nodes */
+  --d4n-r-pill: 999px;
+  --d4n-shadow-xs: 0 1px 2px rgb(15 61 110 / 6%);
+  --d4n-shadow-sm: 0 1px 3px rgb(15 61 110 / 8%);
+  --d4n-shadow-md: 0 4px 12px rgb(15 61 110 / 8%);
+  --d4n-shadow-lg: 0 12px 28px rgb(15 61 110 / 12%);
+  --d4n-shadow-xl: 0 24px 48px rgb(15 61 110 / 16%);
+  --d4n-shadow-focus: 0 0 0 3px rgb(31 160 160 / 30%);
+  --d4n-shadow-node-selected:
+    0 4px 12px rgb(15 61 110 / 14%), 0 0 0 2px rgb(31 160 160 / 28%);
+  --d4n-scrim: rgb(11 31 56 / 55%);
+  --d4n-ease: cubic-bezier(0.2, 0, 0.1, 1);
+  --d4n-dur-fast: 120ms;
+  --d4n-dur-base: 200ms;
+}
+
+/* ============================================================================
+   DARK — JupyterLab sets data-jp-theme-light="false" on <body>.
+
+   Only NEUTRALS and the handful of theme-sensitive brand tokens are
+   redefined. Brand hues, status hues, the code surface and every
+   non-colour token above are inherited unchanged.
+   ========================================================================= */
+body[data-jp-theme-light='false'] {
+  /* Surfaces follow the active JupyterLab theme so the extension sits in
+     its host rather than punching a light hole in it.
+
+     NOTE — both the raw ramp AND the semantic aliases are restated here, and
+     that duplication is load-bearing, not sloppiness. A `var()` inside a
+     custom-property *declaration* is substituted at computed-value time on
+     the element where the declaration sits. `--d4n-bg-surface: var(--d4n-surface)`
+     is declared on `:root`, so it resolves against `:root`'s ramp (#fff) and
+     that resolved value is what inherits down. Overriding `--d4n-surface`
+     here would NOT retroactively change it — the alias is already a literal
+     by the time it reaches this element. Overriding only the ramp gave a fully
+     light extension inside a dark JupyterLab, with just the directly-named
+     tokens (`--d4n-fg-heading`) flipping. Keep both lists in sync. */
+  --d4n-surface: var(--jp-layout-color1, #212121);
+  --d4n-paper: var(--jp-layout-color0, #111);
+  --d4n-fog: var(--jp-layout-color2, #424242);
+  --d4n-mist: var(--jp-border-color1, #4a4a4a);
+  --d4n-ink: var(--jp-ui-font-color0, #fff);
+  --d4n-graphite: var(--jp-ui-font-color1, #e0e0e0);
+  --d4n-slate: var(--jp-ui-font-color2, #a0a0a0);
+  --d4n-steel: var(--jp-ui-font-color3, #7a7a7a);
+  --d4n-bg-page: var(--jp-layout-color0, #111);
+  --d4n-bg-surface: var(--jp-layout-color1, #212121);
+  --d4n-bg-sunken: var(--jp-layout-color2, #424242);
+  --d4n-bg-hover: var(--jp-layout-color2, #424242);
+  --d4n-fg-1: var(--jp-ui-font-color0, #fff);
+  --d4n-fg-2: var(--jp-ui-font-color1, #e0e0e0);
+  --d4n-fg-3: var(--jp-ui-font-color2, #a0a0a0);
+  --d4n-fg-4: var(--jp-ui-font-color3, #7a7a7a);
+  --d4n-border-1: var(--jp-border-color2, #3a3a3a);
+  --d4n-border-2: var(--jp-border-color1, #4a4a4a);
+  --d4n-cat-default: var(--jp-ui-font-color2, #a0a0a0);
+
+  /* Navy is too dark to read as text or to sit as a button on a dark
+     shell — lift both toward the lighter end of the brand's blue range.
+     Teal stays exactly as-is; it already has the contrast. */
+  --d4n-fg-heading: #8fb8e8;
+  --d4n-solid-bg: #2c5f9e;
+  --d4n-solid-bg-hover: #3b73ba;
+
+  /* Pastel status washes become low-alpha tints of the same hue. Borders
+     lift to the full-strength hue so cards stay delineated. */
+  --d4n-success-bg: rgb(31 138 94 / 18%);
+  --d4n-success-border: rgb(31 138 94 / 45%);
+  --d4n-warning-bg: rgb(201 124 10 / 18%);
+  --d4n-warning-border: rgb(201 124 10 / 45%);
+  --d4n-danger-bg: rgb(230 53 88 / 16%);
+  --d4n-danger-border: rgb(230 53 88 / 45%);
+  --d4n-info-bg: rgb(31 160 160 / 16%);
+  --d4n-info-border: rgb(31 160 160 / 45%);
+
+  /* Status text needs to lighten too — the deep variants were chosen for
+     contrast against a pastel wash, not against a dark surface. */
+  --d4n-success: #4cc38a;
+  --d4n-warning: #e0a340;
+  --d4n-danger-strong: #ff8199;
+  --d4n-info-strong: #4fc9c9;
+
+  /* Neutral-black shadows read better than navy ones on a dark shell. */
+  --d4n-shadow-xs: 0 1px 2px rgb(0 0 0 / 40%);
+  --d4n-shadow-sm: 0 1px 3px rgb(0 0 0 / 45%);
+  --d4n-shadow-md: 0 4px 12px rgb(0 0 0 / 45%);
+  --d4n-shadow-lg: 0 12px 28px rgb(0 0 0 / 50%);
+  --d4n-shadow-xl: 0 24px 48px rgb(0 0 0 / 55%);
+  --d4n-shadow-node-selected:
+    0 4px 12px rgb(0 0 0 / 50%), 0 0 0 2px rgb(31 160 160 / 45%);
+  --d4n-scrim: rgb(0 0 0 / 65%);
+}
+
+/* ============================================================================
+   SHARED PRIMITIVES
+   Small, genuinely repeated patterns. Anything used once belongs in the
+   component's own rule, not here.
+   ========================================================================= */
+
+/* Section eyebrow: uppercase teal micro-label above a group of controls.
+   The single most repeated element in the design. */
+.jp-d4n-eyebrow {
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
+  text-transform: uppercase;
+}
+
+/* Field label: uppercase, tighter tracking than an eyebrow, neutral colour. */
+.jp-d4n-label {
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-label);
+  color: var(--d4n-fg-2);
+  text-transform: uppercase;
+}
+
+/* Status pill. Colour comes from whichever modifier the component adds. */
+.jp-d4n-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
+  border-radius: var(--d4n-r-pill);
+}
+
+.jp-d4n-pill.jp-mod-ok {
+  color: var(--d4n-success);
+  background: var(--d4n-success-bg);
+}
+
+.jp-d4n-pill.jp-mod-error {
+  color: var(--d4n-danger-strong);
+  background: var(--d4n-danger-bg);
+}
+
+.jp-d4n-pill.jp-mod-info {
+  color: var(--d4n-info-strong);
+  background: var(--d4n-info-bg);
+}
+
+.jp-d4n-pill.jp-mod-warn {
+  color: var(--d4n-warning);
+  background: var(--d4n-warning-bg);
+}
+
+/* Keyboard focus. Applied via :focus-visible so pointer users never see it.
+   The teal ring is a brand cue as much as an affordance, which is why it is
+   defined once here rather than per control. */
+.jp-afdag-root :focus-visible,
+.jp-airflow-root :focus-visible {
+  outline: none;
+  box-shadow: var(--d4n-shadow-focus);
+}
+
+@keyframes jp-d4n-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes jp-d4n-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Respect the OS "reduce motion" setting — the pulsing deploy indicator and
+   the spinner are the only continuous animations, and both are decorative. */
+@media (prefers-reduced-motion: reduce) {
+  .jp-afdag-root *,
+  .jp-airflow-root * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

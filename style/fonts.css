@@ -1,0 +1,95 @@
+/* Data4Now brand typefaces — Montserrat (display), Roboto (body),
+   JetBrains Mono (code).
+
+   These are BUNDLED as latin-subset woff2 rather than pulled from Google
+   Fonts at runtime. The extension ships as a wheel into JupyterLab servers
+   that are frequently offline or air-gapped (national statistical offices are
+   a primary audience), where a remote @import would simply fail and silently
+   drop the whole design back to system fonts. It would also make every
+   JupyterLab page issue a third-party request, which is its own problem for
+   public-sector deployments.
+
+   All three families are redistributable: Montserrat and JetBrains Mono are
+   OFL-1.1, Roboto is Apache-2.0. See style/fonts/LICENSES.md.
+
+   Only the `latin` subset is vendored — latin-ext/cyrillic/greek/vietnamese
+   would roughly triple the payload for glyphs this UI never renders. 188 KB
+   total across nine faces.
+
+   `font-display: swap` so text paints in the JupyterLab fallback immediately
+   and re-renders when the face loads, rather than blocking on it. */
+
+/* --- Montserrat: eyebrows, headings, labels, buttons --- */
+@font-face {
+  font-family: 'D4N Montserrat';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/montserrat-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'D4N Montserrat';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/montserrat-600.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'D4N Montserrat';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/montserrat-700.woff2') format('woff2');
+}
+
+/* --- Roboto: body copy, form controls --- */
+@font-face {
+  font-family: 'D4N Roboto';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('./fonts/roboto-300.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'D4N Roboto';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/roboto-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'D4N Roboto';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/roboto-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'D4N Roboto';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/roboto-700.woff2') format('woff2');
+}
+
+/* --- JetBrains Mono: dag_id, task_id, paths, generated code, logs --- */
+@font-face {
+  font-family: 'D4N JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/jetbrains-mono-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'D4N JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/jetbrains-mono-500.woff2') format('woff2');
+}

@@ -1,17 +1,26 @@
-/* Airflow Studio visual editor (.afdag document widget). All colours come from
-   JupyterLab CSS variables so light/dark themes are honoured automatically. */
+/* Airflow Studio visual editor (.afdag document widget).
+
+   Every colour, font, radius and easing here comes from style/d4n-tokens.css.
+   There should be no literal colour value in this file — see that file's header
+   for how the Data4Now palette and JupyterLab's light/dark themes coexist. */
 
 .jp-afdag-editor {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--jp-layout-color0);
-  color: var(--jp-ui-font-color1);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-body);
 }
 
 .jp-afdag-loading {
   padding: 16px;
-  color: var(--jp-ui-font-color2);
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-body);
+}
+
+.jp-afdag-loading.jp-mod-error {
+  color: var(--d4n-danger-strong);
 }
 
 .jp-afdag-root {
@@ -19,89 +28,137 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  font-size: var(--jp-ui-font-size1);
+  font-size: var(--d4n-fs-14);
 }
 
-/* Top bar */
+/* ---------------------------------------------------------------- Top bar */
+
 .jp-afdag-topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--jp-border-color2);
-  background: var(--jp-layout-color1);
+  gap: 10px 14px;
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--d4n-border-2);
+  background: var(--d4n-bg-surface);
 }
 
+/* "AIRFLOW STUDIO" — the product eyebrow above the dag_id. Sits on its own
+   line so the dag_id reads as the page title rather than as a form value. */
 .jp-afdag-brand {
+  flex: 0 0 100%;
+  font-family: var(--d4n-font-display);
+  font-size: 9.5px;
   font-weight: 600;
+  line-height: 1;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
+  text-transform: uppercase;
 }
 
 .jp-afdag-dagid {
-  font-family: var(--jp-code-font-family);
-  color: var(--jp-brand-color1);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-19);
+  font-weight: 700;
+  line-height: var(--d4n-lh-tight);
+  letter-spacing: var(--d4n-ls-display);
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-count {
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-fg-3);
+  font-size: 12.5px;
 }
 
+/* Live validation pill. Both states carry a glyph as well as a colour, so the
+   distinction survives greyscale and colour-blindness. */
 .jp-afdag-errors {
-  font-size: var(--jp-ui-font-size0);
-  padding: 1px 8px;
-  border-radius: 8px;
+  padding: 3px 8px;
+  border-radius: var(--d4n-r-pill);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .jp-afdag-errors.jp-mod-error {
-  color: #fff;
-  background: var(--jp-error-color1, #e63558);
+  color: var(--d4n-danger-strong);
+  background: var(--d4n-danger-bg);
 }
 
 .jp-afdag-errors.jp-mod-ok {
-  color: var(--jp-success-color1, #3a9c52);
+  color: var(--d4n-success);
+  background: var(--d4n-success-bg);
 }
 
 .jp-afdag-spacer {
   flex: 1 1 auto;
 }
 
-/* TaskFlow / Traditional segmented toggle (PRD §6.3 / §15.1) */
+/* TaskFlow / Traditional segmented toggle (PRD §6.3 / §15.1). A sunken track
+   with a raised active pill, rather than two bordered buttons — it reads as
+   one control with two states instead of two competing actions. */
 .jp-afdag-syntax-toggle {
   display: inline-flex;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  overflow: hidden;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-sunken);
 }
 
 .jp-afdag-syntax-opt {
+  padding: 5px 13px;
   border: none;
-  padding: 3px 10px;
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-12);
+  font-weight: 600;
   cursor: pointer;
+  transition: background var(--d4n-dur-base) var(--d4n-ease);
 }
 
 .jp-afdag-syntax-opt:hover {
-  background: var(--jp-layout-color2);
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-syntax-opt.jp-mod-active {
-  background: var(--jp-brand-color1);
-  color: #fff;
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-heading);
+  box-shadow: var(--d4n-shadow-xs);
 }
 
+/* ---------------------------------------------------------------- Buttons */
+
+/* Default button is the SECONDARY style (outlined). The primary/solid
+   treatment is opt-in via .jp-afdag-btn-primary so a toolbar of five buttons
+   does not read as five equally-weighted calls to action. */
 .jp-afdag-btn {
-  border: 1px solid var(--jp-border-color1);
-  background: var(--jp-brand-color1);
-  color: #fff;
-  border-radius: 3px;
-  padding: 3px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-2);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-12);
+  font-weight: 600;
   cursor: pointer;
+  transition:
+    background var(--d4n-dur-base) var(--d4n-ease),
+    border-color var(--d4n-dur-base) var(--d4n-ease);
 }
 
 .jp-afdag-btn:hover {
-  background: var(--jp-brand-color0);
+  background: var(--d4n-bg-hover);
+  border-color: var(--d4n-fg-4);
 }
 
 .jp-afdag-btn:disabled {
@@ -110,99 +167,139 @@
 }
 
 .jp-afdag-btn-primary {
-  margin-left: 6px;
-  font-weight: 600;
+  height: 32px;
+  padding: 0 16px;
+  border-color: transparent;
+  background: var(--d4n-solid-bg);
+  color: var(--d4n-fg-on-solid);
+  font-size: 12.5px;
+}
+
+.jp-afdag-btn-primary:hover {
+  background: var(--d4n-solid-bg-hover);
+  border-color: transparent;
+}
+
+/* Pressed state nudges down 1px — the only "physical" motion in the UI, kept
+   for the single most consequential action (Deploy). */
+.jp-afdag-btn-primary:active {
+  transform: translateY(1px);
 }
 
 .jp-afdag-btn-ghost {
+  border-color: transparent;
   background: transparent;
-  color: var(--jp-ui-font-color1);
-  border-color: var(--jp-border-color1);
+  color: var(--d4n-fg-3);
 }
 
 .jp-afdag-btn-ghost:hover {
-  background: var(--jp-layout-color2);
+  border-color: transparent;
+  background: var(--d4n-bg-hover);
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-btn-danger {
-  background: var(--jp-error-color1, #e63558);
-  border-color: var(--jp-error-color1, #e63558);
+  border-color: var(--d4n-danger);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-danger-strong);
 }
 
 .jp-afdag-btn-danger:hover {
-  background: var(--jp-error-color0, #b3203b);
+  border-color: var(--d4n-danger);
+  background: var(--d4n-danger-bg);
 }
 
 .jp-afdag-node-delete-btn {
   margin-top: 12px;
 }
 
-/* Deploy lifecycle banner */
+/* ------------------------------------------------- Deploy lifecycle banner */
+
 .jp-afdag-deploybanner {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px 12px;
   flex: 0 0 auto;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--jp-border-color2);
-  background: var(--jp-layout-color2);
-  font-size: var(--jp-ui-font-size1);
-  color: var(--jp-ui-font-color1);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--d4n-border-2);
+  background: var(--d4n-bg-page);
+  color: var(--d4n-fg-2);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
 }
 
 .jp-afdag-deploybanner.jp-mod-ok {
-  background: var(--jp-success-color3, var(--jp-layout-color2));
+  border-bottom-color: var(--d4n-success-border);
+  background: var(--d4n-success-bg);
 }
 
 .jp-afdag-deploybanner.jp-mod-error {
-  background: var(--jp-error-color3, var(--jp-layout-color2));
+  border-bottom-color: var(--d4n-danger-border);
+  background: var(--d4n-danger-bg);
 }
 
 .jp-afdag-deploybanner-msg {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 500;
+  font-family: var(--d4n-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-deploybanner-note {
+  max-width: 760px;
   font-weight: 400;
-  font-size: var(--jp-ui-font-size0);
-  opacity: 0.85;
+  font-size: 12.5px;
+  color: var(--d4n-fg-2);
 }
 
 .jp-afdag-deploybanner-actions {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-left: auto;
 }
 
+/* The plain-language explanation of a failure. Left rule in the danger hue
+   ties it to the banner it sits inside (PRD §6.6). */
 .jp-afdag-deploybanner-explain {
   flex: 1 1 100%;
-  margin-top: 6px;
-  padding: 8px 10px;
-  border-radius: 4px;
-  background: var(--jp-layout-color0);
-  border-left: 3px solid var(--jp-error-color1);
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--d4n-danger-border);
+  border-left: 3px solid var(--d4n-danger);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
   font-weight: 400;
-  line-height: 1.45;
+  line-height: var(--d4n-lh-normal);
 }
 
 .jp-afdag-deploybanner-explain-title {
+  margin-bottom: 3px;
+  font-family: var(--d4n-font-display);
   font-weight: 600;
-  margin-bottom: 2px;
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-deploybanner-explain-node {
   margin-top: 4px;
-  color: var(--jp-warn-color1);
+  color: var(--d4n-warning);
 }
 
+/* The copy-pasteable remediation line (e.g. a pip install). Mono on a plain
+   surface so it reads as a command, not as prose. */
 .jp-afdag-deploybanner-explain-hint {
-  margin-top: 4px;
-  font-size: var(--jp-ui-font-size0);
-  opacity: 0.9;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--d4n-danger-border);
+  border-radius: var(--d4n-r-sm);
+  background: var(--d4n-bg-page);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
 }
 
 .jp-afdag-deploybanner-trace {
@@ -213,20 +310,22 @@
   margin: 4px 0 0;
   max-height: 180px;
   overflow: auto;
-  padding: 6px 8px;
-  border-radius: 3px;
-  background: var(--jp-layout-color0);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
-  color: var(--jp-error-color1);
+  padding: 8px 10px;
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-code-bg);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
+  line-height: var(--d4n-lh-normal);
+  color: var(--d4n-log-error);
   white-space: pre-wrap;
 }
 
 .jp-afdag-spinner {
+  flex: 0 0 auto;
   width: 12px;
   height: 12px;
-  border: 2px solid var(--jp-border-color1);
-  border-top-color: var(--jp-brand-color1);
+  border: 2px solid var(--d4n-border-2);
+  border-top-color: var(--d4n-teal);
   border-radius: 50%;
   animation: jp-afdag-spin 0.8s linear infinite;
 }
@@ -237,132 +336,228 @@
   }
 }
 
-/* Body layout */
+/* ----------------------------------------------------------- Body layout */
+
 .jp-afdag-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
 }
 
-/* Palette */
+/* ------------------------------------------------------------- Palette */
+
 .jp-afdag-palette {
-  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 236px;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--jp-border-color2);
-  background: var(--jp-layout-color1);
-  padding: 8px;
-  transition: flex-basis 0.12s ease;
+  border-right: 1px solid var(--d4n-border-1);
+  background: var(--d4n-bg-surface);
+  transition: flex-basis var(--d4n-dur-fast) var(--d4n-ease);
 }
 
+/* `flex: none` on every direct child is what keeps the header controls at
+   their real size. In a scrolling flex column the default `flex-shrink: 1`
+   lets tall content squeeze fixed-height controls — that is what collapsed
+   the 31px search field to 17px. */
 .jp-afdag-palette-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 13px 13px 10px;
+  border-bottom: 1px solid var(--d4n-border-1);
+  background: var(--d4n-bg-surface);
+}
+
+.jp-afdag-palette-headrow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
+  gap: 4px;
+}
+
+/* The bordered field; the input inside it is chrome-less. */
+.jp-afdag-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: 31px;
+  padding: 0 9px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  transition: border-color var(--d4n-dur-base) var(--d4n-ease);
+}
+
+.jp-afdag-search-wrap:focus-within {
+  border-color: var(--d4n-border-focus);
+}
+
+.jp-afdag-search-icon {
+  flex: 0 0 auto;
+  color: var(--d4n-fg-4);
+  font-size: var(--d4n-fs-12);
+  line-height: 1;
 }
 
 .jp-afdag-palette-title {
   margin-right: auto;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
   font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
 }
 
-.jp-afdag-palette-refresh {
+/* Small square icon buttons (refresh, collapse) share one silhouette. */
+.jp-afdag-palette-refresh,
+.jp-afdag-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  margin-right: 2px;
-  padding: 2px 6px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: none;
-  border-radius: 3px;
+  border-radius: 5px;
   background: transparent;
-  color: var(--jp-ui-font-color2);
-  font-size: 13px;
+  color: var(--d4n-fg-3);
+  font-size: var(--d4n-fs-12);
   line-height: 1;
   cursor: pointer;
+  transition: background var(--d4n-dur-fast) var(--d4n-ease);
 }
 
-.jp-afdag-palette-refresh:hover {
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
+.jp-afdag-palette-refresh:hover,
+.jp-afdag-collapse-btn:hover {
+  background: var(--d4n-bg-hover);
+  color: var(--d4n-fg-heading);
 }
 
 /* Collapsed side-panel rail (palette + inspector) */
 .jp-afdag-palette.jp-mod-collapsed,
 .jp-afdag-inspector.jp-mod-collapsed {
-  flex: 0 0 30px;
-  min-width: 30px;
+  flex: 0 0 32px;
+  min-width: 32px;
   overflow: hidden;
-  padding: 6px 0;
+  padding: 10px 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-}
-
-.jp-afdag-collapse-btn {
-  flex: 0 0 auto;
-  padding: 2px 6px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--jp-ui-font-color2);
-  font-size: 14px;
-  line-height: 1;
+  gap: 12px;
+  background: var(--d4n-bg-page);
   cursor: pointer;
 }
 
-.jp-afdag-collapse-btn:hover {
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
+.jp-afdag-palette.jp-mod-collapsed:hover,
+.jp-afdag-inspector.jp-mod-collapsed:hover {
+  background: var(--d4n-bg-hover);
 }
 
 .jp-afdag-rail-label {
   writing-mode: vertical-rl;
-  font-size: var(--jp-ui-font-size0);
+  font-family: var(--d4n-font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-fg-3);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--jp-ui-font-color3);
   user-select: none;
 }
 
 .jp-afdag-search {
-  width: 100%;
-  box-sizing: border-box;
-  margin-bottom: 8px;
-  padding: 3px 6px;
-  background: var(--jp-input-active-background, var(--jp-layout-color0));
-  color: var(--jp-ui-font-color1);
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-body);
+  font-size: 12.5px;
 }
 
+.jp-afdag-search::placeholder {
+  color: var(--d4n-fg-4);
+}
+
+/* Scrolls under the sticky header. `flex: none` for the same reason as the
+   header's children — nothing in this column may be squeezed. */
+.jp-afdag-palette-group {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  padding: 0 10px;
+}
+
+/* Category rule: label plus a hairline that fills the remaining width. */
 .jp-afdag-palette-cat {
-  margin: 8px 0 4px;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+  padding: 4px 3px 0;
+  font-family: var(--d4n-font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-fg-4);
   text-transform: uppercase;
 }
 
+.jp-afdag-palette-cat::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--d4n-border-1);
+}
+
+/* Operator chip. The 3px teal bar on the leading edge is the palette's only
+   colour cue at rest, and it is what greys out when a provider is missing. */
 .jp-afdag-palette-item {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
+  box-sizing: border-box;
   text-align: left;
-  padding: 5px 8px;
-  margin-bottom: 3px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 3px;
-  background: var(--jp-layout-color0);
-  color: var(--jp-ui-font-color1);
-  cursor: pointer;
+  padding: 7px 9px 7px 16px;
+  margin-bottom: 4px;
+  border: 1px solid var(--d4n-border-1);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-body);
+  font-size: 12.5px;
+  cursor: grab;
+  transition:
+    box-shadow var(--d4n-dur-base) var(--d4n-ease),
+    border-color var(--d4n-dur-base) var(--d4n-ease);
+}
+
+.jp-afdag-palette-item::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 3px;
+  height: 15px;
+  margin-top: -7.5px;
+  border-radius: 2px;
+  background: var(--d4n-teal);
 }
 
 .jp-afdag-palette-item:hover {
-  border-color: var(--jp-brand-color1);
+  border-color: var(--d4n-border-2);
+  box-shadow: var(--d4n-shadow-sm);
 }
 
 .jp-afdag-palette-item-label {
@@ -372,49 +567,157 @@
 }
 
 /* Operator unavailable in the target Airflow: dimmed + an (i) glyph (never
-   color-only) and a pip/version tooltip; still clickable (PRD §6.2.1). */
+   colour-only) and a pip/version tooltip; still clickable (PRD §6.2.1). */
 .jp-afdag-palette-item.jp-mod-unavailable {
-  opacity: 0.55;
+  opacity: 0.72;
+  color: var(--d4n-fg-4);
+}
+
+.jp-afdag-palette-item.jp-mod-unavailable::before {
+  background: var(--d4n-border-2);
 }
 
 .jp-afdag-palette-item.jp-mod-unavailable:hover {
-  border-color: var(--jp-border-color1);
+  border-color: var(--d4n-border-1);
+  box-shadow: none;
 }
 
-.jp-afdag-palette-item-warn {
-  flex: 0 0 auto;
-  color: var(--jp-warn-color1, var(--jp-ui-font-color2));
-  font-size: var(--jp-ui-font-size0);
-}
-
-/* Third-party op (off the constraints file): a neutral info glyph + tooltip;
-   the item is NOT dimmed (it's deployable — never gate-blocked, §13 Q13). */
+/* Both trailing glyphs are the same circular badge; only the hue differs. */
+.jp-afdag-palette-item-warn,
 .jp-afdag-palette-item-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
-  color: var(--jp-brand-color1, var(--jp-ui-font-color2));
-  font-size: var(--jp-ui-font-size0);
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-pill);
+  color: var(--d4n-fg-4);
+  font-size: 9px;
+  line-height: 1;
 }
 
-/* Canvas */
+/* Third-party op (off the constraints file): a teal info glyph + tooltip; the
+   item is NOT dimmed (it's deployable — never gate-blocked, §13 Q13). */
+.jp-afdag-palette-item-info {
+  border-color: var(--d4n-teal);
+  color: var(--d4n-info-strong);
+}
+
+.jp-afdag-addnote-btn {
+  display: block;
+  width: 100%;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px dashed var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: transparent;
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--d4n-dur-base) var(--d4n-ease);
+}
+
+.jp-afdag-addnote-btn:hover {
+  border-color: var(--d4n-teal);
+  color: var(--d4n-info-strong);
+}
+
+/* -------------------------------------------------------------- Canvas */
+
 .jp-afdag-canvas {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
+  background: var(--d4n-bg-page);
 }
 
 .jp-afdag-canvas .react-flow {
-  background: var(--jp-layout-color0);
+  background: transparent;
 }
 
-/* Dependency edges (rounded smoothstep arrows), themed for light/dark */
+/* ReactFlow's <Background/> draws the dot grid as an SVG pattern; recolour it
+   here so it follows the theme instead of the component's default prop. */
+.jp-afdag-canvas .react-flow__background circle,
+.jp-afdag-canvas .react-flow__background path {
+  fill: var(--d4n-border-2);
+  stroke: var(--d4n-border-2);
+}
+
+/* Dependency edges (rounded smoothstep arrows) */
 .jp-afdag-canvas .react-flow__edge-path {
-  stroke: var(--jp-border-color0);
-  stroke-width: 1.5;
+  stroke: var(--d4n-fg-4);
+  stroke-width: 1.6;
 }
 
 .jp-afdag-canvas .react-flow__edge:hover .react-flow__edge-path,
 .jp-afdag-canvas .react-flow__edge.selected .react-flow__edge-path {
-  stroke: var(--jp-brand-color1);
+  stroke: var(--d4n-teal);
+}
+
+.jp-afdag-canvas .react-flow__arrowhead polyline,
+.jp-afdag-canvas .react-flow__arrowhead path {
+  fill: var(--d4n-fg-3);
+  stroke: var(--d4n-fg-3);
+}
+
+/* Connection handles: hollow dots that fill teal with the node's selection. */
+.jp-afdag-canvas .react-flow__handle {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--d4n-fg-4);
+  background: var(--d4n-bg-surface);
+}
+
+.jp-afdag-canvas .react-flow__node.selected .react-flow__handle {
+  border-color: var(--d4n-teal);
+}
+
+/* Zoom / fit controls and the minimap, restyled off ReactFlow's defaults. */
+.jp-afdag-canvas .react-flow__controls {
+  border-radius: var(--d4n-r-md);
+  overflow: hidden;
+  box-shadow: var(--d4n-shadow-sm);
+}
+
+.jp-afdag-canvas .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-bottom: 1px solid var(--d4n-border-1);
+  background: var(--d4n-bg-surface);
+  fill: var(--d4n-fg-2);
+}
+
+.jp-afdag-canvas .react-flow__controls-button:hover {
+  background: var(--d4n-bg-hover);
+}
+
+.jp-afdag-canvas .react-flow__minimap {
+  border: 1px solid var(--d4n-border-2);
+  border-radius: 8px;
+  background: var(--d4n-bg-surface);
+  box-shadow: var(--d4n-shadow-sm);
+}
+
+/* ReactFlow paints the minimap's out-of-view mask and its node rects with an
+   inline `fill` presentation attribute taken from component props, so they
+   ignore the theme and render as a bright grey slab on a dark shell. A CSS
+   `fill` outranks a presentation attribute, which is why this works without
+   touching the component. */
+.jp-afdag-canvas .react-flow__minimap-mask {
+  fill: var(--d4n-bg-page);
+  fill-opacity: 0.65;
+}
+
+.jp-afdag-canvas .react-flow__minimap-node {
+  fill: var(--d4n-navy-soft);
+  stroke: none;
 }
 
 /* On-edge delete (×) button, rendered at the edge midpoint when selected */
@@ -423,50 +726,58 @@
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 1px solid var(--jp-border-color1);
+  border: 1px solid var(--d4n-border-2);
   border-radius: 50%;
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color1);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-3);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
   pointer-events: all;
-  box-shadow: var(--jp-elevation-z1);
+  box-shadow: var(--d4n-shadow-sm);
 }
 
 .jp-afdag-edge-del:hover {
-  color: #fff;
-  background: var(--jp-error-color1, #e63558);
-  border-color: var(--jp-error-color1, #e63558);
+  color: var(--d4n-fg-on-solid);
+  background: var(--d4n-danger);
+  border-color: var(--d4n-danger);
 }
 
+/* Empty canvas: a dashed drop target rather than a bare label, so the first
+   thing a new user sees names the gesture they are meant to make (§15.2). */
 .jp-afdag-empty {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   pointer-events: none;
-  color: var(--jp-ui-font-color3);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-14);
+  font-weight: 600;
+  color: var(--d4n-fg-3);
+  text-align: center;
 }
 
 /* First-run onboarding coachmark (PRD §7 / §15.2) — a small, non-blocking
    guided card pinned top-centre of the canvas. */
 .jp-afdag-coach {
   position: absolute;
-  top: 12px;
+  top: 16px;
   left: 50%;
   z-index: 5;
   box-sizing: border-box;
-  width: 330px;
-  max-width: calc(100% - 24px);
-  padding: 10px 12px;
+  width: 420px;
+  max-width: calc(100% - 32px);
+  padding: 16px 18px;
   transform: translateX(-50%);
-  border: 1px solid var(--jp-brand-color1);
-  border-radius: 4px;
-  background: var(--jp-layout-color1);
-  box-shadow: var(--jp-elevation-z4, 0 2px 8px rgb(0 0 0 / 25%));
-  font-size: var(--jp-ui-font-size1);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-lg);
+  background: var(--d4n-bg-surface);
+  box-shadow: var(--d4n-shadow-md);
+  font-size: 13px;
 
   /* Don't trap canvas clicks/drag-to-pan under the card — only the buttons are
      interactive (mirrors .jp-afdag-empty). */
@@ -482,52 +793,63 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .jp-afdag-coach-eyebrow {
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  font-family: var(--d4n-font-display);
+  font-size: 9.5px;
   font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
 }
 
 .jp-afdag-coach-skip {
   border: none;
   background: transparent;
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
-  text-decoration: underline;
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-11);
+  font-weight: 600;
   cursor: pointer;
 }
 
+.jp-afdag-coach-skip:hover {
+  color: var(--d4n-magenta);
+}
+
+/* Progress as short bars rather than dots: they read as "steps remaining"
+   at a glance and give the filled state somewhere to go. */
 .jp-afdag-coach-dots {
   display: flex;
   gap: 5px;
-  margin: 7px 0;
+  margin: 9px 0;
 }
 
 .jp-afdag-coach-dots span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--jp-border-color1);
+  width: 22px;
+  height: 3px;
+  border-radius: var(--d4n-r-pill);
+  background: var(--d4n-border-2);
 }
 
 .jp-afdag-coach-dots span.jp-mod-active {
-  background: var(--jp-brand-color1);
+  background: var(--d4n-teal);
 }
 
 .jp-afdag-coach-title {
-  margin-bottom: 2px;
-  color: var(--jp-ui-font-color0);
+  margin-bottom: 5px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-15);
   font-weight: 600;
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-coach-body {
-  margin: 0 0 8px;
-  color: var(--jp-ui-font-color1);
+  margin: 0 0 12px;
+  color: var(--d4n-fg-2);
+  line-height: var(--d4n-lh-relaxed);
 }
 
 .jp-afdag-coach-actions {
@@ -535,62 +857,123 @@
   justify-content: flex-end;
 }
 
-/* Nodes */
+/* --------------------------------------------------------------- Nodes */
+
 .jp-afdag-node {
   position: relative;
-  min-width: 150px;
-  padding: 6px 10px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 6px;
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color1);
-  box-shadow: var(--jp-elevation-z1);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  box-sizing: border-box;
+  width: 240px;
+  min-height: 86px;
+  padding: 10px 14px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-lg);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-1);
+  box-shadow: var(--d4n-shadow-sm);
+  transition:
+    box-shadow var(--d4n-dur-base) var(--d4n-ease),
+    border-color var(--d4n-dur-base) var(--d4n-ease);
 }
 
 .jp-afdag-node.jp-mod-selected {
-  border-color: var(--jp-brand-color1);
-  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+  border-color: var(--d4n-teal);
+  box-shadow: var(--d4n-shadow-node-selected);
 }
 
 .jp-afdag-node.jp-mod-invalid {
-  border-color: var(--jp-error-color1, #e63558);
+  border-color: var(--d4n-danger-border);
 }
 
+/* Operator family, colour-coded so groups are scannable across the canvas.
+   The per-category hue is set from the operator registry via a data attribute
+   below; this is the neutral default. */
 .jp-afdag-node-cat {
-  font-size: 10px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-9);
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-cat-default);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--jp-ui-font-color3);
+}
+
+.jp-afdag-node-cat[data-cat='sensors'] {
+  color: var(--d4n-cat-sensors);
+}
+
+.jp-afdag-node-cat[data-cat='storage'] {
+  color: var(--d4n-cat-storage);
+}
+
+.jp-afdag-node-cat[data-cat='quality'] {
+  color: var(--d4n-cat-quality);
+}
+
+.jp-afdag-node-cat[data-cat='sql'] {
+  color: var(--d4n-cat-sql);
+}
+
+.jp-afdag-node-cat[data-cat='notifications'] {
+  color: var(--d4n-cat-notifications);
+}
+
+.jp-afdag-node-cat[data-cat='compute'] {
+  color: var(--d4n-cat-compute);
+}
+
+.jp-afdag-node-cat[data-cat='ingestion'] {
+  color: var(--d4n-cat-ingestion);
+}
+
+.jp-afdag-node-cat[data-cat='flow'] {
+  color: var(--d4n-cat-flow);
 }
 
 .jp-afdag-node-label {
+  font-family: var(--d4n-font-display);
+  font-size: 14.5px;
   font-weight: 600;
+  line-height: 1.2;
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-node-taskid {
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-brand-color1);
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  color: var(--d4n-fg-3);
 }
 
+/* Ready / error chip in the node's top-right. */
 .jp-afdag-node-flag {
   position: absolute;
-  top: 4px;
-  right: 22px;
-  font-weight: 700;
+  top: 9px;
+  right: 12px;
+  padding: 3px 8px;
+  border-radius: var(--d4n-r-pill);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
 }
 
 .jp-afdag-node-flag.jp-mod-ok {
-  color: var(--jp-success-color1, #3a9c52);
+  color: var(--d4n-success);
+  background: var(--d4n-success-bg);
 }
 
 .jp-afdag-node-flag.jp-mod-error {
-  color: var(--jp-error-color1, #e63558);
+  color: var(--d4n-danger-strong);
+  background: var(--d4n-danger-bg);
 }
 
-/* Node delete (×) — revealed on hover/focus/selection (icon, themed) */
+/* Node delete (×) — revealed on hover/focus/selection */
 .jp-afdag-node-del {
   position: absolute;
-  top: 2px;
+  top: 4px;
   right: 4px;
   width: 16px;
   height: 16px;
@@ -598,17 +981,17 @@
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.1s ease;
+  transition: opacity var(--d4n-dur-fast) var(--d4n-ease);
 }
 
 .jp-afdag-node-del:hover {
-  color: #fff;
-  background: var(--jp-error-color1, #e63558);
+  color: var(--d4n-fg-on-solid);
+  background: var(--d4n-danger);
 }
 
 .jp-afdag-node:hover .jp-afdag-node-del,
@@ -617,153 +1000,214 @@
   opacity: 1;
 }
 
-/* Inspector */
+/* ------------------------------------------------------------ Inspector */
+
 .jp-afdag-inspector {
-  flex: 0 0 300px;
+  flex: 0 0 372px;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid var(--jp-border-color2);
-  background: var(--jp-layout-color1);
-  transition: flex-basis 0.12s ease;
+  border-left: 1px solid var(--d4n-border-2);
+  background: var(--d4n-bg-surface);
+  transition: flex-basis var(--d4n-dur-fast) var(--d4n-ease);
 }
 
 .jp-afdag-inspector-head {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
+  gap: 8px;
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--jp-border-color2);
+  padding: 11px 12px 0;
+  border-bottom: 1px solid var(--d4n-border-1);
 }
 
 .jp-afdag-tabs {
   display: flex;
+  flex-wrap: wrap;
   flex: 1 1 auto;
+  gap: 4px;
   min-width: 0;
-  overflow-x: auto;
+  padding-bottom: 10px;
 }
 
+/* Tabs wrap onto two rows rather than scrolling horizontally: with eight of
+   them, a hidden overflow row is a tab nobody finds. */
 .jp-afdag-tab {
-  flex: 1;
-  padding: 6px 8px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size1);
-  letter-spacing: 0.3px;
+  padding: 5px 9px;
+  border: 1px solid var(--d4n-border-1);
+  border-radius: var(--d4n-r-pill);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-label);
+  text-transform: uppercase;
   cursor: pointer;
+  transition:
+    background var(--d4n-dur-fast) var(--d4n-ease),
+    border-color var(--d4n-dur-fast) var(--d4n-ease);
 }
 
 .jp-afdag-tab:hover {
-  background: var(--jp-layout-color2);
+  border-color: var(--d4n-border-2);
+  background: var(--d4n-bg-hover);
 }
 
 .jp-afdag-tab.jp-mod-active {
-  color: var(--jp-ui-font-color0);
-  border-bottom-color: var(--jp-brand-color1);
+  border-color: var(--d4n-solid-bg);
+  background: var(--d4n-solid-bg);
+  color: var(--d4n-fg-on-solid);
 }
 
 .jp-afdag-tabpanel {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 16px 16px 28px;
 }
 
-/* Notifications tab (PRD §6.8 / §15.14): DAG-level callback channels per event. */
+/* Shared section card used by the NODE tab's grouped settings and the
+   Notifications tab: a titled box with a sunken header strip. */
+.jp-afdag-inspector-section {
+  margin-bottom: 16px;
+  border: 1px solid var(--d4n-border-1);
+  border-radius: var(--d4n-r-lg);
+  overflow: hidden;
+}
+
+.jp-afdag-inspector-title {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--d4n-border-1);
+  background: var(--d4n-bg-page);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------- Notifications tab (§6.8/§15.14) */
+
 .jp-afdag-notify-intro {
-  margin: 0 0 10px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 0 14px;
+  color: var(--d4n-fg-3);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
 }
 
 .jp-afdag-notify-event {
   margin-bottom: 14px;
+  border: 1px solid var(--d4n-border-1);
+  border-radius: var(--d4n-r-lg);
+  overflow: hidden;
 }
 
 .jp-afdag-notify-event-title {
-  margin: 0 0 4px;
-  padding-bottom: 2px;
-  border-bottom: 1px solid var(--jp-border-color2);
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size1);
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--d4n-border-1);
+  background: var(--d4n-bg-page);
+  color: var(--d4n-fg-heading);
+  font-family: var(--d4n-font-display);
+  font-size: 12.5px;
   font-weight: 600;
 }
 
 .jp-afdag-notify-hint {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   font-weight: 400;
 }
 
 .jp-afdag-notify-none {
-  margin: 4px 0;
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0;
+  padding: 12px;
+  color: var(--d4n-fg-4);
+  font-size: var(--d4n-fs-12);
 }
 
+/* A configured channel: the transport as a teal pill, then its target. */
 .jp-afdag-notify-entry {
-  margin: 6px 0;
-  padding: 6px 8px;
-  border: 1px solid var(--jp-border-color2);
-  border-left: 3px solid var(--jp-brand-color1);
-  border-radius: 3px;
-  background: var(--jp-layout-color1);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-page);
 }
 
 .jp-afdag-notify-entry-head {
   display: flex;
   align-items: center;
+  gap: 8px;
   justify-content: space-between;
 }
 
 .jp-afdag-notify-channel {
+  padding: 3px 8px;
+  border-radius: var(--d4n-r-pill);
+  background: var(--d4n-info-bg);
+  color: var(--d4n-info-strong);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
   font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
 }
 
 .jp-afdag-notify-remove {
   padding: 0 4px;
   border: none;
   background: none;
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   cursor: pointer;
 }
 
 .jp-afdag-notify-remove:hover {
-  color: var(--jp-error-color1);
+  color: var(--d4n-magenta);
 }
 
 .jp-afdag-notify-warn {
   margin: 2px 0;
-  color: var(--jp-warn-color1);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-warning);
+  font-size: var(--d4n-fs-12);
 }
 
 .jp-afdag-notify-add {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 7px;
+  padding: 12px;
 }
 
 .jp-afdag-notify-add-label {
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-fg-4);
+  font-size: var(--d4n-fs-12);
 }
 
+/* Dashed "add" affordances read as a placeholder slot rather than an action
+   that already exists — same treatment as the palette's Add note. */
 .jp-afdag-notify-add-btn {
-  padding: 2px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size0);
+  padding: 5px 10px;
+  border: 1px dashed var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: transparent;
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-11);
+  font-weight: 600;
   cursor: pointer;
+  transition: border-color var(--d4n-dur-base) var(--d4n-ease);
 }
 
 .jp-afdag-notify-add-btn:hover {
-  border-color: var(--jp-brand-color1);
-  color: var(--jp-brand-color1);
+  border-color: var(--d4n-teal);
+  color: var(--d4n-info-strong);
 }
 
 .jp-afdag-notify-add-btn.jp-mod-unavailable {
@@ -771,46 +1215,64 @@
 }
 
 .jp-afdag-notify-error {
-  margin: 2px 0 0;
-  color: var(--jp-error-color1);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 12px 12px;
+  color: var(--d4n-danger-strong);
+  font-size: var(--d4n-fs-12);
 }
 
-/* Per-task callbacks section inside the NODE tab (PRD §6.8): a divider sets it
-   apart from the operator form above, mirroring the "Common settings" fieldset. */
+/* Per-task callbacks section inside the NODE tab (PRD §6.8). */
 .jp-afdag-node-callbacks {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--jp-border-color1);
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--d4n-border-1);
 }
 
 .jp-afdag-node-section-title {
   margin: 0 0 8px;
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size1);
+  color: var(--d4n-fg-heading);
+  font-family: var(--d4n-font-display);
+  font-size: 12.5px;
   font-weight: 600;
 }
 
-/* CodeMirror host (code/json fields + read-only preview) */
+/* --------------------------------- CodeMirror host (code/json + preview) */
+
 .jp-afdag-cm {
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 2px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
   max-height: 320px;
   overflow: auto;
-  background: var(--jp-layout-color0);
+  background: var(--d4n-bg-page);
 }
 
 .jp-afdag-cm .cm-editor {
-  font-size: var(--jp-code-font-size);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-12);
 }
 
 .jp-afdag-cm .cm-editor.cm-focused {
   outline: none;
 }
 
-/* Read-only preview (the CODE tab): no caret, taller scroll box */
+/* Read-only preview (the CODE tab).
+
+   The design draws generated code as a dark inset terminal, and an earlier
+   pass set `background: var(--d4n-code-bg)` here to match. That made the code
+   INVISIBLE: this host wraps a CodeMirror editor whose foreground — plain text
+   and every syntax token — comes from JupyterLab's own CodeMirror theme, which
+   follows the JupyterLab theme, not ours. Under the light theme that
+   foreground resolved to rgb(11,31,56), the exact value of `--d4n-code-bg`, so
+   the text was painted in the background colour.
+
+   Only CodeMirror may own this surface: whoever sets the background must also
+   set every token colour, and re-deriving an entire syntax theme to win a
+   background is the wrong trade. So the panel keeps the neutral recessed
+   surface and CodeMirror stays legible in both themes. The dark treatment is
+   still used where we DO own the foreground — the log viewer and the deploy
+   banner's traceback, both plain DOM. */
 .jp-afdag-cm.jp-mod-readonly {
   max-height: 60vh;
+  border-radius: 8px;
 }
 
 .jp-afdag-cm.jp-mod-readonly .cm-cursor,
@@ -818,16 +1280,30 @@
   display: none;
 }
 
-/* RJSF form, themed with jp variables */
+/* ------------------------------------------------------------ RJSF form */
+
 .jp-afdag-rjsf .form-group {
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 
+/* RJSF emits the label and the `ⓘ` bubble as SIBLINGS, then the control:
+   `<label>…</label><span class="jp-afdag-info-bubble">…</span><input>`.
+   A block label claims the whole row and pushes the bubble onto a line of its
+   own — a wasted row on every field. inline-flex keeps the two on one line
+   while the block-level control below still starts a new one. It also suits
+   the checkbox case, where RJSF nests the input inside the label. */
 .jp-afdag-rjsf label {
-  display: block;
-  margin-bottom: 3px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  vertical-align: middle;
+  margin-bottom: 6px;
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-label);
+  color: var(--d4n-fg-2);
+  text-transform: uppercase;
 }
 
 .jp-afdag-rjsf input[type='text'],
@@ -837,57 +1313,164 @@
 .jp-afdag-rjsf textarea {
   box-sizing: border-box;
   width: 100%;
-  padding: 3px 6px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 2px;
-  background: var(--jp-input-active-background, var(--jp-layout-color0));
-  color: var(--jp-ui-font-color0);
-  font-size: var(--jp-ui-font-size1);
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-body);
+  font-size: 13px;
+}
+
+.jp-afdag-rjsf textarea {
+  height: auto;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.jp-afdag-rjsf input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--d4n-teal);
 }
 
 .jp-afdag-rjsf .control-label .required {
-  color: var(--jp-error-color1);
+  color: var(--d4n-magenta);
   margin-left: 2px;
 }
 
 .jp-afdag-rjsf .text-danger,
 .jp-afdag-rjsf .error-detail {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   padding-left: 16px;
   list-style: disc;
-  color: var(--jp-error-color1);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-danger-strong);
+  font-family: var(--d4n-font-body);
+  font-size: 11.5px;
+  text-transform: none;
 }
 
 .jp-afdag-rjsf .field-description,
 .jp-afdag-rjsf .help-block {
-  margin: 2px 0 0;
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
+  margin: 4px 0 0;
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-body);
+  font-size: var(--d4n-fs-12);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
-/* Per-field info bubble (PRD §6.1.3): an `ⓘ` glyph next to the field that
-   reveals its help text in a tooltip on hover/focus. Replaces always-on inline
-   help so the form stays uncluttered but the explanation is one hover away. */
-.jp-afdag-info-bubble {
-  position: relative;
-  display: inline-block;
-  margin: 1px 0 0;
-}
-
-.jp-afdag-info-glyph {
+/* Nested object fields (the "Common settings" section) render as a fieldset. */
+.jp-afdag-rjsf fieldset {
+  min-width: 0;
+  margin: 0;
   padding: 0;
   border: none;
+}
+
+.jp-afdag-rjsf legend {
+  width: 100%;
+  margin: 18px 0 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--d4n-border-1);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
+  text-transform: uppercase;
+}
+
+.jp-afdag-schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jp-afdag-schedule-cron {
+  font-family: var(--d4n-font-mono);
+  font-size: 12.5px;
+}
+
+/* Fields whose value is code (SQL, JSON, paths) get the mono face so the
+   distinction from prose fields is visible before you click in. */
+.jp-afdag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.jp-afdag-field > span {
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-label);
+  color: var(--d4n-fg-2);
+  text-transform: uppercase;
+}
+
+.jp-afdag-field input,
+.jp-afdag-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-body);
+  font-size: 13px;
+}
+
+.jp-afdag-field textarea {
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-12);
+  resize: vertical;
+}
+
+.jp-afdag-hint {
+  color: var(--d4n-fg-3);
+  font-size: var(--d4n-fs-12);
+  line-height: var(--d4n-lh-normal);
+}
+
+/* --------------------------------------------- Per-field info bubble (§6.1.3) */
+
+/* Shares a line with the label it annotates (see the label rule above), so it
+   needs the same baseline alignment and bottom margin or the control below
+   sits tight against it. */
+.jp-afdag-info-bubble {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+  margin: 0 0 6px 5px;
+}
+
+/* A bordered circle rather than a bare glyph: at 14px the outline is what
+   makes it read as an affordance instead of punctuation. */
+.jp-afdag-info-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-pill);
   background: none;
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-fg-3);
+  font-size: 9px;
   line-height: 1;
   cursor: help;
 }
 
 .jp-afdag-info-glyph:hover,
 .jp-afdag-info-glyph:focus {
-  color: var(--jp-brand-color1);
+  border-color: var(--d4n-teal);
+  color: var(--d4n-info-strong);
   outline: none;
 }
 
@@ -899,53 +1482,34 @@
   width: max-content;
   max-width: 260px;
   margin-top: 4px;
-  padding: 6px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  background: var(--jp-layout-color1);
-  box-shadow: var(--jp-elevation-z2);
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size0);
-  line-height: 1.35;
+  padding: 8px 10px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  box-shadow: var(--d4n-shadow-md);
+  color: var(--d4n-fg-2);
+  font-family: var(--d4n-font-body);
+  font-size: var(--d4n-fs-12);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: var(--d4n-lh-normal);
+  text-transform: none;
   white-space: normal;
 }
 
-/* Nested object fields (the "Common settings" section) render as a fieldset.
-   Drop the default browser box; the legend (present only on the titled common
-   section, not the untitled root) becomes a section divider. */
-.jp-afdag-rjsf fieldset {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: none;
-}
+/* ----------------------------------------------------------- SAVED tab */
 
-.jp-afdag-rjsf legend {
-  width: 100%;
-  margin: 14px 0 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--jp-border-color2);
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.jp-afdag-schedule {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* SAVED tab */
 .jp-afdag-saved-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  margin-bottom: 12px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
+  text-transform: uppercase;
 }
 
 .jp-afdag-saved-list {
@@ -955,160 +1519,149 @@
 }
 
 .jp-afdag-saved-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
-  padding: 4px 6px;
-  border: none;
-  border-radius: 2px;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--d4n-border-1);
+  border-radius: 8px;
   background: transparent;
-  color: var(--jp-content-font-color1);
-  font-size: var(--jp-ui-font-size1);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-12);
   text-align: left;
   cursor: pointer;
   word-break: break-all;
 }
 
 .jp-afdag-saved-item:hover {
-  background: var(--jp-layout-color2);
+  border-color: var(--d4n-border-2);
+  background: var(--d4n-bg-page);
 }
 
 .jp-afdag-saved-item.jp-mod-current {
-  color: var(--jp-brand-color1);
+  border-color: var(--d4n-teal);
+  color: var(--d4n-info-strong);
 }
 
 .jp-afdag-saved-tag {
-  color: var(--jp-ui-font-color3);
-  font-style: italic;
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: var(--d4n-r-pill);
+  background: var(--d4n-bg-sunken);
+  color: var(--d4n-fg-3);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------ CODE tab */
+
+.jp-afdag-code {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .jp-afdag-code-errors {
-  margin: 0 0 8px;
-  padding: 6px 8px 6px 22px;
+  margin: 0 0 12px;
+  padding: 10px 12px 10px 28px;
   list-style: disc;
-  background: var(--jp-error-color3, rgb(255 0 0 / 8%));
-  border: 1px solid var(--jp-error-color1);
-  border-radius: 3px;
-  color: var(--jp-error-color1);
-  font-size: var(--jp-ui-font-size0);
+  border: 1px solid var(--d4n-danger-border);
+  border-radius: 8px;
+  background: var(--d4n-danger-bg);
+  color: var(--d4n-danger-strong);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
 }
 
-.jp-afdag-inspector-section {
-  margin-bottom: 16px;
-}
+/* ------------------------------------------------------------ INFO tab */
 
-.jp-afdag-inspector-title {
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
-  border-bottom: 1px solid var(--jp-border-color2);
-  padding-bottom: 4px;
-  margin-bottom: 8px;
-}
-
-.jp-afdag-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-bottom: 8px;
-  font-size: var(--jp-ui-font-size0);
-}
-
-.jp-afdag-field > span {
-  color: var(--jp-ui-font-color2);
-}
-
-.jp-afdag-field input,
-.jp-afdag-field textarea {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 3px 6px;
-  background: var(--jp-input-active-background, var(--jp-layout-color0));
-  color: var(--jp-ui-font-color1);
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  font-family: inherit;
-}
-
-.jp-afdag-field textarea {
-  font-family: var(--jp-code-font-family);
-  resize: vertical;
-}
-
-.jp-afdag-hint {
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
-}
-
-/* INFO tab (learn-Airflow surface) */
 .jp-afdag-info {
-  font-size: var(--jp-ui-font-size1);
-  line-height: 1.45;
-  color: var(--jp-ui-font-color1);
+  font-size: 13.5px;
+  line-height: var(--d4n-lh-relaxed);
+  color: var(--d4n-fg-2);
 }
 
 .jp-afdag-info-cat {
-  font-size: 10px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-info-strong);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--jp-ui-font-color3);
 }
 
 .jp-afdag-info-title {
-  margin: 2px 0 6px;
-  font-size: var(--jp-ui-font-size2);
+  margin: 6px 0 10px;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-17);
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-info-desc {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
 }
 
 .jp-afdag-info-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-bottom: 12px;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
+  gap: 6px 12px;
+  margin-bottom: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--d4n-border-1);
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  color: var(--d4n-fg-2);
 }
 
 .jp-afdag-info-unavailable {
-  margin: 0 0 12px;
-  padding: 6px 8px;
-  border: 1px solid var(--jp-warn-color1, var(--jp-border-color1));
-  border-radius: 3px;
-  background: var(--jp-warn-color3, var(--jp-layout-color2));
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--d4n-warning-border);
+  border-radius: 8px;
+  background: var(--d4n-warning-bg);
+  color: var(--d4n-fg-2);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
 }
 
-/* Third-party (off-constraints) note: informational (brand-tinted), not a
-   warning — the op deploys, it just needs a separate pinned install (§13 Q13). */
+/* Third-party (off-constraints) note: informational (teal), not a warning —
+   the op deploys, it just needs a separate pinned install (§13 Q13). */
 .jp-afdag-info-thirdparty {
-  margin: 0 0 12px;
-  padding: 6px 8px;
-  border: 1px solid var(--jp-brand-color1, var(--jp-border-color1));
-  border-radius: 3px;
-  background: var(--jp-brand-color3, var(--jp-layout-color2));
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--d4n-info-border);
+  border-radius: 8px;
+  background: var(--d4n-info-bg);
+  color: var(--d4n-fg-2);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
 }
 
 .jp-afdag-info-section {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .jp-afdag-info-heading {
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--d4n-border-1);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-10);
   font-weight: 600;
+  letter-spacing: var(--d4n-ls-eyebrow);
+  color: var(--d4n-fg-4);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
-  border-bottom: 1px solid var(--jp-border-color2);
-  padding-bottom: 3px;
-  margin-bottom: 6px;
 }
 
 .jp-afdag-info-params {
@@ -1116,60 +1669,47 @@
 }
 
 .jp-afdag-info-params dt {
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-brand-color1);
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  color: var(--d4n-info-strong);
 }
 
 .jp-afdag-info-params dd {
-  margin: 0 0 8px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  margin: 2px 0 10px;
+  color: var(--d4n-fg-2);
+  font-size: 12.5px;
 }
 
 .jp-afdag-info-example {
   margin: 0;
-  padding: 6px 8px;
+  padding: 8px 10px;
   overflow: auto;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 3px;
-  background: var(--jp-layout-color0);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
+  border: 1px solid var(--d4n-border-1);
+  border-radius: var(--d4n-r-sm);
+  background: var(--d4n-bg-page);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-mono);
+  font-size: 11.5px;
+  line-height: var(--d4n-lh-normal);
   white-space: pre-wrap;
-  color: var(--jp-content-font-color1);
 }
 
 .jp-afdag-info-docs {
   display: inline-block;
-  margin-top: 4px;
-  color: var(--jp-brand-color1);
+  margin-top: 8px;
+  color: var(--d4n-fg-link);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-12);
+  font-weight: 600;
   text-decoration: none;
 }
 
 .jp-afdag-info-docs:hover {
+  color: var(--d4n-magenta);
   text-decoration: underline;
 }
 
-/* Annotation note cards (PRD §6.1.7) */
-.jp-afdag-addnote-btn {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  margin-bottom: 8px;
-  padding: 4px 8px;
-  border: 1px dashed var(--jp-border-color1);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size1);
-  cursor: pointer;
-}
-
-.jp-afdag-addnote-btn:hover {
-  border-color: var(--jp-brand-color1);
-  background: var(--jp-layout-color2);
-}
+/* ------------------------------------- Annotation note cards (PRD §6.1.7) */
 
 .jp-afdag-note {
   display: flex;
@@ -1180,10 +1720,10 @@
   min-width: 140px;
   min-height: 70px;
   overflow: hidden;
-  border: 1px solid var(--jp-warn-color1, #c9a227);
-  border-radius: 4px;
-  background: var(--jp-warn-color3, #fdf6c9);
-  box-shadow: var(--jp-elevation-z1);
+  border: 1px solid var(--d4n-warning-border);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-warning-bg);
+  box-shadow: var(--d4n-shadow-sm);
 }
 
 .jp-afdag-note-bar {
@@ -1193,7 +1733,7 @@
   justify-content: space-between;
   height: 16px;
   padding: 0 2px 0 4px;
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-warning);
   cursor: grab;
 }
 
@@ -1207,19 +1747,19 @@
   box-sizing: border-box;
   flex: 1 1 auto;
   width: 100%;
-  padding: 0 6px 6px;
+  padding: 0 8px 8px;
   border: none;
   background: transparent;
   outline: none;
   resize: none;
-  color: var(--jp-ui-font-color1);
-  font-family: var(--jp-ui-font-family);
-  font-size: var(--jp-ui-font-size1);
-  line-height: 1.4;
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-body);
+  font-size: 12.5px;
+  line-height: 1.45;
 }
 
 .jp-afdag-note-text::placeholder {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
 }
 
 .jp-afdag-note-del {
@@ -1229,7 +1769,7 @@
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--jp-ui-font-color2);
+  color: var(--d4n-fg-3);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
@@ -1237,8 +1777,8 @@
 }
 
 .jp-afdag-note-del:hover {
-  color: #fff;
-  background: var(--jp-error-color1, #e63558);
+  color: var(--d4n-fg-on-solid);
+  background: var(--d4n-danger);
 }
 
 .jp-afdag-note:hover .jp-afdag-note-del {
@@ -1248,87 +1788,108 @@
 /* -- VARIABLES tab (PRD §6.10 / §15.15) ---------------------------------- */
 
 .jp-afdag-var-intro {
-  margin: 0 0 8px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 0 12px;
+  color: var(--d4n-fg-3);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
 }
 
+/* The plaintext-in-git warning. Amber, not red: it is a caution about where
+   the value lands, not an error that blocks anything (PRD §6.10). */
 .jp-afdag-var-secrets {
-  color: var(--jp-warn-color1);
+  padding: 10px 12px;
+  border: 1px solid var(--d4n-warning-border);
+  border-radius: 8px;
+  background: var(--d4n-warning-bg);
+  color: var(--d4n-fg-2);
 }
 
 .jp-afdag-var-secrets code {
   margin: 0 2px;
-  font-size: var(--jp-ui-font-size0);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
 }
 
 .jp-afdag-var-alert {
-  margin: 0 0 10px;
-  padding: 6px 8px;
-  border-left: 3px solid var(--jp-warn-color1);
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size0);
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--d4n-warning-border);
+  border-left: 3px solid var(--d4n-warning);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-warning-bg);
+  color: var(--d4n-fg-2);
+  font-size: 12.5px;
+  line-height: var(--d4n-lh-normal);
 }
 
 .jp-afdag-var-alert-error {
-  border-left-color: var(--jp-error-color1);
+  border-color: var(--d4n-danger-border);
+  border-left-color: var(--d4n-danger);
+  background: var(--d4n-danger-bg);
 }
 
 .jp-afdag-var-empty {
-  margin: 12px 0;
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
+  margin: 14px 0;
+  color: var(--d4n-fg-4);
+  font-size: var(--d4n-fs-12);
   font-style: italic;
 }
 
 .jp-afdag-var-row {
   margin-bottom: 12px;
-  padding: 8px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 3px;
-  background: var(--jp-layout-color1);
+  padding: 11px 12px;
+  border: 1px solid var(--d4n-border-1);
+  border-radius: 8px;
+  background: var(--d4n-bg-surface);
 }
 
 .jp-afdag-var-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .jp-afdag-var-key {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 2px;
-  background: var(--jp-layout-color0);
-  color: var(--jp-ui-font-color0);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size1);
+  height: 31px;
+  padding: 0 9px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-12);
 }
 
+/* Scope badge: local (this flow owns it) vs remote (Airflow owns it) vs
+   missing. Local is the only one this flow may edit, so it gets the brand
+   fill while remote stays neutral (PRD §6.10). */
 .jp-afdag-var-badge {
   flex: 0 0 auto;
-  padding: 1px 6px;
-  border-radius: 8px;
-  font-size: var(--jp-ui-font-size0);
+  padding: 3px 8px;
+  border-radius: var(--d4n-r-pill);
+  font-family: var(--d4n-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-pill);
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .jp-afdag-var-badge-local {
-  background: var(--jp-brand-color3);
-  color: var(--jp-ui-inverse-font-color1);
+  background: var(--d4n-info-bg);
+  color: var(--d4n-info-strong);
 }
 
 .jp-afdag-var-badge-remote {
-  background: var(--jp-layout-color3);
-  color: var(--jp-ui-font-color1);
+  background: var(--d4n-bg-sunken);
+  color: var(--d4n-fg-2);
 }
 
 .jp-afdag-var-badge-missing {
-  background: var(--jp-error-color1);
-  color: var(--jp-ui-inverse-font-color1);
+  background: var(--d4n-danger-bg);
+  color: var(--d4n-danger-strong);
 }
 
 .jp-afdag-var-remove {
@@ -1336,21 +1897,25 @@
   padding: 0 6px;
   border: none;
   background: none;
-  color: var(--jp-ui-font-color2);
+  color: var(--d4n-fg-3);
   cursor: pointer;
-  font-size: var(--jp-ui-font-size1);
+  font-size: var(--d4n-fs-14);
+}
+
+.jp-afdag-var-remove:hover {
+  color: var(--d4n-magenta);
 }
 
 .jp-afdag-var-remove:disabled {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   cursor: not-allowed;
 }
 
 .jp-afdag-var-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .jp-afdag-var-wide {
@@ -1360,80 +1925,95 @@
 .jp-afdag-var-fields label {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  gap: 5px;
+  font-family: var(--d4n-font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: var(--d4n-ls-label);
+  color: var(--d4n-fg-2);
+  text-transform: uppercase;
 }
 
 .jp-afdag-var-fields input,
 .jp-afdag-var-fields select,
 .jp-afdag-var-fields textarea {
-  padding: 3px 6px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 2px;
-  background: var(--jp-layout-color0);
-  color: var(--jp-ui-font-color0);
-  font-family: inherit;
-  font-size: var(--jp-ui-font-size1);
+  padding: 7px 9px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-body);
+  font-size: var(--d4n-fs-12);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
   resize: vertical;
 }
 
+/* The two ready-to-paste reference forms (Jinja and Variable.get). */
 .jp-afdag-var-refs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .jp-afdag-var-refs code {
-  padding: 2px 5px;
-  border-radius: 2px;
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size0);
+  padding: 3px 6px;
+  border-radius: var(--d4n-r-sm);
+  background: var(--d4n-bg-page);
+  color: var(--d4n-fg-1);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
   overflow-wrap: anywhere;
 }
 
 .jp-afdag-var-usage {
-  margin-top: 6px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  margin-top: 8px;
+  color: var(--d4n-fg-4);
+  font-size: 11.5px;
 }
 
 .jp-afdag-var-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .jp-afdag-var-actions button {
-  padding: 3px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 2px;
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-2);
+  font-family: var(--d4n-font-display);
+  font-size: 11.5px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-afdag-var-actions button:hover {
+  background: var(--d4n-bg-hover);
 }
 
 .jp-afdag-var-actions button:disabled {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   cursor: not-allowed;
 }
 
 .jp-afdag-var-loading {
-  color: var(--jp-ui-font-color3);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-fg-4);
+  font-size: var(--d4n-fs-12);
 }
 
 .jp-afdag-var-picker {
   max-height: 220px;
-  margin-top: 6px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 3px;
+  margin-top: 8px;
+  border: 1px solid var(--d4n-border-1);
+  border-radius: 8px;
   overflow-y: auto;
 }
 
@@ -1442,28 +2022,28 @@
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  padding: 8px 10px;
   border: none;
-  border-bottom: 1px solid var(--jp-border-color2);
+  border-bottom: 1px solid var(--d4n-border-1);
   background: none;
-  color: var(--jp-ui-font-color1);
+  color: var(--d4n-fg-1);
   cursor: pointer;
-  font-size: var(--jp-ui-font-size0);
+  font-size: var(--d4n-fs-12);
   text-align: left;
 }
 
 .jp-afdag-var-pick:hover {
-  background: var(--jp-layout-color2);
+  background: var(--d4n-bg-page);
 }
 
 .jp-afdag-var-pick-key {
-  font-family: var(--jp-code-font-family);
+  font-family: var(--d4n-font-mono);
   overflow-wrap: anywhere;
 }
 
 .jp-afdag-var-pick-owner {
   flex: 0 0 auto;
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
 }
 
 /* -- CONNECTIONS tab additions (PRD §6.11 / §15.16) ---------------------- */
@@ -1473,19 +2053,20 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
-  font-size: var(--jp-ui-font-size0);
+  margin-top: 6px;
+  font-size: var(--d4n-fs-12);
 }
 
 .jp-afdag-conn-pending code {
-  padding: 1px 4px;
-  border-radius: 2px;
-  background: var(--jp-layout-color1);
-  font-family: var(--jp-code-font-family);
+  padding: 2px 5px;
+  border-radius: var(--d4n-r-sm);
+  background: var(--d4n-bg-page);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
 }
 
 .jp-afdag-conn-pending em {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   font-style: normal;
 }
 
@@ -1494,70 +2075,86 @@
    `.jp-afdag-var-actions button:disabled` but comes later in the file, which
    stylelint's no-descending-specificity flags as a source-order hazard. */
 .jp-afdag-conn-declare {
-  padding: 1px 6px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 2px;
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color1);
+  padding: 4px 9px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-2);
   cursor: pointer;
-  font-size: var(--jp-ui-font-size0);
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-11);
+  font-weight: 600;
+}
+
+.jp-afdag-conn-declare:hover {
+  background: var(--d4n-bg-hover);
 }
 
 .jp-afdag-conn-missing {
-  color: var(--jp-error-color1);
+  color: var(--d4n-danger-strong);
 }
 
 .jp-afdag-conn-type {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   font-style: normal;
+}
+
+.jp-afdag-conn-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* -- connection-type extra help (PRD §6.13) ------------------------------ */
 
 .jp-afdag-conn-extrahelp {
-  margin-top: 2px;
-  padding: 6px 8px;
-  border-left: 3px solid var(--jp-brand-color1);
-  background: var(--jp-layout-color2);
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--d4n-info-border);
+  border-left: 3px solid var(--d4n-teal);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-info-bg);
 }
 
 .jp-afdag-conn-extraintro {
   margin: 0 0 6px;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-fg-2);
+  font-size: var(--d4n-fs-12);
 }
 
 .jp-afdag-conn-keys {
   margin: 8px 0 0;
-  font-size: var(--jp-ui-font-size0);
+  font-size: var(--d4n-fs-12);
 }
 
 .jp-afdag-conn-keys dt {
   margin-top: 6px;
-  color: var(--jp-ui-font-color1);
+  color: var(--d4n-fg-1);
 }
 
 .jp-afdag-conn-keys dt code {
-  font-family: var(--jp-code-font-family);
+  font-family: var(--d4n-font-mono);
 }
 
 .jp-afdag-conn-keys dt em {
-  color: var(--jp-ui-font-color3);
+  color: var(--d4n-fg-4);
   font-style: normal;
 }
 
 .jp-afdag-conn-keys dd {
   margin: 2px 0 0;
-  color: var(--jp-ui-font-color2);
+  color: var(--d4n-fg-2);
 }
 
 .jp-afdag-conn-hint {
-  margin-top: 6px;
-  padding: 4px 8px;
-  border-left: 3px solid var(--jp-warn-color1);
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
-  font-size: var(--jp-ui-font-size0);
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--d4n-warning-border);
+  border-left: 3px solid var(--d4n-warning);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-warning-bg);
+  color: var(--d4n-fg-2);
+  font-size: var(--d4n-fs-12);
 }
 
 /* -- per-field variable picker (PRD §6.10) ------------------------------- */
@@ -1581,20 +2178,19 @@
 }
 
 .jp-afdag-varpick-btn {
-  padding: 2px 5px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 2px;
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color2);
+  padding: 3px 6px;
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-sm);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-info-strong);
   cursor: pointer;
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size0);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
   line-height: 1.4;
 }
 
 .jp-afdag-varpick-btn:hover {
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
+  background: var(--d4n-info-bg);
 }
 
 .jp-afdag-varpick-menu {
@@ -1607,58 +2203,63 @@
   min-width: 220px;
   max-height: 240px;
   overflow-y: auto;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  background: var(--jp-layout-color0);
-  box-shadow: var(--jp-elevation-z4);
+  border: 1px solid var(--d4n-border-2);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-bg-surface);
+  box-shadow: var(--d4n-shadow-lg);
 }
 
 .jp-afdag-varpick-item {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border: none;
-  border-bottom: 1px solid var(--jp-border-color2);
+  border-bottom: 1px solid var(--d4n-border-1);
   background: none;
-  color: var(--jp-ui-font-color1);
+  color: var(--d4n-fg-1);
   cursor: pointer;
   text-align: left;
 }
 
 .jp-afdag-varpick-item:hover {
-  background: var(--jp-layout-color2);
+  background: var(--d4n-bg-page);
 }
 
 .jp-afdag-varpick-key {
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size1);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-12);
 }
 
 .jp-afdag-varpick-snippet {
-  color: var(--jp-ui-font-color3);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size0);
+  color: var(--d4n-fg-4);
+  font-family: var(--d4n-font-mono);
+  font-size: var(--d4n-fs-11);
   overflow-wrap: anywhere;
 }
 
 /* -- inline dag_id editor (PRD §6.1.8(B) / §15.1) ------------------------ */
 
 /* The read state is a button so it is keyboard-reachable, but it must look
-   exactly like the plain `dag_id` label it replaced. */
+   like the title it replaced. The dashed underline is the only hint that it
+   is editable until hover turns it teal. */
 .jp-afdag-dagid-btn {
-  padding: 1px 4px;
-  border: 1px solid transparent;
-  border-radius: 3px;
+  padding: 0 0 1px;
+  border: none;
+  border-bottom: 1px dashed var(--d4n-border-2);
+  border-radius: 0;
   background: none;
   cursor: text;
-  font-family: var(--jp-code-font-family);
-  font-size: inherit;
+  font-family: var(--d4n-font-display);
+  font-size: var(--d4n-fs-19);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--d4n-ls-display);
+  color: var(--d4n-fg-heading);
 }
 
 .jp-afdag-dagid-btn:hover {
-  border-color: var(--jp-border-color1);
-  background: var(--jp-layout-color2);
+  border-bottom-color: var(--d4n-teal);
 }
 
 .jp-afdag-dagid-edit {
@@ -1668,17 +2269,24 @@
 }
 
 .jp-afdag-dagid-input {
-  padding: 1px 4px;
-  border: 1px solid var(--jp-brand-color1);
-  border-radius: 3px;
-  background: var(--jp-layout-color0);
-  color: var(--jp-ui-font-color0);
-  font-family: var(--jp-code-font-family);
-  font-size: inherit;
+  width: 230px;
+  padding: 1px 6px;
+  border: 1px solid var(--d4n-teal);
+  border-radius: var(--d4n-r-sm);
+  background: var(--d4n-bg-surface);
+  color: var(--d4n-fg-heading);
+  font-family: var(--d4n-font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: var(--d4n-ls-display);
+}
+
+.jp-afdag-dagid-input:focus {
+  outline: none;
 }
 
 .jp-afdag-dagid-input[aria-invalid='true'] {
-  border-color: var(--jp-error-color1);
+  border-color: var(--d4n-magenta);
 }
 
 .jp-afdag-dagid-error {
@@ -1686,11 +2294,83 @@
   top: 100%;
   left: 0;
   z-index: 10;
-  margin-top: 2px;
-  padding: 4px 8px;
+  margin-top: 4px;
+  padding: 6px 9px;
   max-width: 320px;
-  border-radius: 3px;
-  background: var(--jp-error-color1);
-  color: var(--jp-ui-inverse-font-color1);
-  font-size: var(--jp-ui-font-size0);
+  border-radius: var(--d4n-r-md);
+  background: var(--d4n-magenta);
+  color: var(--d4n-fg-on-solid);
+  font-family: var(--d4n-font-body);
+  font-size: 11.5px;
+  box-shadow: var(--d4n-shadow-md);
+}
+
+/* -- editor status bar (PRD §15.1) --------------------------------------- */
+
+/* Persistent footer: which file, which codegen style, where a deploy lands.
+   These are the three things a user re-checks before hitting Deploy, and none
+   of them were visible without opening a tab. */
+.jp-afdag-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 14px;
+  border-top: 1px solid var(--d4n-border-2);
+  background: var(--d4n-bg-page);
+  color: var(--d4n-fg-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.jp-afdag-statusbar-file {
+  font-family: var(--d4n-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-afdag-statusbar-sep {
+  color: var(--d4n-fg-4);
+}
+
+.jp-afdag-statusbar-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-afdag-statusbar-state {
+  margin-left: auto;
+  padding-left: 10px;
+}
+
+/* -- form focus ---------------------------------------------------------- */
+
+/* One focus treatment for every text control in the Studio, defined once at
+   the end of the file. Two reasons it lives here rather than beside each
+   control: the teal border is a single design decision that should not be
+   restated five times, and element-qualified `:focus` rules scattered through
+   the file outrank the plain descendant rules that follow them, which is
+   exactly the source-order hazard stylelint's no-descending-specificity
+   catches. Last-in-file keeps the cascade honest.
+
+   The teal ring itself (`:focus-visible`) is in d4n-tokens.css — this only
+   carries the border, which applies on any focus including a mouse click. */
+
+/* `.jp-afdag-search` is deliberately absent: it is chrome-less inside
+   `.jp-afdag-search-wrap`, which carries the border and takes the teal on
+   `:focus-within`. */
+.jp-afdag-var-key:focus,
+.jp-afdag-rjsf input[type='text']:focus,
+.jp-afdag-rjsf input[type='number']:focus,
+.jp-afdag-rjsf input[type='date']:focus,
+.jp-afdag-rjsf select:focus,
+.jp-afdag-rjsf textarea:focus,
+.jp-afdag-var-fields input:focus,
+.jp-afdag-var-fields select:focus,
+.jp-afdag-var-fields textarea:focus,
+.jp-afdag-field input:focus,
+.jp-afdag-field textarea:focus {
+  outline: none;
+  border-color: var(--d4n-border-focus);
 }
