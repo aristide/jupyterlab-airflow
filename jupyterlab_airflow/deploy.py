@@ -716,20 +716,23 @@ def is_drifted(filename: str, target: Optional[DeployTarget] = None) -> bool:
     return _body_hash(content) != recorded
 
 
-def _afdag_paths(contents_root: Optional[str]) -> Tuple[Dict[str, str], bool]:
-    """Map ``afdag_id`` → Contents-relative path for every `.afdag` design file
-    under the Jupyter Contents root. The *source* side of the orphan join (PRD
-    §6.5.6) and the backing index for :func:`find_source_path` ("Open in Studio
-    to fix", §7). Hidden/checkpoint dirs are skipped; paths use forward slashes.
+def _afdag_index(contents_root: Optional[str]) -> Tuple[Dict[str, Dict[str, str]], bool]:
+    """Map ``afdag_id`` → ``{path, dag_id}`` for every `.afdag` design file under
+    the Jupyter Contents root — the *source* side of both joins in
+    :func:`find_orphans`.
 
-    Returns ``(id→path, degraded)`` where ``degraded`` is True if any `.afdag`
-    could not be read or parsed (its ``afdag_id`` is then unknown). If two files
-    share an ``afdag_id`` (a copied `.afdag`), the first walked wins.
+    ``dag_id`` is the flow's **current** id, which is what makes the
+    ``superseded`` join possible: a deployed `.py` can carry a live ``afdag_id``
+    and still be stale, because the flow was renamed after it was written.
+
+    Returns ``(id→{path,dag_id}, degraded)``; ``degraded`` is True if any
+    `.afdag` could not be read or parsed (its identity is then unknown). If two
+    files share an ``afdag_id`` (a copied `.afdag`), the first walked wins.
     """
-    paths: Dict[str, str] = {}
+    index: Dict[str, Dict[str, str]] = {}
     degraded = False
     if not contents_root or not os.path.isdir(contents_root):
-        return paths, degraded
+        return index, degraded
     for dirpath, dirnames, filenames in os.walk(contents_root):
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for name in filenames:
@@ -745,10 +748,22 @@ def _afdag_paths(contents_root: Optional[str]) -> Tuple[Dict[str, str], bool]:
             afdag_id = ((ir or {}).get("provenance") or {}).get("afdag_id")
             if afdag_id:
                 key = str(afdag_id).strip()
-                if key not in paths:
+                if key not in index:
                     rel = os.path.relpath(full, contents_root)
-                    paths[key] = rel.replace(os.sep, "/")
-    return paths, degraded
+                    index[key] = {
+                        "path": rel.replace(os.sep, "/"),
+                        "dag_id": str(((ir or {}).get("dag") or {}).get("dag_id") or ""),
+                    }
+    return index, degraded
+
+
+def _afdag_paths(contents_root: Optional[str]) -> Tuple[Dict[str, str], bool]:
+    """``afdag_id`` → Contents-relative path; the backing index for
+    :func:`find_source_path` ("Open in Studio to fix", §7). A thin projection of
+    :func:`_afdag_index` so there is only one directory walk to keep correct.
+    """
+    index, degraded = _afdag_index(contents_root)
+    return {key: entry["path"] for key, entry in index.items()}, degraded
 
 
 def _live_afdag_ids(contents_root: Optional[str]) -> Tuple[Set[str], bool]:
@@ -802,21 +817,38 @@ def find_orphans(
     was deleted (in-session, or out of band via terminal/`git`/`rm`). Remediation
     is the manager-side :func:`purge_dag` (file-first, then ``DELETE /dags/{id}``).
 
-    Returns ``{orphans: [{dag_id, filename, afdag_id}], degraded}``. Files without
-    an ``afdag_id`` (pre-provenance deploys) are skipped — they can't be
-    re-associated, so we never auto-delete them. ``degraded`` is True when a
-    `.afdag` could not be read/parsed (its identity is unknown), so the caller
-    should suppress the destructive "source deleted" prompt for that sweep rather
-    than risk a false positive.
+    Also reports **superseded** files, a second and quite different class: the
+    source `.afdag` is alive and well, but it has since been renamed, so a `.py`
+    deploying the flow's *old* ``dag_id`` is still sitting in the dags folder
+    (PRD §6.1.8(B) / §15.11). The rename migration is meant to retire it; when
+    that step does not complete, Airflow keeps serving both ids and the orphan
+    join cannot see it — both files carry a live ``afdag_id``.
+
+    The two are returned separately on purpose. An orphan means "the source is
+    gone", which is what licenses the manager's destructive purge prompt; a
+    superseded file's source is *right there*, and the remedy is a
+    keep-history :func:`retire_old_dag`, not a purge. Folding them together
+    would attach the wrong copy — and the wrong default action — to a
+    recoverable state.
+
+    Returns ``{orphans: [{dag_id, filename, afdag_id}], superseded:
+    [{dag_id, filename, afdag_id, current_dag_id, source_path}], degraded}``.
+    Files without an ``afdag_id`` (pre-provenance deploys) are skipped for both
+    — they can't be re-associated, so we never auto-delete them. ``degraded`` is
+    True when a `.afdag` could not be read/parsed (its identity is unknown), so
+    the caller should suppress the destructive "source deleted" prompt for that
+    sweep rather than risk a false positive.
     """
     target = target or get_deploy_target()
-    live_ids, degraded = _live_afdag_ids(contents_root)
+    index, degraded = _afdag_index(contents_root)
     orphans: List[Dict[str, str]] = []
+    superseded: List[Dict[str, str]] = []
     for entry in target.list():
         afdag_id = entry.get("afdag_id")
         if not afdag_id:
             continue
-        if afdag_id not in live_ids:
+        source = index.get(afdag_id)
+        if source is None:
             orphans.append(
                 {
                     "dag_id": entry.get("dag_id", ""),
@@ -824,7 +856,106 @@ def find_orphans(
                     "afdag_id": afdag_id,
                 }
             )
-    return {"orphans": orphans, "degraded": degraded}
+            continue
+        # Same flow, different id: only meaningful when we know BOTH ids. A file
+        # predating the `dag_id=` header, or an `.afdag` we couldn't read an id
+        # from, tells us nothing — stay quiet rather than guess.
+        deployed_id = entry.get("dag_id", "")
+        current_id = source.get("dag_id", "")
+        if deployed_id and current_id and deployed_id != current_id:
+            superseded.append(
+                {
+                    "dag_id": deployed_id,
+                    "filename": entry.get("filename", ""),
+                    "afdag_id": afdag_id,
+                    "current_dag_id": current_id,
+                    "source_path": source.get("path", ""),
+                }
+            )
+    return {"orphans": orphans, "superseded": superseded, "degraded": degraded}
+
+
+def _collision_errors(
+    ir: Dict[str, Any], dag_id: str, target: DeployTarget
+) -> List[str]:
+    """Deploy-gate errors for a ``dag_id`` that something else already owns
+    (PRD §6.5.3).
+
+    ``DeployTarget.write`` refuses a file without the Studio header, so a
+    hand-written DAG *of the same filename* is already safe. What it cannot see
+    is ownership **between flows**: two `.afdag` documents that pick the same
+    ``dag_id`` both map to `{dag_id}.py`, and the second deploy would quietly
+    overwrite the first — same filename, same header, so every existing check
+    passes. In Airflow the two flows then collapse into one DAG, and the loser
+    has no signal at all. That is the case this closes.
+
+    Two independent owners are checked:
+
+    * the **file** in the dags folder, whose header names the ``afdag_id`` that
+      wrote it;
+    * the **live Airflow**, where the id may be served from some other file
+      entirely (typically a hand-written DAG under a different filename, which
+      the filename-scoped file check can never see).
+
+    The Airflow half is a no-op when the target is unreachable, matching
+    ``variables.block_errors`` / ``providers.get_target_index``: an
+    infrastructure blip must not block a deploy, and ``/importErrors`` stays the
+    authoritative post-deploy verdict.
+    """
+    errors: List[str] = []
+    own_id = str(((ir.get("provenance") or {}).get("afdag_id") or "")).strip()
+    try:
+        filename = _safe_filename(dag_id)
+    except UnsafeFilenameError:
+        # Validation already rejects a dag_id that isn't a Python identifier;
+        # don't duplicate (or reorder) that failure here.
+        return errors
+
+    try:
+        if target.exists(filename):
+            header = _parse_header(target.read(filename)) or {}
+            other_id = str(header.get("afdag_id") or "").strip()
+            # No afdag_id on the deployed file = a pre-provenance deploy. It is
+            # unattributable, so blocking would strand those flows with no route
+            # forward but deleting the file by hand, while overwriting is
+            # recoverable (write() backs the prior version up and `backed_up`
+            # reports it). find_orphans makes the same call for the same reason:
+            # never act destructively on what we cannot match.
+            if other_id and other_id != own_id:
+                errors.append(
+                    f"'{dag_id}' is already deployed by a different flow "
+                    f"({filename} was written by another .afdag document). "
+                    "Deploying would overwrite it and both flows would fight "
+                    f"over the same DAG. Rename this flow's dag_id, or undeploy "
+                    f"'{dag_id}' from the flow that owns it first."
+                )
+    except DeployError:
+        # An unreadable target is the write's problem to report, not the gate's.
+        pass
+
+    if errors:
+        return errors
+
+    from .client import AirflowError, get_client
+
+    try:
+        dag = get_client().get_dag(dag_id)
+    except AirflowError:
+        # 404 (not registered) and unreachable are both "nothing to conflict
+        # with, as far as we can tell" — see the docstring.
+        return errors
+    except Exception:  # noqa: BLE001 - never let a gate lookup fail a deploy
+        return errors
+    fileloc = (dag or {}).get("fileloc") if isinstance(dag, dict) else None
+    if fileloc and os.path.basename(str(fileloc)) != filename:
+        errors.append(
+            f"Airflow already has a DAG called '{dag_id}', defined in "
+            f"{os.path.basename(str(fileloc))} rather than {filename}. Studio "
+            "will not shadow a DAG it does not manage — two files declaring one "
+            "dag_id is undefined behaviour in Airflow. Rename this flow's "
+            "dag_id, or remove the other definition first."
+        )
+    return errors
 
 
 def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dict[str, Any]:
@@ -888,6 +1019,20 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
             "correlation_id": correlation_id,
             "warnings": [],
             "errors": gate_errors,
+            "dagbag": result["dagbag"],
+        }
+
+    # Hard-gate on ownership of the dag_id (PRD §6.5.3). Deliberately the last
+    # gate but still *before* the variable/connection sync below: a refusal must
+    # leave nothing behind, and sync pushes values into the live Airflow.
+    collision_errors = _collision_errors(ir, dag_id, target)
+    if collision_errors:
+        return {
+            "deployed": False,
+            "dag_id": dag_id,
+            "correlation_id": correlation_id,
+            "warnings": [],
+            "errors": collision_errors,
             "dagbag": result["dagbag"],
         }
 

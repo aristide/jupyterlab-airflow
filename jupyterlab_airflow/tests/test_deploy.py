@@ -370,10 +370,16 @@ def test_is_drifted_false_for_absent_or_unmanaged(tmp_path):
     assert is_drifted("hand.py", target) is False
 
 
-def _write_afdag(root, name, afdag_id):
+def _write_afdag(root, name, afdag_id, dag_id=None):
     import json
 
-    (root / name).write_text(json.dumps({"provenance": {"afdag_id": afdag_id}}))
+    ir = {"provenance": {"afdag_id": afdag_id}}
+    if dag_id is not None:
+        # Only the superseded join needs the flow's current dag_id; the orphan
+        # tests deliberately omit it, which also pins that a source without a
+        # readable dag_id never produces a superseded entry.
+        ir["dag"] = {"dag_id": dag_id}
+    (root / name).write_text(json.dumps(ir))
 
 
 def test_find_orphans_flags_deployed_with_deleted_source(tmp_path):
@@ -442,6 +448,174 @@ def test_find_orphans_not_degraded_when_all_readable(tmp_path):
     res = find_orphans(str(root), target)
     assert res["degraded"] is False
     assert res["orphans"] == []
+
+
+# -- superseded: renamed flow, old dag_id left deployed (§6.1.8(B) / §15.11) --
+
+
+def test_find_orphans_flags_superseded_after_rename(tmp_path):
+    # The exact HELLO/HELLOP shape: one flow, renamed, both .py files still on
+    # disk carrying the SAME live afdag_id. The orphan join cannot see this
+    # (nothing is orphaned), which is why it needs its own class.
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("HELLO.py", f"{MANAGED_PREFIX}  dag_id=HELLO  afdag_id=SAME\nx=1\n")
+    target.write("HELLOP.py", f"{MANAGED_PREFIX}  dag_id=HELLOP  afdag_id=SAME\nx=1\n")
+    _write_afdag(root, "flow.afdag", "SAME", dag_id="HELLO")
+
+    res = find_orphans(str(root), target)
+    assert res["orphans"] == []  # the source is alive — nothing is orphaned
+    assert [s["dag_id"] for s in res["superseded"]] == ["HELLOP"]
+    entry = res["superseded"][0]
+    assert entry["current_dag_id"] == "HELLO"
+    assert entry["filename"] == "HELLOP.py"
+    assert entry["source_path"] == "flow.afdag"
+
+
+def test_find_orphans_no_superseded_for_current_deploy(tmp_path):
+    # The normal case: the deployed dag_id matches the flow's current one.
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d  afdag_id=HHH\nx=1\n")
+    _write_afdag(root, "d.afdag", "HHH", dag_id="d")
+    res = find_orphans(str(root), target)
+    assert res["orphans"] == []
+    assert res["superseded"] == []
+
+
+def test_find_orphans_superseded_and_orphan_stay_separate(tmp_path):
+    # A deleted source is an orphan; a renamed source is superseded. They must
+    # not be conflated — the orphan copy licenses a destructive purge, which
+    # would be the wrong remedy for a flow whose source is still there.
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("gone.py", f"{MANAGED_PREFIX}  dag_id=gone  afdag_id=DEAD\nx=1\n")
+    target.write("old.py", f"{MANAGED_PREFIX}  dag_id=old  afdag_id=LIVE\nx=1\n")
+    _write_afdag(root, "live.afdag", "LIVE", dag_id="new")
+
+    res = find_orphans(str(root), target)
+    assert [o["dag_id"] for o in res["orphans"]] == ["gone"]
+    assert [s["dag_id"] for s in res["superseded"]] == ["old"]
+
+
+def test_find_orphans_superseded_needs_both_ids(tmp_path):
+    # A source whose dag_id we can't read tells us nothing — stay quiet rather
+    # than flag a file that may be perfectly current.
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    root = tmp_path / "workspace"
+    root.mkdir()
+    target = SharedVolumeTarget(str(dags))
+    target.write("d.py", f"{MANAGED_PREFIX}  dag_id=d  afdag_id=III\nx=1\n")
+    _write_afdag(root, "d.afdag", "III")  # no dag.dag_id
+    assert find_orphans(str(root), target)["superseded"] == []
+
+
+# -- deploy collision guard (PRD §6.5.3) --------------------------------------
+
+
+def _owned_ir(dag_id, afdag_id):
+    ir = _ir(dag_id=dag_id)
+    ir["provenance"] = {"afdag_id": afdag_id}
+    return ir
+
+
+def test_deploy_refused_when_dag_id_owned_by_another_flow(tmp_path):
+    # Two .afdag documents picking the same dag_id both map to {dag_id}.py, so
+    # every filename-scoped check passes and the second silently overwrites the
+    # first. This is the gate that stops it.
+    target = SharedVolumeTarget(str(tmp_path))
+    assert deploy_dag(_owned_ir("dep_dag", "FLOW-A"), target=target)["deployed"] is True
+
+    res = deploy_dag(_owned_ir("dep_dag", "FLOW-B"), target=target)
+    assert res["deployed"] is False
+    assert any("different flow" in e for e in res["errors"])
+    # Refused before anything is touched: the first flow's file is intact and no
+    # backup was taken (a backup would mean the write had started).
+    assert "afdag_id=FLOW-A" in (tmp_path / "dep_dag.py").read_text()
+    assert not list(tmp_path.glob("*.bak"))
+
+
+def test_deploy_allows_reploy_of_own_dag_id(tmp_path):
+    # The normal path: same flow, same id, re-deployed. Must be unaffected.
+    target = SharedVolumeTarget(str(tmp_path))
+    assert deploy_dag(_owned_ir("dep_dag", "FLOW-A"), target=target)["deployed"] is True
+    res = deploy_dag(_owned_ir("dep_dag", "FLOW-A"), target=target)
+    assert res["deployed"] is True
+    assert res["backed_up"] is True
+
+
+def test_deploy_allows_overwriting_pre_provenance_file(tmp_path):
+    # A managed file with no afdag_id can't be attributed. Blocking would strand
+    # pre-provenance flows with no route forward, and the overwrite is
+    # recoverable via the backup — so we allow it, as find_orphans does.
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("dep_dag.py", f"{MANAGED_PREFIX}  dag_id=dep_dag\nx=1\n")
+    res = deploy_dag(_owned_ir("dep_dag", "FLOW-B"), target=target)
+    assert res["deployed"] is True
+
+
+def test_deploy_refused_when_airflow_serves_dag_id_from_another_file(monkeypatch, tmp_path):
+    # The file check is filename-scoped, so it cannot see a hand-written DAG that
+    # declares the same dag_id from some other file. Airflow can.
+    class _Serving(_FakeClient):
+        def get_dag(self, dag_id):
+            return {"dag_id": dag_id, "fileloc": "/opt/airflow/dags/handwritten.py"}
+
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: _Serving())
+    target = SharedVolumeTarget(str(tmp_path))
+    res = deploy_dag(_owned_ir("dep_dag", "FLOW-A"), target=target)
+    assert res["deployed"] is False
+    assert any("handwritten.py" in e for e in res["errors"])
+    assert not list(tmp_path.glob("*.py"))  # nothing written
+
+
+def test_deploy_not_refused_when_airflow_serves_it_from_our_file(monkeypatch, tmp_path):
+    class _Serving(_FakeClient):
+        def get_dag(self, dag_id):
+            return {"dag_id": dag_id, "fileloc": f"/opt/airflow/dags/{dag_id}.py"}
+
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: _Serving())
+    target = SharedVolumeTarget(str(tmp_path))
+    assert deploy_dag(_owned_ir("dep_dag", "FLOW-A"), target=target)["deployed"] is True
+
+
+def test_deploy_not_refused_when_airflow_unreachable(monkeypatch, tmp_path):
+    # An infrastructure blip must never block a deploy — same contract as the
+    # variables/provider gates. /importErrors stays the post-deploy verdict.
+    class _Down(_FakeClient):
+        def get_dag(self, dag_id):
+            raise AirflowError("connection refused", status=None)
+
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: _Down())
+    target = SharedVolumeTarget(str(tmp_path))
+    assert deploy_dag(_owned_ir("dep_dag", "FLOW-A"), target=target)["deployed"] is True
+
+
+def test_deploy_new_flow_without_afdag_id_still_deploys(tmp_path):
+    # A brand-new flow that has never deployed has no provenance yet; a clean
+    # dags folder must not be treated as a conflict.
+    target = SharedVolumeTarget(str(tmp_path))
+    assert deploy_dag(_ir(dag_id="dep_dag"), target=target)["deployed"] is True
+
+
+def test_deploy_new_flow_refused_against_owned_file(tmp_path):
+    # ...but it still cannot claim an id a named owner already holds. This is the
+    # likeliest collision in practice: a fresh flow picking a name in use.
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("dep_dag.py", f"{MANAGED_PREFIX}  dag_id=dep_dag  afdag_id=FLOW-A\nx=1\n")
+    res = deploy_dag(_ir(dag_id="dep_dag"), target=target)
+    assert res["deployed"] is False
+    assert any("different flow" in e for e in res["errors"])
 
 
 def test_find_source_path_resolves_by_filename(tmp_path):

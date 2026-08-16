@@ -35,6 +35,11 @@ export interface IInspectorProps {
   collapsed: boolean;
   /** Toggle the collapsed state. */
   onToggle: () => void;
+  /** Bumped by the editor to request focus on the CODE tab (the syntax toggle
+   * does this, so switching TaskFlow/Traditional shows what it produced). A
+   * counter, not a tab value, so a repeated request re-fires after the user
+   * has navigated away. */
+  focusCodeNonce?: number;
   onDagChange: (patch: Partial<IAfdagIR['dag']>) => void;
   onNodeChange: (id: string, patch: Partial<IAfdagNodeData>) => void;
   /** Replace the flow's variable declarations (PRD §6.10). Separate from
@@ -74,6 +79,18 @@ export function Inspector(props: IInspectorProps): JSX.Element {
     }
     lastNodeId.current = id;
   }, [props.node]);
+
+  // Focus CODE when the editor asks (the syntax toggle). Compared against the
+  // previous nonce rather than keyed on mount, so opening a document does not
+  // yank the user off the DAG tab.
+  const lastCodeFocus = React.useRef(props.focusCodeNonce ?? 0);
+  React.useEffect(() => {
+    const nonce = props.focusCodeNonce ?? 0;
+    if (nonce !== lastCodeFocus.current) {
+      lastCodeFocus.current = nonce;
+      setTab('code');
+    }
+  }, [props.focusCodeNonce]);
 
   if (props.collapsed) {
     return (

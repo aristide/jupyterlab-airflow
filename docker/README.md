@@ -70,7 +70,20 @@ Studio dims an operator in the palette — and hard-blocks a deploy that uses it
 
 `apache-spark` · `apprise` · `discord` · `imap` · `opsgenie` · `papermill` · `telegram`
 
-Versions are pinned to what the official 3.0.2 constraints resolve to, so a rebuild-free `up` stays reproducible instead of drifting onto a future incompatible release. With these in place all **47** gated operators/notifiers report `available` and none are dimmed. (The two third-party ops — Great Expectations and OpenMetadata — sit outside Airflow's constraints and are *by design* never gated: they show a pinned-install hint and are never deploy-blocked, so they need nothing installed here. See PRD §13 Q13.)
+Versions are pinned to what the official 3.0.2 constraints resolve to, so a rebuild-free `up` stays reproducible instead of drifting onto a future incompatible release. With these in place all **47** gated operators/notifiers report `available` and none are dimmed.
+
+The install also passes `--constraint` pointing at Airflow's own 3.0.2 constraints file, and that flag is **load-bearing**. The two third-party ops sit *outside* that file (PRD §13 Q13), and without the pin pip will happily satisfy them by resolving a different Airflow — a first attempt at adding them selected `apache-airflow-core==3.3.1`, i.e. it would have silently upgraded Airflow out from under this pinned 3.0.2 environment. A constraints file only pins packages listed in it, so a third-party package still installs; it simply can no longer drag Airflow along. Anything genuinely unsatisfiable now fails loudly instead of quietly breaking the scheduler.
+
+### The two third-party ops
+
+| Op | Package | Installed here? |
+| -- | ------- | --------------- |
+| Great Expectations | `airflow-provider-great-expectations==1.0.0` | **Yes** — resolves cleanly under the 3.0.2 constraints |
+| OpenMetadata lineage | `openmetadata-ingestion` | **No — it cannot be** |
+
+`openmetadata-ingestion` is not installable alongside Airflow 3.0.2 at any version. Every published release (0.8.0 → 1.13.3.2, roughly 350 of them) conflicts with the constraint set on a different pin — `idna>=3.15` vs `idna==3.10`, `PyJWT>=2.13.0`, `httpx~=0.28.0`, `boto3~=1.41.5`, `chardet==4.0.0`, `jaraco.context>=6.1.0`. Unconstrained it appears to work only because pip upgrades Airflow itself.
+
+This costs the product nothing: Studio *never* deploy-blocks a third-party op — it shows a pinned-install hint and lets Airflow's own import error be the verdict (PRD §13 Q13). The palette entry stays usable and the generated DAG is correct; it just won't run in *this* dev container. If you need it working, run it against an Airflow whose constraints admit it (OpenMetadata ships its own `openmetadata-ingestion`-based Airflow image for exactly this reason) rather than forcing it into this one.
 
 To add another provider, append a pinned entry to `_PIP_ADDITIONAL_REQUIREMENTS` and `docker compose up -d airflow`.
 

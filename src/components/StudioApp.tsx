@@ -169,6 +169,10 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   const [reloadKey, setReloadKey] = React.useState(0);
   const [leftCollapsed, setLeftCollapsed] = React.useState(false);
   const [rightCollapsed, setRightCollapsed] = React.useState(false);
+  // Bumped to ask the inspector to focus its CODE tab (see `onPickSyntax`). A
+  // counter rather than a boolean/tab value so repeated requests still fire:
+  // the user may navigate away from CODE and toggle the syntax again.
+  const [codeFocusNonce, setCodeFocusNonce] = React.useState(0);
   // The generated-code syntax family (PRD §6.3). Lives in the IR; the toggle
   // persists it and the CODE preview / Deploy regenerate accordingly.
   const [syntaxStyle, setSyntaxStyle] = React.useState<SyntaxStyle>('taskflow');
@@ -656,6 +660,22 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     [commit]
   );
 
+  // Picking a syntax reveals the generated code, because the code IS the point
+  // of the switch — otherwise you flip it and nothing visibly happens. Wrapped
+  // around `onToggleSyntax` rather than folded into it so the reveal fires on
+  // EVERY click, including re-clicking the already-active option (which
+  // `onToggleSyntax` short-circuits): "show me the code" is a reasonable
+  // reading of that click too. Expanding a collapsed inspector is part of the
+  // same intent — focusing a tab in a hidden panel would do nothing.
+  const onPickSyntax = React.useCallback(
+    (next: SyntaxStyle): void => {
+      onToggleSyntax(next);
+      setRightCollapsed(false);
+      setCodeFocusNonce(n => n + 1);
+    },
+    [onToggleSyntax]
+  );
+
   // Replace the flow's variable declarations (PRD §6.10). Variables live on the
   // IR *root*, which `flowToIR` carries through from `base` — so, exactly like
   // the syntax toggle, the write goes into `baseRef` (not React state) and then
@@ -819,8 +839,26 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         triggered: false,
         message: `Registered ${dagId} — unpausing & triggering…`
       });
-      await setDagPaused(dagId, false);
+      // Check the unpause instead of discarding it. A failure here is silent
+      // otherwise, and the banner below goes on to report the deploy as a
+      // success — leaving a DAG that looks live but is paused and will never
+      // run, which is exactly the state a user cannot diagnose from the UI.
+      const unpaused = await setDagPaused(dagId, false);
       if (token.cancelled) {
+        return;
+      }
+      if (unpaused.status !== 'OK') {
+        setDeploy({
+          phase: 'registered',
+          dagId,
+          filename,
+          note,
+          triggered: false,
+          message:
+            `Deployed ${dagId}, but could not unpause it` +
+            `${unpaused.error ? ` — ${unpaused.error}` : ''}. ` +
+            'It will not run until you unpause it in the DAG list.'
+        });
         return;
       }
       const run = await triggerDag(dagId);
@@ -988,7 +1026,12 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
   // overwriting mid-run can corrupt the in-flight run. Same active-run check the
   // rename migration uses (§6.1.8(B)); preflight failure falls through to deploy.
   const onDeploy = React.useCallback(async (): Promise<void> => {
-    pendingRetireRef.current = null; // a plain deploy never retires another DAG
+    // Deliberately NOT cleared here. A plain deploy does not itself retire
+    // another DAG, but clearing unconditionally means one Deploy click while a
+    // rename migration is still waiting for Airflow silently discards the
+    // retire intent — and the old dag_id is then stranded with no trace of why.
+    // Retiring stays gated on actually observing `registered`, so keeping the
+    // intent cannot retire anything that was not renamed.
     const dagId = currentIR.dag.dag_id;
     const pf = await renamePreflight(dagId); // shared dag-state preflight
     if (pf.status === 'OK' && pf.data?.registered && pf.data.active_runs > 0) {
@@ -1285,6 +1328,11 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
                 ? `✕ ${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`
                 : '✓ no errors'}
             </span>
+            <span className="jp-afdag-spacer" />
+            {/* The syntax toggle sits with the other actions on the right, not
+              beside the title: it is something you DO to the flow, like Tidy or
+              Deploy, not a fact about it like the node count or error badge.
+              Grouping it left mixed those two readings. */}
             <div
               className="jp-afdag-syntax-toggle"
               role="group"
@@ -1298,7 +1346,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
                 }
                 aria-pressed={syntaxStyle === 'taskflow'}
                 title="TaskFlow — @dag / @task decorators (Airflow-3 idiomatic)"
-                onClick={() => onToggleSyntax('taskflow')}
+                onClick={() => onPickSyntax('taskflow')}
               >
                 TaskFlow
               </button>
@@ -1310,12 +1358,11 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
                 }
                 aria-pressed={syntaxStyle === 'traditional'}
                 title="Traditional — with DAG(…) + operator instances + >> wiring"
-                onClick={() => onToggleSyntax('traditional')}
+                onClick={() => onPickSyntax('traditional')}
               >
                 Traditional
               </button>
             </div>
-            <span className="jp-afdag-spacer" />
             {/* Disabled rather than hidden: a toolbar that silently loses three
               buttons reads as a broken build, while a greyed-out one with a
               reason reads as a permission. */}
@@ -1449,6 +1496,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
               reloadKey={reloadKey}
               collapsed={rightCollapsed}
               onToggle={toggleRight}
+              focusCodeNonce={codeFocusNonce}
               onDagChange={patch => setDag(d => ({ ...d, ...patch }))}
               onNodeChange={updateNode}
               onVariablesChange={onVariablesChange}

@@ -415,10 +415,13 @@ class DagRunStateHandler(_AirflowHandler):
 
 
 class OrphansHandler(_AirflowHandler):
-    """Deployed Studio DAGs whose source `.afdag` was deleted (PRD §6.5.6). The
-    reconciliation sweep diffs deployed-`.py` provenance against the `.afdag`
-    files under the Jupyter Contents root; the manager surfaces the result so the
-    user can undeploy them."""
+    """The reconciliation sweep (PRD §6.5.6): diffs deployed-`.py` provenance
+    against the `.afdag` files under the Jupyter Contents root.
+
+    Returns two distinct classes, because they need different remedies —
+    ``orphans`` (the source `.afdag` was deleted → undeploy/purge) and
+    ``superseded`` (the source is alive but was renamed, leaving the old
+    ``dag_id`` deployed → keep-history retire). The manager surfaces both."""
 
     @tornado.web.authenticated
     async def get(self):

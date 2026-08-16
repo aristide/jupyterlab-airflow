@@ -17,6 +17,7 @@ import {
   listImportErrors,
   listTaskInstances,
   setDagPaused,
+  retireOldDag,
   setDagRunState,
   triggerDag
 } from '../handler';
@@ -26,6 +27,7 @@ import {
   IDagRun,
   IImportError,
   IOrphan,
+  ISupersededDag,
   ITaskInstance
 } from '../interfaces';
 import { explainImportError } from '../importErrors';
@@ -71,6 +73,11 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   const [showErrors, setShowErrors] = React.useState(true);
   // Deployed DAGs whose source .afdag was deleted (PRD §6.5.6).
   const [orphans, setOrphans] = React.useState<IOrphan[]>([]);
+  // Renamed-but-not-retired leftovers (PRD §15.11). Tracked separately from
+  // orphans because the remedy differs: retire, not purge.
+  const [superseded, setSuperseded] = React.useState<ISupersededDag[]>([]);
+  const [showSuperseded, setShowSuperseded] = React.useState(true);
+  const keptSuperseded = React.useRef<Set<string>>(new Set());
   const [showOrphans, setShowOrphans] = React.useState(true);
   // dag_ids the user chose to "Keep" this session — don't re-nag on refresh.
   const keptOrphans = React.useRef<Set<string>>(new Set());
@@ -116,6 +123,11 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         setOrphans(
           (orphanRes.data?.orphans ?? []).filter(
             o => !keptOrphans.current.has(o.dag_id)
+          )
+        );
+        setSuperseded(
+          (orphanRes.data?.superseded ?? []).filter(
+            s => !keptSuperseded.current.has(s.dag_id)
           )
         );
       }
@@ -383,6 +395,29 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     setOrphans(os => os.filter(o => o.dag_id !== orphan.dag_id));
   };
 
+  // Finish the migration the editor started. `purge: false` deletes the old
+  // generated file and pauses the old DAG but KEEPS its run history — the
+  // non-destructive half of the §15.11 dialog, so it needs no second
+  // confirmation. Purging remains available per-row via Delete.
+  const retireSuperseded = (item: ISupersededDag): void => {
+    void (async () => {
+      setBusy(trans.__('Retiring %1…', item.dag_id));
+      const res = await retireOldDag(item.dag_id, false);
+      setBusy(null);
+      if (res.status === 'ERR') {
+        setError(apiError(res, trans.__('Failed to retire %1', item.dag_id)));
+        return;
+      }
+      setSuperseded(list => list.filter(s => s.dag_id !== item.dag_id));
+      await refresh();
+    })();
+  };
+
+  const keepSuperseded = (item: ISupersededDag): void => {
+    keptSuperseded.current.add(item.dag_id);
+    setSuperseded(list => list.filter(s => s.dag_id !== item.dag_id));
+  };
+
   // "Open in Studio to fix" (PRD §7): resolve the failed deployed file back to
   // its source `.afdag` and open it in the editor. The source may be gone (a
   // pre-provenance deploy, or the design file was deleted) — say so plainly.
@@ -510,6 +545,50 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
                   <button
                     className="jp-airflow-linkbtn"
                     onClick={() => keepOrphan(o)}
+                  >
+                    {trans.__('Keep')}
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
+
+        {/* A rename that never finished: the flow now deploys a new dag_id but
+          the old one is still live in Airflow. Deliberately a SEPARATE banner
+          from orphans — an orphan's source is gone and purging is the answer,
+          whereas here the source is alive and well and the remedy is a
+          keep-history retire. Sharing the orphan banner would offer a
+          destructive action for a non-destructive problem. */}
+        {superseded.length > 0 && (
+          <div className="jp-airflow-importerrors jp-mod-warn">
+            <button
+              className="jp-airflow-importerrors-head"
+              onClick={() => setShowSuperseded(s => !s)}
+            >
+              {showSuperseded ? '▾' : '▸'}{' '}
+              {trans.__('Unfinished rename — old dag_id still deployed')} (
+              {superseded.length})
+            </button>
+            {showSuperseded &&
+              superseded.map(s => (
+                <div key={s.dag_id} className="jp-airflow-orphan">
+                  <span className="jp-airflow-orphan-name" title={s.filename}>
+                    {s.dag_id} → {s.current_dag_id}
+                  </span>
+                  {canEdit && (
+                    <button
+                      className="jp-airflow-linkbtn"
+                      onClick={() => retireSuperseded(s)}
+                      title={trans.__(
+                        'Remove the old DAG and its file. Run history is kept.'
+                      )}
+                    >
+                      {trans.__('Retire (keep history)')}
+                    </button>
+                  )}
+                  <button
+                    className="jp-airflow-linkbtn"
+                    onClick={() => keepSuperseded(s)}
                   >
                     {trans.__('Keep')}
                   </button>

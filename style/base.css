@@ -15,6 +15,7 @@
    ------------------------------------------------------------------------ */
 
 .jp-airflow-panel {
+  height: 100%;
   min-width: 240px;
   overflow-y: auto;
   font-family: var(--d4n-font-body);
@@ -22,7 +23,15 @@
   background: var(--d4n-bg-surface);
 }
 
+/* A column at least as tall as the panel, so the footer's `margin-top: auto`
+   has somewhere to push to. Without the min-height the column is only as tall
+   as its content, and with a short DAG list the footer sat directly under the
+   last row with empty panel below it. */
 .jp-airflow-root {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 100%;
   font-size: var(--d4n-fs-13);
   line-height: var(--d4n-lh-normal);
 }
@@ -320,16 +329,23 @@
    Orphan row
    ------------------------------------------------------------------------ */
 
+/* Wraps, because this panel is ~216px wide and two action labels alone can
+   exceed that. Unwrapped, the flexible name was crushed to 1px — the row
+   showed its buttons and hid the one thing that identifies WHICH dag they act
+   on, which is worse than useless for a destructive-adjacent action. */
 .jp-airflow-orphan {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   padding: 0 13px 12px;
   font-size: 12.5px;
 }
 
+/* Claims its own line so the buttons can never squeeze it out. */
 .jp-airflow-orphan-name {
-  flex: 1 1 auto;
+  flex: 1 1 100%;
+  min-width: 0;
   overflow: hidden;
   font-family: var(--d4n-font-mono);
   font-size: var(--d4n-fs-12);
@@ -1049,11 +1065,16 @@
    and 3 are different APIs and this extension only speaks v2 (Airflow 3.x).
    ------------------------------------------------------------------------ */
 
-/* flex-start, not space-between: the refresh button and its label must stay
+/* `margin-top: auto` pins it to the bottom of the panel when the DAG list is
+   short; `position: sticky` keeps it there once the list is long enough to
+   scroll. Both are needed — either alone leaves it in the wrong place for one
+   of the two cases.
+   flex-start, not space-between: the refresh button and its label must stay
    adjacent, and `/api/v2` is pushed right by its own auto margin. */
 .jp-airflow-footer {
   position: sticky;
   bottom: 0;
+  margin-top: auto;
   display: flex;
   align-items: center;
   justify-content: flex-start;

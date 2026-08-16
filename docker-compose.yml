@@ -90,7 +90,27 @@ services:
       # Cost lands on a container RECREATE, not a `restart` (which keeps the
       # writable layer, so pip just reports "already satisfied"); see the pip
       # cache mount below for the measured numbers.
+      # `--constraint` is load-bearing, not tidiness. The last entry is a
+      # THIRD-PARTY op (PRD §13 Q13) that sits OUTSIDE Airflow's constraints
+      # file, and without the constraint pin pip happily resolves a different
+      # Airflow to satisfy it — a first attempt at adding these selected
+      # `apache-airflow-core==3.3.1`, i.e. it would have silently upgraded
+      # Airflow out from under this pinned 3.0.2 environment. The constraints
+      # file only pins packages listed in it, so the third-party op still
+      # installs; it just can no longer drag Airflow with it. If a package
+      # genuinely cannot be satisfied under the pin, pip now fails loudly
+      # instead of quietly breaking the scheduler.
+      #
+      # openmetadata-ingestion is deliberately NOT here: it is not installable
+      # alongside Airflow 3.0.2 at all. Every published version (0.8.0 →
+      # 1.13.3.2, ~350 of them) conflicts with the constraint set on a
+      # different pin — idna, PyJWT, httpx, boto3, chardet, jaraco.context.
+      # Without the constraint it "succeeds" only by upgrading Airflow itself.
+      # Studio never deploy-blocks it (§13 Q13), so nothing in the product
+      # depends on it being present. See docker/README.md.
       _PIP_ADDITIONAL_REQUIREMENTS: >-
+        --constraint
+        https://raw.githubusercontent.com/apache/airflow/constraints-3.0.2/constraints-3.12.txt
         apache-airflow-providers-apache-spark==5.3.0
         apache-airflow-providers-apprise==2.1.0
         apache-airflow-providers-discord==3.10.0
@@ -98,6 +118,7 @@ services:
         apache-airflow-providers-opsgenie==5.9.0
         apache-airflow-providers-papermill==3.11.0
         apache-airflow-providers-telegram==4.8.0
+        airflow-provider-great-expectations==1.0.0
     volumes:
       - ./docker/airflow-dags:/opt/airflow/dags
       - ./docker/airflow-config:/opt/airflow/config

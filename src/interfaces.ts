@@ -111,8 +111,26 @@ export interface IOrphan {
   afdag_id?: string;
 }
 
+/** A deployed `.py` whose source `.afdag` is alive but has since been renamed,
+ * so it still deploys the flow's OLD dag_id (PRD §6.1.8(B) / §15.11). Distinct
+ * from an orphan: the source exists, so the remedy is a keep-history retire,
+ * not the destructive purge an orphan invites. */
+export interface ISupersededDag {
+  /** The stale dag_id this file still deploys. */
+  dag_id: string;
+  filename: string;
+  afdag_id?: string;
+  /** What the source flow is called now. */
+  current_dag_id: string;
+  /** Contents-relative path of the source `.afdag`, for "open in Studio". */
+  source_path?: string;
+}
+
 export interface IOrphansRes {
   orphans: IOrphan[];
+  /** Renamed-but-not-retired leftovers; see {@link ISupersededDag}. Optional so
+   * a response from an older server still typechecks. */
+  superseded?: ISupersededDag[];
   // True when a `.afdag` could not be read/parsed during the sweep — its
   // identity is unknown, so the manager suppresses the destructive prompt that
   // sweep rather than risk falsely flagging a present-but-unreadable source.
