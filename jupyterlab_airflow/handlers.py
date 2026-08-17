@@ -14,6 +14,7 @@ from .config import can_edit, studio_role
 from .codegen import generate_dag
 from .deploy import (
     deploy_dag,
+    drop_retired,
     find_orphans,
     find_source_path,
     purge_dag,
@@ -21,6 +22,8 @@ from .deploy import (
     retire_old_dag,
     rollback_dag,
 )
+from .journal import get_journal
+from .journal import utcnow as journal_utcnow
 from .providers import annotated_notifiers, annotated_operators
 from .validation import validate_dag
 
@@ -258,21 +261,200 @@ class ValidateHandler(_AirflowHandler):
         await self.respond(validate_dag, ir)
 
 
+def _deploy_envelope(body):
+    """Split a deploy POST body into ``(ir, lifecycle)``.
+
+    The envelope is ``{ir, lifecycle}``; a bare IR body is the pre-envelope shape
+    (an `.afdag` IR never has a top-level ``ir`` key, so the two are
+    distinguishable). ``lifecycle=None`` for a bare body is load-bearing, not a
+    convenience: that client is a browser tab from before this server was
+    upgraded, and it is still performing the post-write steps itself. Journaling
+    it would give one deploy two performers. Gating on the envelope deletes that
+    problem instead of mitigating it.
+    """
+    if not isinstance(body.get("ir"), dict):
+        return body, None
+    ir = body["ir"]
+    raw = body.get("lifecycle")
+    raw = raw if isinstance(raw, dict) else {}
+    retire = raw.get("retire")
+    if isinstance(retire, dict) and retire.get("dag_id"):
+        retire = {"dag_id": str(retire["dag_id"]), "purge": bool(retire.get("purge"))}
+    else:
+        retire = None
+    return ir, {"retire": retire, "run_on_deploy": bool(raw.get("run_on_deploy", True))}
+
+
 class DeployHandler(_AirflowHandler):
     """Validate then atomically write the generated DAG to the dags folder.
 
     Privileged (PRD §9): writing into the dags folder == running code as the
     Airflow worker. Validation failures come back in ``errors`` (200), the file
-    is not written. The post-deploy import poll lives in the manager.
+    is not written. When the request carries a ``lifecycle`` envelope, the
+    remaining steps (retire / unpause / trigger) are journaled and the server
+    finishes them even if the tab closes (PRD §6.5.4).
     """
 
     @tornado.web.authenticated
     async def post(self):
-        ir = self._json_body_object()
-        if ir is None:
+        body = self._json_body_object()
+        if body is None:
             return
+        ir, lifecycle = _deploy_envelope(body)
         dag_id = (ir.get("dag") or {}).get("dag_id")
-        await self.respond(deploy_dag, ir, audit_action="deploy", audit_dag_id=dag_id)
+        await self.respond(
+            deploy_dag,
+            ir,
+            # Read on the IOLoop thread: `self.current_user` must not be touched
+            # from the executor, and the journal needs the human's name up front
+            # (every later reconciler action is attributed to them).
+            requested_by=self._current_username(),
+            lifecycle=lifecycle,
+            audit_action="deploy",
+            audit_dag_id=dag_id,
+        )
+
+
+def _lifecycle_view(entry):
+    """The editor-facing projection of a journal entry.
+
+    Deliberately narrow: no ``user``, no paths, no IR, no conf. This endpoint is
+    read-only and ungated, so it must not become a way to read who deployed what.
+    """
+    if entry is None:
+        return None
+    steps = {
+        name: {
+            "state": step.get("state"),
+            "attempts": step.get("attempts", 0),
+            "last_error": step.get("last_error"),
+            "skipped_reason": step.get("skipped_reason"),
+        }
+        for name, step in entry["steps"].items()
+    }
+    retire = entry.get("retire") or {}
+    return {
+        "deploy_id": entry["deploy_id"],
+        "dag_id": entry["dag_id"],
+        "filename": entry["filename"],
+        "afdag_id": entry.get("afdag_id", ""),
+        "phase": entry["phase"],
+        "outcome": entry.get("outcome"),
+        "steps": steps,
+        "retire_dag_id": retire.get("dag_id"),
+        "run_id": entry.get("run_id") or None,
+        "run_state": entry["steps"]["trigger"].get("run_state"),
+        "import_error": entry.get("import_error"),
+        "message": entry.get("message", ""),
+        "updated_at": entry.get("updated_at"),
+        "action_deadline_at": entry.get("action_deadline_at"),
+    }
+
+
+class DeployLifecycleHandler(_AirflowHandler):
+    """Observe a deploy the server is completing (PRD §6.5.4).
+
+    Read-only, so no ``audit_action`` — and therefore no role gate: a viewer may
+    watch. ``deploy_id`` reads one entry; ``afdag_id`` reads the flow's latest,
+    which is how a reopened editor re-attaches its banner after a page reload.
+    """
+
+    @tornado.web.authenticated
+    async def get(self):
+        deploy_id = self.get_argument("deploy_id", "")
+        afdag_id = self.get_argument("afdag_id", "")
+
+        def _read():
+            store = get_journal()
+            entry = (
+                store.get(deploy_id) if deploy_id else store.latest_for_afdag(afdag_id)
+            )
+            return _lifecycle_view(entry)
+
+        await self.respond(_read)
+
+
+class DeployLifecycleCancelHandler(_AirflowHandler):
+    """Stop completing a deploy in the background — the escape hatch that closing
+    the tab used to provide, now that closing it no longer stops anything.
+
+    Audited as ``deploy`` (so a viewer 403s): it changes what the server will do
+    to Airflow on the user's behalf.
+    """
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self._json_body_object()
+        if body is None:
+            return
+        deploy_id = body.get("deploy_id")
+        if not deploy_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "deploy_id required"}))
+            return
+
+        def _cancel():
+            store = get_journal()
+            # `request_stop`, never a bare `finish`: a sweep may be holding this
+            # entry inside a multi-second Airflow call, and writing over a claimed
+            # entry used to be silently undone by that sweep's release — the
+            # server then went on to retire, unpause and trigger after telling the
+            # user (and the audit trail) it had stopped.
+            outcome = store.request_stop(
+                deploy_id,
+                outcome="cancelled",
+                message="Cancelled — the remaining steps were not run.",
+            )
+            return {
+                "deploy_id": deploy_id,
+                "cancelled": outcome is not None,
+                # `requested` means a sweep is mid-step: it stops before its next
+                # transition, so the step already in flight may still land.
+                "pending_step": outcome == "requested",
+            }
+
+        await self.respond(_cancel, audit_action="deploy")
+
+
+class DeployLifecycleResumeHandler(_AirflowHandler):
+    """Re-arm a deploy whose budget ran out — the banner's "Keep waiting".
+
+    An ``expired`` outcome means Airflow was still slow when the server's budget
+    elapsed; the deploy's remaining steps (notably the rename's retire) were
+    *skipped*, not performed. Re-arming has to happen **here**, because the
+    editor cannot do it: on the journaled path the retire intent deliberately
+    lives only in the journal, so a browser-side retry would unpause and trigger
+    the new DAG while the old one is still live and unpaused — the two-live-DAGs
+    state the whole feature exists to prevent.
+
+    Audited as ``deploy`` (so a viewer 403s): it puts server-side work back on.
+    """
+
+    @tornado.web.authenticated
+    async def post(self):
+        body = self._json_body_object()
+        if body is None:
+            return
+        deploy_id = body.get("deploy_id")
+        if not deploy_id:
+            self.set_status(400)
+            self.finish(json.dumps({"error": "deploy_id required"}))
+            return
+
+        def _resume():
+            from .reconciler import deploy_budget_s, reopen_expired, get_reconciler
+
+            store = get_journal()
+            resumed, reason = reopen_expired(
+                store, deploy_id, now=journal_utcnow(), budget_s=deploy_budget_s()
+            )
+            if resumed:
+                reconciler = get_reconciler()
+                if reconciler is not None:
+                    reconciler.wake()
+            return {"deploy_id": deploy_id, "resumed": resumed, "reason": reason}
+
+        await self.respond(_resume, audit_action="deploy")
 
 
 class DeployStatusHandler(_AirflowHandler):
@@ -307,12 +489,19 @@ class DagsHandler(_AirflowHandler):
             self.finish(json.dumps({"error": "limit and offset must be integers"}))
             return
         pattern = self.get_argument("dag_id_pattern", "") or None
-        await self.respond(
-            get_client().list_dags,
-            limit=limit,
-            offset=offset,
-            dag_id_pattern=pattern,
-        )
+
+        def _list():
+            # Airflow keeps returning a keep-history-retired dag_id until its
+            # dag-processor marks the fileless row stale (~300 s, and never when
+            # the deploy target is not the scanned folder). `drop_retired` makes
+            # this list authoritative instead of waiting on that (PRD §6.1.8(B)).
+            return drop_retired(
+                get_client().list_dags(
+                    limit=limit, offset=offset, dag_id_pattern=pattern
+                )
+            )
+
+        await self.respond(_list)
 
 
 class DagDetailsHandler(_AirflowHandler):
@@ -337,10 +526,19 @@ class DagPauseHandler(_AirflowHandler):
             self.set_status(400)
             self.finish(json.dumps({"error": "dag_id required"}))
             return
+
+        def _pause_with_veto():
+            # A deliberate pause beats a deploy still in flight: veto FIRST, so
+            # the reconciler cannot unpause between our veto and Airflow's PATCH.
+            # Both the manager's and the editor's pause funnel through this one
+            # handler in this one process, so the realistic case is fully covered
+            # (pausing from the Airflow UI is not — see the PR's residual risks).
+            if is_paused:
+                get_journal().veto_unpause(dag_id)
+            return get_client().set_paused(dag_id, is_paused)
+
         await self.respond(
-            get_client().set_paused,
-            dag_id,
-            is_paused,
+            _pause_with_veto,
             audit_action="pause" if is_paused else "unpause",
             audit_dag_id=dag_id,
         )
@@ -767,6 +965,9 @@ def setup_handlers(web_app):
         (_url(base_url, "validate"), ValidateHandler),
         (_url(base_url, "deploy"), DeployHandler),
         (_url(base_url, "deploy/status"), DeployStatusHandler),
+        (_url(base_url, "deploy/lifecycle"), DeployLifecycleHandler),
+        (_url(base_url, "deploy/lifecycle/cancel"), DeployLifecycleCancelHandler),
+        (_url(base_url, "deploy/lifecycle/resume"), DeployLifecycleResumeHandler),
         (_url(base_url, "importerrors"), ImportErrorsHandler),
         (_url(base_url, "dags"), DagsHandler),
         (_url(base_url, "dags/details"), DagDetailsHandler),

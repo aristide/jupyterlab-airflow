@@ -9,6 +9,7 @@ import {
   IDagListRes,
   IDagRunsRes,
   IDagRun,
+  IDeployLifecycleRes,
   IDeployRes,
   IDeployStatusRes,
   IGenerateRes,
@@ -137,8 +138,52 @@ export const generateDag = (ir: IAfdagIR): Promise<IApiRes<IGenerateRes>> =>
 export const validateDag = (ir: IAfdagIR): Promise<IApiRes<IValidateRes>> =>
   POST<IValidateRes>('validate', ir as unknown as Record<string, unknown>);
 
-export const deployDag = (ir: IAfdagIR): Promise<IApiRes<IDeployRes>> =>
-  POST<IDeployRes>('deploy', ir as unknown as Record<string, unknown>);
+/** What the editor would otherwise perform after the write (PRD §6.5.4): the
+ * rename migration's retire intent, and whether to run the DAG on deploy. Sent
+ * WITH the deploy so the server owns the whole lifecycle — a retire intent held
+ * in the browser dies with the tab. */
+export interface IDeployLifecycleReq {
+  retire?: { dag_id: string; purge: boolean } | null;
+  run_on_deploy?: boolean;
+}
+
+// The `{ir, lifecycle}` envelope is also how the server knows this client
+// observes rather than performs; a bare-IR body keeps the old behaviour.
+export const deployDag = (
+  ir: IAfdagIR,
+  lifecycle: IDeployLifecycleReq = {}
+): Promise<IApiRes<IDeployRes>> =>
+  POST<IDeployRes>('deploy', { ir, lifecycle } as unknown as Record<
+    string,
+    unknown
+  >);
+
+/** Observe a deploy the server is completing. By `deployId` for the deploy this
+ * session started; by `afdagId` to re-attach after a page reload. */
+export const deployLifecycle = (opts: {
+  deployId?: string;
+  afdagId?: string;
+}): Promise<IApiRes<IDeployLifecycleRes | null>> =>
+  GET<IDeployLifecycleRes | null>('deploy/lifecycle', {
+    ...(opts.deployId ? { deploy_id: opts.deployId } : {}),
+    ...(opts.afdagId ? { afdag_id: opts.afdagId } : {})
+  });
+
+/** Stop the server finishing a deploy — the escape hatch closing the tab used to
+ * provide, now that closing it no longer stops anything. */
+export const cancelDeployLifecycle = (
+  deployId: string
+): Promise<
+  IApiRes<{ deploy_id: string; cancelled: boolean; pending_step?: boolean }>
+> => POST('deploy/lifecycle/cancel', { deploy_id: deployId });
+
+/** Re-arm a deploy whose server-side budget ran out ("Keep waiting"). The server
+ * owns the remaining steps — notably a rename's retire, whose intent lives only
+ * in the journal — so waiting longer has to be asked of it, not re-run here. */
+export const resumeDeployLifecycle = (
+  deployId: string
+): Promise<IApiRes<{ deploy_id: string; resumed: boolean; reason: string }>> =>
+  POST('deploy/lifecycle/resume', { deploy_id: deployId });
 
 export const deployStatus = (
   dagId: string,

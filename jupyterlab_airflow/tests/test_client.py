@@ -310,3 +310,20 @@ def test_set_dag_run_state_patches_state(requests_mock):
     # Default state is "failed" — the stop-a-run path (PRD §6.6).
     make_client().set_dag_run_state("d", "r1")
     assert m.last_request.json() == {"state": "failed"}
+
+
+def test_trigger_sends_an_explicit_run_id_only_when_given(requests_mock):
+    # The deploy reconciler triggers with a deterministic run_id so a duplicate
+    # is a 409 rather than a second run (PRD §6.5.4); the manager's Trigger
+    # button must keep its existing body exactly.
+    requests_mock.post(f"{BASE}/auth/token", json={"access_token": "t"})
+    run_m = requests_mock.post(
+        f"{BASE}{API_PREFIX}/dags/demo/dagRuns", json={"dag_run_id": "r1"}
+    )
+
+    client = make_client()
+    client.trigger_dag("demo", dag_run_id="studio__abc")
+    assert run_m.last_request.json()["dag_run_id"] == "studio__abc"
+
+    client.trigger_dag("demo")
+    assert "dag_run_id" not in run_m.last_request.json()

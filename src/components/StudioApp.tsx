@@ -38,8 +38,11 @@ import {
 } from '../graph';
 import {
   apiError,
+  cancelDeployLifecycle,
+  resumeDeployLifecycle,
   deleteDag,
   deployDag,
+  deployLifecycle,
   deployStatus,
   getDagRun,
   renamePreflight,
@@ -47,10 +50,12 @@ import {
   rollbackDag,
   setDagPaused,
   setDagRunState,
-  triggerDag
+  triggerDag,
+  IDeployLifecycleReq
 } from '../handler';
+import { keepWaitingPlan } from '../deployLifecycle';
 import { explainImportError } from '../importErrors';
-import { IOperatorDef } from '../interfaces';
+import { IDeployLifecycleRes, IOperatorDef } from '../interfaces';
 import { tidyLayout } from '../layout';
 import {
   AfdagCallbacksValue,
@@ -81,7 +86,7 @@ import {
 } from './capabilitiesContext';
 import { Coachmark, CoachStep } from './Coachmark';
 import { DagIdField } from './DagIdField';
-import { DeployBanner, IDeployState } from './DeployBanner';
+import { DeployBanner, DeployPhase, IDeployState } from './DeployBanner';
 import { EditorActionsContext, IEditorActions } from './editorContext';
 import { Inspector } from './Inspector';
 import { NoteNode } from './NoteNode';
@@ -105,6 +110,10 @@ const POLL_MAX_MS = 8000;
 // Run-on-deploy (§6.5.4): a deployed run is polled to completion, with a longer
 // ceiling than registration since a DAG run can legitimately take a while.
 const RUN_POLL_TIMEOUT_MS = 600000;
+// Observing a server-driven deploy (PRD §6.5.4): the server's own budget is
+// 900s, so watch a little past it — reaching this deadline means the tab gave up
+// watching, never that the deploy stopped.
+const OBSERVE_TIMEOUT_MS = 960000;
 // Give up the run poll after this many consecutive errors (e.g. the run/DAG was
 // removed out of band → 404, or Airflow is unreachable) instead of spinning a
 // stale "Running…" banner until the deadline.
@@ -732,12 +741,25 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     return messages;
   }, [taskNodes, edges]);
 
-  // A queued "retire the old DAG" step for a dag_id rename migration (§6.1.8(B)):
-  // set just before deploying the renamed DAG; run once it reaches `registered`.
-  const pendingRetireRef = React.useRef<{
+  // A queued "retire the old DAG" step for a dag_id rename migration (§6.1.8(B)).
+  //
+  // This ref is now the FALLBACK path only — when the server did not journal the
+  // deploy (`lifecycle.reconciled === false`: the reconciler is switched off, or
+  // the journal could not be written). On the normal path the intent is sent to
+  // the server with the deploy and lives in the journal, which is the whole point:
+  // an intent held in a React ref dies with the tab, and a rename whose tab closed
+  // before Airflow registered the new DAG left the old one live forever.
+  const fallbackRetireRef = React.useRef<{
     oldDagId: string;
     purge: boolean;
   } | null>(null);
+  // The deploy currently being observed, so Dismiss can call it off server-side.
+  const observedRef = React.useRef<string | null>(null);
+  // A journaled deploy whose server-side budget ran out. "Keep waiting" must
+  // re-arm the SERVER for it — never fall through to the legacy browser path,
+  // which would unpause and trigger the new DAG while the rename's old DAG is
+  // still live and unpaused (the retire intent lives only in the journal).
+  const resumableRef = React.useRef<string | null>(null);
 
   // Stop any in-flight poll loop (dismiss / unmount / re-deploy).
   const cancelPoll = React.useCallback((): void => {
@@ -916,9 +938,9 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
             // Rename migration: the renamed DAG is live → retire the old one
             // before running the new one.
             let retireNote: string | undefined;
-            const pending = pendingRetireRef.current;
+            const pending = fallbackRetireRef.current;
             if (pending) {
-              pendingRetireRef.current = null;
+              fallbackRetireRef.current = null;
               const retired = await retireOldDag(
                 pending.oldDagId,
                 pending.purge
@@ -944,7 +966,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
           }
           if (res.data.state === 'failed') {
             // A migration's new DAG failed to import → leave the old one intact.
-            pendingRetireRef.current = null;
+            fallbackRetireRef.current = null;
             // Functional update preserves `backedUp` (set on the prior waiting
             // state) so the failed banner can offer Roll back (§7).
             setDeploy(prev => ({
@@ -962,7 +984,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       }
 
       if (!token.cancelled) {
-        // Timed out. `pendingRetireRef` is deliberately NOT cleared: retiring is
+        // Timed out. `fallbackRetireRef` is deliberately NOT cleared: retiring is
         // gated on actually observing `registered`, so keeping the intent is
         // safe and lets "Keep waiting" finish a migration that was merely slow.
         // Clearing it here used to strand the old DAG permanently — the rename
@@ -971,9 +993,9 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
           phase: 'processing',
           dagId,
           filename,
-          message: pendingRetireRef.current
+          message: fallbackRetireRef.current
             ? `Still processing — Airflow has not picked up “${dagId}” yet, so ` +
-              `“${pendingRetireRef.current.oldDagId}” has not been retired. ` +
+              `“${fallbackRetireRef.current.oldDagId}” has not been retired. ` +
               'Keep waiting to finish the rename.'
             : 'Still processing — Airflow has not picked up the file yet. ' +
               'This can take a few minutes.'
@@ -983,13 +1005,96 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
     [runAfterDeploy]
   );
 
-  // Phase 1: validate + atomic write, then enter the polling lifecycle. Takes an
-  // explicit IR so a rename migration can deploy the renamed DAG (§6.1.8(B)).
+  // Observe (never perform) a deploy the SERVER is completing (PRD §6.5.4).
+  //
+  // This is the other half of the fix: when the deploy is journaled, retiring,
+  // unpausing and triggering all happen server-side, so this loop calls no
+  // mutating API at all. Closing the tab now stops the watching, not the deploy.
+  const observeLifecycle = React.useCallback(
+    async (deployId: string): Promise<void> => {
+      const token = { cancelled: false };
+      pollRef.current = token;
+      observedRef.current = deployId;
+      const deadline = Date.now() + OBSERVE_TIMEOUT_MS;
+      let delay = POLL_START_MS;
+      let errors = 0;
+
+      while (!token.cancelled && Date.now() < deadline) {
+        const res = await deployLifecycle({ deployId });
+        if (token.cancelled) {
+          return;
+        }
+        if (res.status === 'OK' && res.data) {
+          errors = 0;
+          const entry = res.data;
+          if (entry.outcome === null) {
+            setDeploy(prev => ({ ...prev, ...ongoingState(entry) }));
+          } else {
+            observedRef.current = null;
+            // `expired` is "Airflow was still slow when the budget ran out", and
+            // its skipped steps are re-armable server-side. Remember it so
+            // "Keep waiting" asks the server for more time instead of taking the
+            // work back into this tab.
+            resumableRef.current =
+              entry.outcome === 'expired' ? deployId : null;
+            setDeploy(prev => ({ ...prev, ...terminalState(entry) }));
+            // A created run is where the server's job ends — a run can take
+            // hours and Airflow owns its state, so the existing run poll takes
+            // over from the journal's run_id.
+            if (
+              entry.outcome === 'completed' &&
+              entry.run_id &&
+              entry.steps.trigger.state === 'done'
+            ) {
+              await pollRunState(
+                entry.dag_id,
+                entry.filename,
+                entry.run_id,
+                token
+              );
+            }
+            return;
+          }
+        } else if (++errors >= MAX_RUN_POLL_ERRORS) {
+          setDeploy(prev => ({
+            ...prev,
+            phase: 'processing',
+            message:
+              `Lost track of this deploy (${res.error ?? 'poll failed'}), but ` +
+              'the server is still finishing it. Check the Manager.'
+          }));
+          return;
+        }
+        await sleep(delay);
+        delay = Math.min(delay + 1000, POLL_MAX_MS);
+      }
+
+      if (!token.cancelled) {
+        setDeploy(prev => ({
+          ...prev,
+          phase: 'processing',
+          message:
+            'Still processing — Airflow has not picked up the file yet. The ' +
+            'server keeps finishing this deploy either way.'
+        }));
+      }
+    },
+    [pollRunState]
+  );
+
+  // Phase 1: validate + atomic write, then either observe the server finishing
+  // the deploy or (when it did not journal it) drive the rest here. Takes an
+  // explicit IR so a rename migration can deploy the renamed DAG (§6.1.8(B)),
+  // and the migration's retire intent so the SERVER owns it.
   const runDeploy = React.useCallback(
-    async (ir: IAfdagIR): Promise<void> => {
+    async (
+      ir: IAfdagIR,
+      lifecycle: IDeployLifecycleReq = {}
+    ): Promise<void> => {
       cancelPoll();
+      resumableRef.current = null;
       setDeploy({ phase: 'writing', message: 'Writing the DAG file…' });
-      const res = await deployDag(ir);
+      const res = await deployDag(ir, lifecycle);
       if (res.status !== 'OK' || !res.data?.deployed) {
         // Validation errors (when the server got far enough to produce them)
         // are the most specific thing to show; otherwise fall back to the
@@ -998,11 +1103,22 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         const detail =
           res.data?.errors?.join('; ') || apiError(res, 'Deploy failed');
         // A failed (re)deploy aborts any pending rename migration.
-        pendingRetireRef.current = null;
+        fallbackRetireRef.current = null;
         setDeploy({ phase: 'error', message: detail });
         return;
       }
       const { dag_id: dagId, filename = '' } = res.data;
+      const reconciled = res.data.lifecycle?.reconciled === true;
+      if (reconciled) {
+        // Exactly one performer: the intent is in the journal now, so it must
+        // not also sit in a ref here.
+        fallbackRetireRef.current = null;
+      } else if (lifecycle.retire) {
+        fallbackRetireRef.current = {
+          oldDagId: lifecycle.retire.dag_id,
+          purge: lifecycle.retire.purge
+        };
+      }
       setDeploy({
         phase: 'waiting',
         dagId,
@@ -1013,11 +1129,16 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         // directory scan, so say so rather than letting it look hung.
         message:
           'Waiting for Airflow to pick it up… A new DAG file can take up to ' +
-          '5 minutes to be discovered.'
+          '5 minutes to be discovered.' +
+          (reconciled ? ' This continues even if you close this tab.' : '')
       });
-      void pollLifecycle(dagId, filename);
+      if (reconciled && res.data.lifecycle) {
+        void observeLifecycle(res.data.lifecycle.deploy_id);
+      } else {
+        void pollLifecycle(dagId, filename);
+      }
     },
-    [cancelPoll, pollLifecycle]
+    [cancelPoll, pollLifecycle, observeLifecycle]
   );
 
   // The Deploy button. A plain re-deploy overwrites the same {dag_id}.py, so if
@@ -1118,53 +1239,109 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
         }
       }
 
-      // Deployed (idle, or overridden): choose what happens to the old DAG.
-      const choice = await showDialog({
-        title: 'Rename & redeploy',
-        body:
-          `Airflow has no rename — this creates a NEW DAG “${next}” (paused, empty ` +
-          `history). The old “${current}” history does NOT carry over. Keep the ` +
-          'old DAG’s history (paused) or purge it?',
-        buttons: [
-          Dialog.cancelButton({ label: 'Cancel' }),
-          Dialog.okButton({ label: 'Keep history' }),
-          Dialog.warnButton({ label: 'Purge old DAG' })
-        ]
-      });
-      if (!choice.button.accept) {
-        return;
-      }
-      const purge = choice.button.label === 'Purge old DAG';
-
-      // Migrate: set the new id in the editor (persisted by the commit effect),
-      // then deploy it; pollLifecycle retires the old DAG once the new registers.
+      // Deployed and idle: no prompt. Renaming is one action — type the new
+      // name, press Enter. The old DAG is retired KEEPING its history, which
+      // is reversible: the history stays in Airflow and the old `.py` is
+      // regenerable from this same IR, so there is nothing here that warrants
+      // interrupting the user to decide.
+      //
+      // Purge is deliberately NOT offered on this path any more. It used to be
+      // a co-equal button on a routine rename, and choosing it destroys the old
+      // DAG's run history irreversibly — a footgun sitting one click away from
+      // the ordinary case. It now lives where the user has evidence the new DAG
+      // works: the manager's per-row Delete, and the post-rename banner.
       const newIR: IAfdagIR = {
         ...currentIR,
         dag: { ...currentIR.dag, dag_id: next }
       };
       setDag(d => ({ ...d, dag_id: next }));
-      pendingRetireRef.current = { oldDagId: current, purge };
-      void runDeploy(newIR);
+      void runDeploy(newIR, { retire: { dag_id: current, purge: false } });
     },
     [dag.dag_id, currentIR, runDeploy]
   );
 
-  const onDismissDeploy = React.useCallback((): void => {
+  // Dismiss. While the server is finishing a deploy, dismissing the banner has
+  // to mean something stronger than "stop looking": closing the tab no longer
+  // stops the work, so this is the escape hatch that used to be implicit.
+  const onDismissDeploy = React.useCallback(async (): Promise<void> => {
+    const deployId = observedRef.current;
+    if (deployId) {
+      const confirmed = await showDialog({
+        title: 'Stop finishing this deploy?',
+        body:
+          'Airflow keeps the deployed file, but Studio will not retire the old ' +
+          'DAG, unpause it, or trigger a run. You can do those from the Manager.',
+        buttons: [
+          Dialog.cancelButton({ label: 'Keep going' }),
+          Dialog.warnButton({ label: 'Stop' })
+        ]
+      });
+      if (!confirmed.button.accept) {
+        return;
+      }
+      observedRef.current = null;
+      await cancelDeployLifecycle(deployId);
+    }
+    resumableRef.current = null;
     cancelPoll();
     setDeploy({ phase: 'idle', message: '' });
   }, [cancelPoll]);
 
-  const onKeepWaiting = React.useCallback((): void => {
-    if (deploy.dagId && deploy.filename) {
+  // "Keep waiting": re-attach to the server's work when it owns the deploy,
+  // otherwise resume polling ourselves (the fallback path).
+  const onKeepWaiting = React.useCallback(async (): Promise<void> => {
+    const plan = keepWaitingPlan({
+      observedDeployId: observedRef.current,
+      resumableDeployId: resumableRef.current,
+      dagId: deploy.dagId,
+      filename: deploy.filename
+    });
+    if (plan.kind === 'observe') {
+      setDeploy(prev => ({
+        ...prev,
+        phase: 'waiting',
+        message: KEEP_WAITING_HINT
+      }));
+      void observeLifecycle(plan.deployId);
+      return;
+    }
+    // The server ran out of budget. Ask it for more rather than re-running the
+    // tail here: on the journaled path this tab holds no retire intent, so
+    // finishing it locally would leave the renamed-away DAG live beside the new
+    // one — both scheduled, both processing the same data.
+    if (plan.kind === 'resume') {
+      const res = await resumeDeployLifecycle(plan.deployId);
+      if (res.status === 'OK' && res.data?.resumed) {
+        resumableRef.current = null;
+        setDeploy(prev => ({
+          ...prev,
+          phase: 'waiting',
+          message: KEEP_WAITING_HINT
+        }));
+        void observeLifecycle(plan.deployId);
+        return;
+      }
+      setDeploy(prev => ({
+        ...prev,
+        phase: 'processing',
+        message:
+          'Could not keep waiting: ' +
+          (res.data?.reason ||
+            apiError(res, 'the deploy could not be re-armed')) +
+          '. Finish it from the Manager.'
+      }));
+      return;
+    }
+    if (plan.kind === 'poll') {
       setDeploy({
         phase: 'waiting',
-        dagId: deploy.dagId,
-        filename: deploy.filename,
+        dagId: plan.dagId,
+        filename: plan.filename,
         message: 'Waiting for Airflow to pick it up…'
       });
-      void pollLifecycle(deploy.dagId, deploy.filename);
+      void pollLifecycle(plan.dagId, plan.filename);
     }
-  }, [deploy.dagId, deploy.filename, pollLifecycle]);
+  }, [deploy.dagId, deploy.filename, pollLifecycle, observeLifecycle]);
 
   // Banner "Unpause & trigger" (fallback) / "Run again" (after a finished run):
   // re-run the same unpause→trigger→poll flow under a fresh cancel token.
@@ -1288,6 +1465,51 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
 
   // Cancel any poll loop if the editor unmounts.
   React.useEffect(() => cancelPoll, [cancelPoll]);
+
+  // Re-attach to this flow's deploy after a reload (PRD §6.5.4). Reopening the
+  // document used to show nothing at all while the server (or, before, nobody)
+  // finished the work — this is the user-visible half of the fix: a still-running
+  // deploy gets its banner back, and one that finished while the tab was closed
+  // says so instead of vanishing.
+  React.useEffect(() => {
+    if (!ready) {
+      return;
+    }
+    const afdagId = baseRef.current.provenance?.afdag_id;
+    if (!afdagId) {
+      return;
+    }
+    let cancelled = false;
+    void deployLifecycle({ afdagId }).then(res => {
+      if (cancelled || res.status !== 'OK' || !res.data) {
+        return;
+      }
+      const entry = res.data;
+      if (entry.outcome === null) {
+        void observeLifecycle(entry.deploy_id);
+        return;
+      }
+      const state = terminalState(entry);
+      if (state.phase === 'idle') {
+        return; // superseded/cancelled: nothing worth reporting on reopen
+      }
+      // Same rule as the live observer: only the server can resume an expired
+      // lifecycle, so record it rather than letting "Keep waiting" fall back.
+      resumableRef.current =
+        entry.outcome === 'expired' ? entry.deploy_id : null;
+      setDeploy(prev => ({
+        ...prev,
+        ...state,
+        // A run that was created while the tab was closed is history by now, so
+        // report the deploy rather than re-entering the live "Running…" poll.
+        phase: state.phase === 'running' ? 'finished' : state.phase,
+        message: `Deployed while this tab was closed — ${entry.message}`
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, observeLifecycle]);
 
   // Only a *first-load* registry failure is fatal (there's no editor to show
   // yet). A later failure (e.g. a palette refresh blip) must never tear down a
@@ -1421,7 +1643,7 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
           <DeployBanner
             state={deploy}
             explanation={deployExplanation}
-            onDismiss={onDismissDeploy}
+            onDismiss={() => void onDismissDeploy()}
             onUnpauseTrigger={onUnpauseTrigger}
             onStopRun={() => void onStopRun()}
             onKeepWaiting={onKeepWaiting}
@@ -1525,6 +1747,105 @@ export function StudioApp(props: IStudioAppProps): JSX.Element {
       </EditorActionsContext.Provider>
     </CanEditContext.Provider>
   );
+}
+
+// The banner is a projection of the server's journal entry while the server is
+// finishing a deploy (PRD §6.5.4). The existing `DeployPhase` union is enough —
+// what changed is who performs the steps, not what the user is told.
+const KEEP_WAITING_HINT =
+  'Waiting for Airflow to pick it up… A new DAG file can take up to 5 minutes ' +
+  'to be discovered. This continues even if you close this tab.';
+
+function retireNote(entry: IDeployLifecycleRes): string | undefined {
+  const old = entry.retire_dag_id;
+  if (!old) {
+    return undefined;
+  }
+  const step = entry.steps.retire;
+  if (step.state === 'done') {
+    return `Old DAG “${old}” retired.`;
+  }
+  if (step.state === 'skipped') {
+    return `Old DAG “${old}” was left alone — ${
+      step.skipped_reason ?? 'the step was skipped'
+    }.`;
+  }
+  return undefined;
+}
+
+/** A banner patch: always carries a phase, so it can be spread over the previous
+ * state without widening `phase` to `undefined`. */
+type LifecycleView = Partial<IDeployState> & { phase: DeployPhase };
+
+function ongoingState(entry: IDeployLifecycleRes): LifecycleView {
+  const waiting = entry.phase === 'awaiting_registration';
+  return {
+    phase: waiting ? 'waiting' : 'registered',
+    dagId: entry.dag_id,
+    filename: entry.filename,
+    note: retireNote(entry),
+    // The server does the unpause + trigger, so never offer "Unpause & trigger"
+    // alongside it — that is what "observe, don't perform" means in the UI.
+    triggered: true,
+    message: waiting
+      ? KEEP_WAITING_HINT
+      : `${entry.message || `Registered ${entry.dag_id}`} ${
+          entry.phase === 'retiring'
+            ? `Retiring “${entry.retire_dag_id ?? ''}”…`
+            : entry.phase === 'unpausing'
+              ? 'Unpausing…'
+              : 'Triggering a run…'
+        } You can close this tab.`
+  };
+}
+
+function terminalState(entry: IDeployLifecycleRes): LifecycleView {
+  const base = {
+    dagId: entry.dag_id,
+    filename: entry.filename,
+    note: retireNote(entry)
+  };
+  switch (entry.outcome) {
+    case 'completed':
+      if (entry.run_id && entry.steps.trigger.state === 'done') {
+        return {
+          ...base,
+          phase: 'running',
+          runId: entry.run_id,
+          runState: entry.run_state ?? undefined,
+          triggered: true,
+          message: `Running ${entry.dag_id}…`
+        };
+      }
+      return {
+        ...base,
+        phase: 'finished',
+        triggered: false,
+        message: entry.message || `Deployed ${entry.dag_id}.`
+      };
+    case 'import_failed':
+      return {
+        ...base,
+        phase: 'failed',
+        importError: entry.import_error,
+        message: entry.message || `${entry.filename} failed to import.`
+      };
+    case 'expired':
+      // "Keep waiting" now re-attaches to the server's work rather than
+      // re-performing it.
+      return { ...base, phase: 'processing', message: entry.message };
+    case 'superseded':
+    case 'cancelled':
+      return { phase: 'idle', message: '' };
+    default:
+      return {
+        ...base,
+        phase: 'error',
+        message:
+          entry.message ||
+          `Could not finish deploying ${entry.dag_id} (${entry.outcome}).`
+      };
+  }
 }
 
 // Short status-bar wording per deploy phase. `idle` is deliberately absent so

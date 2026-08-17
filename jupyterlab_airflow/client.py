@@ -165,8 +165,19 @@ class AirflowClient:
             json={"is_paused": is_paused},
         )
 
-    def trigger_dag(self, dag_id: str, conf=None, logical_date=None) -> dict:
+    def trigger_dag(
+        self, dag_id: str, conf=None, logical_date=None, dag_run_id=None
+    ) -> dict:
+        """Create a DagRun. An explicit ``dag_run_id`` (Airflow 3's
+        ``TriggerDAGRunPostBody``) makes the trigger idempotent: Airflow answers
+        **409** for a duplicate id. That 409 is deliberately NOT handled here —
+        the caller decides what it means. For the deploy reconciler it means "this
+        deploy already triggered, adopt that run"; for the manager's Trigger
+        button a double-click really is an error, and swallowing it would report
+        success pointing at an unrelated run."""
         body = {"logical_date": logical_date, "conf": conf or {}}
+        if dag_run_id:
+            body["dag_run_id"] = dag_run_id
         return self._request("POST", f"/dags/{dag_id}/dagRuns", json=body)
 
     def list_dag_runs(self, dag_id: str, limit: int = 10) -> dict:

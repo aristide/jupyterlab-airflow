@@ -285,9 +285,62 @@ export interface IDeployRes {
   correlation_id?: string;
   /** This deploy overwrote a prior version, so a rollback target exists (§7). */
   backed_up?: boolean;
+  /** The post-write lifecycle (PRD §6.5.4). `reconciled` means the SERVER will
+   * wait for registration, retire the renamed-away dag_id, unpause and trigger —
+   * so the editor only observes. When it is false (an older/disabled server, or
+   * a journal that could not be written) the editor performs those steps itself,
+   * exactly as before. */
+  lifecycle?: { deploy_id: string; reconciled: boolean; run_id: string };
   warnings: string[];
   errors: string[];
   dagbag: IDagBagResult;
+}
+
+// -- Durable deploy lifecycle (PRD §6.5.4) ---------------------------------- //
+
+export type LifecyclePhase =
+  | 'awaiting_registration'
+  | 'retiring'
+  | 'unpausing'
+  | 'triggering'
+  | 'terminal';
+
+export type LifecycleOutcome =
+  | 'completed'
+  | 'import_failed'
+  | 'expired'
+  | 'failed'
+  | 'denied'
+  | 'superseded'
+  | 'cancelled';
+
+export interface ILifecycleStep {
+  state: 'pending' | 'done' | 'skipped' | 'failed';
+  attempts: number;
+  last_error: string | null;
+  skipped_reason?: string | null;
+}
+
+/** One observation of a deploy the server is completing. Deliberately carries no
+ * user, no paths and no IR — it is a read-only, ungated projection. */
+export interface IDeployLifecycleRes {
+  deploy_id: string;
+  dag_id: string;
+  filename: string;
+  afdag_id: string;
+  phase: LifecyclePhase;
+  outcome: LifecycleOutcome | null;
+  steps: Record<
+    'registered' | 'retire' | 'unpause' | 'trigger',
+    ILifecycleStep
+  >;
+  retire_dag_id: string | null;
+  run_id: string | null;
+  run_state: string | null;
+  import_error?: IImportError;
+  message: string;
+  updated_at: string;
+  action_deadline_at: string;
 }
 
 // Result of `POST dags/rollback` — restore the previous deployed version (§7).

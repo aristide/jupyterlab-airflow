@@ -24,6 +24,17 @@ def _load_jupyter_server_extension(server_app):
         JupyterLab application instance
     """
     setup_handlers(server_app.web_app)
+    # The deploy reconciler (PRD §6.5.4): the server finishes a deploy's
+    # lifecycle — wait for registration, retire the renamed-away dag_id, unpause,
+    # trigger — even if the browser tab closes. It is lazily scheduled, so a
+    # server that never deploys creates no timer and makes no Airflow calls.
+    from . import journal, reconciler
+
+    journal.set_root(getattr(server_app, "data_dir", None))
+    rec = reconciler.configure(server_app)  # None when disabled / no journal
+    if rec is not None:
+        rec.start()
+    server_app.web_app.settings["jupyterlab_airflow_reconciler"] = rec
     name = "jupyterlab_airflow"
     server_app.log.info(f"Registered {name} server extension")
 

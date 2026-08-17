@@ -35,6 +35,28 @@ these are provided by the repo-root ``docker-compose.yml``.
     AIRFLOW_S3_ENDPOINT_URL  S3 endpoint for an S3-compatible store (e.g. MinIO);
                           unset → AWS S3.
 
+    Durable deploy lifecycle (PRD §6.5.4), read by ``reconciler.py``/``journal.py``.
+    The server (not the browser) waits for registration, retires the renamed-away
+    dag_id, unpauses and triggers — so a deploy completes even if the tab closes:
+    JUPYTERLAB_AIRFLOW_RECONCILER  "on" (default) or "off". Off = no background
+                          work at all and no journal entry; the editor drives the
+                          remaining steps exactly as it did before. Also the
+                          operator's escape hatch and the test kill switch.
+    JUPYTERLAB_AIRFLOW_RECONCILE_INTERVAL_S  Sweep period, 5..300. Default 15.
+                          The timer only exists while a deploy is in flight.
+    JUPYTERLAB_AIRFLOW_DEPLOY_BUDGET_S  How long a deploy's lifecycle may take,
+                          60..7200. Default 900 (Airflow's new-file scan interval
+                          is ~300s; this covers three cycles plus parse). Past it
+                          nothing is unpaused or triggered — a late unpause is not
+                          "completing a deploy", it is fighting the user.
+    JUPYTERLAB_AIRFLOW_JOURNAL_DIR  Where in-flight deploys are recorded. Default
+                          <data_dir>/airflow-studio/deploy-journal. Point it at
+                          local disk when the server's data_dir is on NFS.
+    JUPYTERLAB_AIRFLOW_JOURNAL_RETENTION_S  How long finished entries stay
+                          observable (so a reopened editor can say "deployed while
+                          you were away"), 300..604800. Default 86400.
+    Out-of-range/unparseable values are clamped/defaulted with a warning.
+
     Authorization (PRD §9):
     JUPYTERLAB_AIRFLOW_ROLE  "editor" (default) or "viewer". A viewer may read
                           everything but cannot run any privileged action —
@@ -60,9 +82,12 @@ Security / multi-user trust model (PRD §9):
 
     Every **mutating** action (deploy / trigger / pause / stop-run / clear /
     delete / rollback / retire) is **audited** (PRD §9): ``audit.py`` emits a
-    structured ``{ts, user, action, dag_id, correlation_id, outcome}`` JSON line
-    on the ``jupyterlab_airflow.audit`` logger, stamped with the authenticated
-    Jupyter user. Route that logger to a file/SIEM via normal logging config.
+    structured ``{ts, user, action, dag_id, correlation_id, outcome, via}`` JSON
+    line on the ``jupyterlab_airflow.audit`` logger, stamped with the
+    authenticated Jupyter user. Route that logger to a file/SIEM via normal
+    logging config. ``via`` distinguishes a human request from a step the deploy
+    reconciler completed in the background; the ``user`` is the human either way,
+    and both share the deploy's ``correlation_id``.
 
     The **authorization gate is derived from that same audit marker**: a handler
     is privileged exactly when it is audited. Both live in one place

@@ -179,6 +179,30 @@ async def test_dags_endpoint(jp_fetch):
     assert payload["data"]["total_entries"] == 1
 
 
+async def test_dags_endpoint_hides_a_retired_dag_id(jp_fetch, monkeypatch, tmp_path):
+    """The manager list is authoritative about a Studio rename, rather than
+    waiting on Airflow (PRD §6.1.8(B)).
+
+    After a keep-history retire the old DAG has no file and is paused, but its
+    DagModel row survives on purpose — that row is the history the user kept — so
+    `GET /dags` keeps returning it for a full `dag_dir_list_interval` (~300 s),
+    and indefinitely when the deploy target is not the folder the dag-processor
+    scans. This endpoint used to pass that straight through, so a rename looked
+    like it had done nothing.
+    """
+    from jupyterlab_airflow.journal import get_journal
+
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_JOURNAL_DIR", str(tmp_path / "journal"))
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path / "dags"))
+    assert get_journal().mark_retired("demo") is True
+
+    response = await jp_fetch("jupyterlab-airflow", "dags")
+
+    data = json.loads(response.body)["data"]
+    assert data["dags"] == []
+    assert data["total_entries"] == 0
+
+
 async def test_operators_endpoint(jp_fetch):
     response = await jp_fetch("jupyterlab-airflow", "operators")
     assert response.code == 200
@@ -685,5 +709,235 @@ async def test_viewer_clear_preview_allowed_real_clear_denied(jp_fetch, monkeypa
             body=json.dumps(
                 {"dag_id": "demo", "dag_run_id": "r1", "task_ids": ["t"], "dry_run": False}
             ),
+        )
+    assert excinfo.value.code == 403
+
+
+# --------------------------------------------------------------------------- #
+# The durable deploy lifecycle (PRD §6.5.4): the deploy envelope, the observe
+# endpoint, the cancel escape hatch, and the pause veto.
+# --------------------------------------------------------------------------- #
+def _envelope(dag_id="ep_dag", retire=None, run_on_deploy=True):
+    return {
+        "ir": _bash_ir(dag_id),
+        "lifecycle": {"retire": retire, "run_on_deploy": run_on_deploy},
+    }
+
+
+async def test_deploy_envelope_journals_the_lifecycle(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST",
+        body=json.dumps(_envelope(retire={"dag_id": "ep_old", "purge": False})),
+    )
+    data = json.loads(resp.body)["data"]
+    assert data["deployed"] is True
+    assert data["lifecycle"]["reconciled"] is True
+    entry = reconciler_on.get(data["correlation_id"])
+    assert entry["retire"] == {"dag_id": "ep_old", "purge": False}
+    # The audit's user is carried onto the entry, so every later reconciler
+    # action is attributed to the human who clicked Deploy.
+    assert entry["user"]
+
+
+async def test_bare_ir_deploy_still_works_and_is_not_journaled(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_bash_ir())
+    )
+    data = json.loads(resp.body)["data"]
+    assert data["deployed"] is True
+    assert data["lifecycle"]["reconciled"] is False
+    assert reconciler_on.list_pending() == []
+
+
+async def test_lifecycle_endpoint_projects_without_leaking(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    deploy = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_envelope())
+    )
+    deploy_id = json.loads(deploy.body)["data"]["correlation_id"]
+
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy/lifecycle", params={"deploy_id": deploy_id}
+    )
+    view = json.loads(resp.body)["data"]
+    assert view["deploy_id"] == deploy_id
+    assert view["dag_id"] == "ep_dag"
+    assert view["phase"] == "awaiting_registration"
+    assert set(view["steps"]) == {
+        "registered", "quiesce", "unpause", "trigger", "retire"
+    }
+    # Read-only and ungated, so it must never become a way to read who deployed
+    # what, from where.
+    assert "user" not in view and "path" not in view and "ir" not in view
+
+
+async def test_lifecycle_endpoint_finds_the_flows_latest_entry(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    # How a reopened editor re-attaches its banner after a page reload.
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    ir = _bash_ir()
+    ir["provenance"] = {"afdag_id": "afd_reopen"}
+    await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST",
+        body=json.dumps({"ir": ir, "lifecycle": {"run_on_deploy": True}}),
+    )
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy/lifecycle", params={"afdag_id": "afd_reopen"}
+    )
+    assert json.loads(resp.body)["data"]["dag_id"] == "ep_dag"
+
+
+async def test_lifecycle_endpoint_returns_null_for_an_unknown_id(jp_fetch, reconciler_on):
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy/lifecycle", params={"deploy_id": "f" * 32}
+    )
+    assert json.loads(resp.body)["data"] is None
+
+
+async def test_cancel_stops_the_server_from_finishing_a_deploy(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    deploy = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_envelope())
+    )
+    deploy_id = json.loads(deploy.body)["data"]["correlation_id"]
+
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy/lifecycle/cancel",
+        method="POST", body=json.dumps({"deploy_id": deploy_id}),
+    )
+    assert json.loads(resp.body)["data"]["cancelled"] is True
+    assert reconciler_on.list_pending() == []
+    assert reconciler_on.get(deploy_id)["outcome"] == "cancelled"
+
+
+async def test_viewer_is_denied_cancel(jp_fetch, monkeypatch, reconciler_on):
+    _as_viewer(monkeypatch)
+    with pytest.raises(HTTPClientError) as excinfo:
+        await jp_fetch(
+            "jupyterlab-airflow", "deploy/lifecycle/cancel",
+            method="POST", body=json.dumps({"deploy_id": "f" * 32}),
+        )
+    assert excinfo.value.code == 403
+
+
+async def test_viewer_deploy_creates_no_journal_entry(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    # The gate runs BEFORE deploy_dag, so a viewer writes no file *and* mints no
+    # work item — which is what makes the reconciler's authority argument hold.
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    _as_viewer(monkeypatch)
+    with pytest.raises(HTTPClientError) as excinfo:
+        await jp_fetch(
+            "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_envelope())
+        )
+    assert excinfo.value.code == 403
+    assert reconciler_on.list_pending() == []
+    assert not list(tmp_path.glob("*.py"))
+
+
+async def test_pausing_a_dag_vetoes_a_pending_unpause(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    # Deliberate user intent beats a deploy still in flight.
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    deploy = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_envelope())
+    )
+    deploy_id = json.loads(deploy.body)["data"]["correlation_id"]
+
+    await jp_fetch(
+        "jupyterlab-airflow", "dags/pause", method="POST",
+        body=json.dumps({"dag_id": "ep_dag", "is_paused": True}),
+    )
+
+    entry = reconciler_on.get(deploy_id)
+    assert entry["steps"]["unpause"]["state"] == "skipped"
+    assert entry["steps"]["trigger"]["state"] == "skipped"
+
+
+async def test_cancel_cannot_be_undone_by_the_sweep_that_holds_the_entry(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    """The escape hatch reported `cancelled: true` while a sweep held the entry,
+    and that sweep's release wrote its stale copy back — the server then went on
+    to retire, unpause and trigger everything the confirmation dialog had just
+    promised would not happen."""
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    deploy = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_envelope())
+    )
+    deploy_id = json.loads(deploy.body)["data"]["correlation_id"]
+
+    # A sweep claims it and stalls inside an Airflow call.
+    claimed = reconciler_on.claim(deploy_id)
+    assert claimed is not None
+
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy/lifecycle/cancel",
+        method="POST", body=json.dumps({"deploy_id": deploy_id}),
+    )
+    data = json.loads(resp.body)["data"]
+    assert data["cancelled"] is True and data["pending_step"] is True
+
+    # The stalled call returns and the sweep releases its (pre-cancel) copy.
+    claimed["phase"] = "unpausing"
+    reconciler_on.release(claimed)
+
+    entry = reconciler_on.get(deploy_id)
+    assert entry["stop_requested"]["outcome"] == "cancelled"
+
+
+async def test_resume_rearms_only_an_expired_deploy(
+    jp_fetch, tmp_path, monkeypatch, reconciler_on
+):
+    monkeypatch.setenv("AIRFLOW_DAGS_DIR", str(tmp_path))
+    deploy = await jp_fetch(
+        "jupyterlab-airflow", "deploy", method="POST", body=json.dumps(_envelope())
+    )
+    deploy_id = json.loads(deploy.body)["data"]["correlation_id"]
+
+    # Still in flight: nothing to re-arm.
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy/lifecycle/resume",
+        method="POST", body=json.dumps({"deploy_id": deploy_id}),
+    )
+    assert json.loads(resp.body)["data"]["resumed"] is False
+
+    # Time it out the way the reconciler would, then re-arm it.
+    entry = reconciler_on.get(deploy_id)
+    entry["steps"]["retire"]["state"] = "skipped"
+    entry["steps"]["retire"]["skipped_reason"] = "the new DAG never registered"
+    entry["message"] = "Airflow did not register ep_dag within the deploy budget."
+    reconciler_on.finish(entry, "expired")
+
+    resp = await jp_fetch(
+        "jupyterlab-airflow", "deploy/lifecycle/resume",
+        method="POST", body=json.dumps({"deploy_id": deploy_id}),
+    )
+    assert json.loads(resp.body)["data"]["resumed"] is True
+    rearmed = reconciler_on.get(deploy_id)
+    assert rearmed["outcome"] is None
+    assert rearmed["steps"]["retire"]["state"] == "pending"
+    assert [e["deploy_id"] for e in reconciler_on.list_pending()] == [deploy_id]
+
+
+async def test_viewer_is_denied_resume(jp_fetch, monkeypatch, reconciler_on):
+    _as_viewer(monkeypatch)
+    with pytest.raises(HTTPClientError) as excinfo:
+        await jp_fetch(
+            "jupyterlab-airflow", "deploy/lifecycle/resume",
+            method="POST", body=json.dumps({"deploy_id": "f" * 32}),
         )
     assert excinfo.value.code == 403

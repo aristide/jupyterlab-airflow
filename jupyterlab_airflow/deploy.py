@@ -13,13 +13,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import tempfile
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
+from .config import AirflowConfig
 from .validation import validate_dag
+
+_log = logging.getLogger(__name__)
 
 # Every Studio-generated file starts with this provenance header; we refuse to
 # overwrite any file that lacks it (it's a hand-written, read-only DAG).
@@ -659,14 +664,26 @@ class S3DeployTarget(DeployTarget):
             self._put(key, existing + sep + "\n".join(missing) + "\n")
 
 
+def deploy_target_kind() -> str:
+    """The configured target as a stable, normalized name (``shared_volume`` /
+    ``git`` / ``s3``). Recorded on a journal entry so the reconciler can refuse to
+    verify a git-written file against an S3 target after a config change."""
+    kind = os.environ.get("AIRFLOW_DEPLOY_TARGET", "shared_volume").strip().lower()
+    if kind in ("git", "git_bundle", "gitdagbundle"):
+        return "git"
+    if kind in ("s3", "s3_bundle", "object_storage"):
+        return "s3"
+    return "shared_volume"
+
+
 def get_deploy_target() -> DeployTarget:
     """The configured deploy target (PRD §6.5.1). ``AIRFLOW_DEPLOY_TARGET`` selects
     ``git`` (the git‑bundle target) or ``s3`` (the object‑storage target); anything
     else (default) is the shared volume."""
-    kind = os.environ.get("AIRFLOW_DEPLOY_TARGET", "shared_volume").strip().lower()
-    if kind in ("git", "git_bundle", "gitdagbundle"):
+    kind = deploy_target_kind()
+    if kind == "git":
         return GitDeployTarget()
-    if kind in ("s3", "s3_bundle", "object_storage"):
+    if kind == "s3":
         return S3DeployTarget()
     return SharedVolumeTarget()
 
@@ -875,6 +892,120 @@ def find_orphans(
     return {"orphans": orphans, "superseded": superseded, "degraded": degraded}
 
 
+def _mark_retired(dag_id: str) -> None:
+    """Remember that Studio retired ``dag_id`` (keep-history), so the manager can
+    stop listing it immediately — see :func:`drop_retired`. Best-effort: an
+    unusable journal degrades the *display*, never the retire itself."""
+    try:
+        from . import journal as journal_mod
+
+        journal_mod.get_journal().mark_retired(dag_id)
+    except Exception:  # noqa: BLE001 - OSError, ImportError, anything
+        _log.debug("could not record the retired dag_id %s", dag_id, exc_info=True)
+
+
+def _clear_retired(dag_id: str) -> None:
+    """Drop the retired marker for a dag_id that is live again (a re-deploy, or a
+    rename back to a previously retired id)."""
+    try:
+        from . import journal as journal_mod
+
+        journal_mod.get_journal().clear_retired(dag_id)
+    except Exception:  # noqa: BLE001
+        _log.debug("could not clear the retired dag_id %s", dag_id, exc_info=True)
+
+
+def drop_retired(
+    listing: Dict[str, Any], target: Optional[DeployTarget] = None
+) -> Dict[str, Any]:
+    """Hide dag_ids Studio has retired but Airflow still lists (PRD §6.1.8(B)).
+
+    A keep-history retire removes `{dag_id}.py` and pauses the DAG; it must not
+    delete the DagModel row, because that row *is* the history the user chose to
+    keep. Airflow therefore keeps returning the old id from ``GET /dags`` until
+    its dag-processor next scans the folder and marks the now-fileless DAG stale
+    — a full ``dag_dir_list_interval`` (~300 s in the shipped compose), and
+    **never** if the deploy target is not the directory that processor scans (a
+    git/S3 bundle whose refresh lags, or an ``AIRFLOW_DAGS_DIR`` mismatch). For
+    that whole window a rename looks like it did nothing: both the old and the new
+    id sit in the manager list. Nothing else can see the state either —
+    ``find_orphans`` joins on files, and the old file is precisely what was just
+    deleted — so the only remedy the UI offered was Delete, which purges the run
+    history the user explicitly asked to keep.
+
+    So the list is made authoritative here instead of waiting on Airflow to
+    agree. Two independent releases keep the suppression honest: a marker is
+    dropped as soon as a `{dag_id}.py` exists again (a re-deploy, a rename back,
+    or a hand-written DAG taking the freed id — in every case the id is live and
+    must be shown), and expires by TTL regardless.
+
+    Never raises: an unusable journal or an unreadable deploy target returns the
+    listing untouched. Showing a stale row is a cosmetic problem; failing the DAG
+    list is not.
+    """
+    try:
+        from . import journal as journal_mod
+
+        dags = listing.get("dags") if isinstance(listing, dict) else None
+        if not isinstance(dags, list):
+            return listing
+        store = journal_mod.get_journal()
+        retired = store.retired_ids()
+        if not retired:
+            return listing
+
+        kept: List[Any] = []
+        hidden = 0
+        for dag in dags:
+            dag_id = str((dag or {}).get("dag_id") or "") if isinstance(dag, dict) else ""
+            if dag_id not in retired:
+                kept.append(dag)
+                continue
+            # Resolved lazily and once: constructing an S3/git target is not free,
+            # and the overwhelmingly common listing has no retired id in it at all.
+            if target is None:
+                target = _safe_target()
+            if _has_deployed_file(dag_id, target):
+                # Live again — the marker is stale, so release it for good.
+                store.clear_retired(dag_id)
+                kept.append(dag)
+                continue
+            hidden += 1
+        if not hidden:
+            return listing
+
+        result = dict(listing)
+        result["dags"] = kept
+        total = listing.get("total_entries")
+        if isinstance(total, int):
+            result["total_entries"] = max(total - hidden, len(kept))
+        return result
+    except Exception:  # noqa: BLE001 - the DAG list must never fail over this
+        _log.debug("could not filter retired dag_ids out of the listing", exc_info=True)
+        return listing
+
+
+def _safe_target() -> Optional[DeployTarget]:
+    """The configured target, or ``None`` when it cannot even be constructed
+    (misconfigured bucket, missing git repo). Used only by the display path."""
+    try:
+        return get_deploy_target()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _has_deployed_file(dag_id: str, target: Optional[DeployTarget]) -> bool:
+    """Is there a deployed `.py` for ``dag_id`` again? An unreadable target
+    answers *no*: the marker records something Studio definitely did, and a
+    transient read failure is not evidence against it (the TTL still bounds it)."""
+    if target is None:
+        return False
+    try:
+        return bool(target.exists(_safe_filename(dag_id)))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _collision_errors(
     ir: Dict[str, Any], dag_id: str, target: DeployTarget
 ) -> List[str]:
@@ -958,16 +1089,151 @@ def _collision_errors(
     return errors
 
 
-def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dict[str, Any]:
+def deploy_run_id(deploy_id: str) -> str:
+    """The deterministic run id a deploy's run-on-deploy trigger uses.
+
+    Computed from the deploy id at journal time, **not** at trigger time: that is
+    what makes the trigger exactly-once across a crash and across processes —
+    Airflow answers 409 for a duplicate ``dag_run_id``, which the reconciler
+    reads as "this deploy already triggered". The ``studio__`` prefix is reserved
+    for Studio-created runs.
+    """
+    return f"studio__{deploy_id}"
+
+
+def _journal_deploy(
+    correlation_id: str,
+    dag_id: str,
+    filename: str,
+    ir: Dict[str, Any],
+    lifecycle: Dict[str, Any],
+    requested_by: str,
+    target: DeployTarget,
+) -> None:
+    """Record the deploy's remaining lifecycle so the SERVER can finish it.
+
+    Called only from :func:`deploy_dag`, i.e. only behind the role gate in
+    ``_AirflowHandler.respond`` — see ``journal.Journal.put`` for why that
+    invariant is what makes the reconciler's authorization argument valid.
+    """
+    from . import journal as journal_mod
+    from .config import studio_role
+    from .reconciler import deploy_budget_s
+
+    afdag_id = str(((ir.get("provenance") or {}).get("afdag_id") or "")).strip()
+    store = journal_mod.get_journal()
+
+    # Every dag_id this deploy owes a retire for, primary first. A *queue*, not a
+    # slot: renaming again while the first deploy is still awaiting registration
+    # (Airflow takes ~300 s) used to drop the first intent with nothing but a log
+    # line, leaving the original dag_id deployed, registered and — since the
+    # retire is what would have paused it — UNPAUSED beside the new one.
+    intents: List[Dict[str, Any]] = []
+    queued: Set[str] = set()
+
+    def _queue(intent: Optional[Dict[str, Any]], source: str) -> None:
+        if not isinstance(intent, dict):
+            return
+        retire_id = str(intent.get("dag_id") or "")
+        if not retire_id or retire_id in queued:
+            return
+        queued.add(retire_id)
+        intents.append({"dag_id": retire_id, "purge": bool(intent.get("purge"))})
+        if source:
+            _log.info(
+                "deploy %s: inherited a pending retire of %r from %s",
+                correlation_id, retire_id, source,
+            )
+
+    _queue(lifecycle.get("retire"), "")
+
+    # A re-deploy of the same flow makes any older entry meaningless. Finish them
+    # first, then inherit their unfinished retire intents.
+    superseded = store.supersede(
+        dag_id=dag_id, afdag_id=afdag_id, except_deploy_id=correlation_id
+    )
+    for old in superseded:
+        if old["steps"]["retire"]["state"] != "pending":
+            continue
+        for inherited in journal_mod.retire_intents(old):
+            _queue(inherited, f"superseded deploy {old['deploy_id']}")
+
+    # `supersede` only scans OPEN entries, so a rename whose deploy ran out of
+    # budget left its (never-performed) retire intent in a terminal entry that
+    # nothing could pick up again — and `reopen_expired` then refused to re-arm
+    # it precisely because this deploy exists. Adopt it here instead: a later
+    # deploy of the same flow is the one moment that intent is both still owed
+    # and safely performable.
+    orphaned = store.orphaned_retires(afdag_id=afdag_id, dag_id=dag_id)
+    for old in orphaned:
+        for inherited in journal_mod.retire_intents(old):
+            _queue(inherited, f"expired deploy {old['deploy_id']}")
+
+    now = journal_mod.utcnow()
+    budget = timedelta(seconds=deploy_budget_s())
+    deadline = journal_mod.iso(now + budget)
+    entry = {
+        "version": journal_mod.JOURNAL_VERSION,
+        "deploy_id": correlation_id,
+        "created_at": journal_mod.iso(now),
+        "updated_at": journal_mod.iso(now),
+        "deadline_at": deadline,
+        "action_deadline_at": deadline,
+        "next_attempt_at": journal_mod.iso(now),
+        "polls": 0,
+        "user": requested_by or "unknown",
+        "role_at_deploy": studio_role(),
+        "dag_id": dag_id,
+        "filename": filename,
+        "afdag_id": afdag_id,
+        # Recorded so the reconciler can tell that it woke up pointed at a
+        # DIFFERENT Airflow / a different deploy target than the one deployed to.
+        "airflow_base_url": AirflowConfig.from_env().base_url,
+        "target_kind": deploy_target_kind(),
+        "run_id": deploy_run_id(correlation_id),
+        "run_on_deploy": bool(lifecycle.get("run_on_deploy", True)),
+        "retire": intents[0] if intents else None,
+        "retire_also": intents[1:],
+        "phase": "awaiting_registration",
+        "steps": journal_mod.new_steps(),
+        "outcome": None,
+        "import_error": None,
+        "message": f"Waiting for Airflow to pick up {filename}…",
+        "terminal_at": None,
+    }
+    store.put(entry)
+    # Only AFTER the new entry is durable. If `put` raised, the stranded intent
+    # stays claimable by the next deploy instead of vanishing with this one;
+    # inheriting it twice, on the other hand, is harmless (retire is idempotent
+    # and ownership-guarded).
+    for old in orphaned:
+        store.consume_orphaned_retire(old["deploy_id"])
+
+
+def deploy_dag(
+    ir: Dict[str, Any],
+    target: Optional[DeployTarget] = None,
+    *,
+    requested_by: str = "",
+    lifecycle: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Validate, then atomically write the generated DAG to the dags folder.
 
-    Returns ``{deployed, path?, filename?, dag_id, correlation_id, warnings,
-    errors, dagbag}``. Does not write when validation fails. The
+    Returns ``{deployed, path?, filename?, dag_id, correlation_id, lifecycle?,
+    warnings, errors, dagbag}``. Does not write when validation fails. The
     ``correlation_id`` (a per-deploy id) is stamped into the written `.py`
     provenance header and returned so the deploy's audit record carries the same
     id — tracing a deployed DAG (and a later import error) back to the deploy
     session (§8.9 / §10). It is returned on every path (incl. a refusal) so the
     audit always has a trace id, even when nothing is written.
+
+    ``lifecycle`` (``{retire: {dag_id, purge} | None, run_on_deploy: bool}``) is
+    what the *editor* would otherwise have performed after the write. When it is
+    given, the remaining steps are journaled and the server finishes them even if
+    the tab closes. **``lifecycle=None`` writes no journal entry** — that is a
+    pre-envelope client (a browser tab left open across a server upgrade), and it
+    is still performing those steps itself; journaling would give the deploy two
+    performers instead of one.
     """
     target = target or get_deploy_target()
     dag_id = (ir.get("dag") or {}).get("dag_id", "")
@@ -1067,6 +1333,38 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
     # Stamp the body hash (drift detection, §6.5.3) + the per-deploy
     # correlation_id (audit↔provenance trace loop, §8.9/§10) into the header.
     path = target.write(filename, _stamp_code_hash(result["code"], correlation_id))
+    # This dag_id is live again, so it must never stay hidden from the manager —
+    # a rename BACK to a retired id, or a re-deploy of one, releases the marker.
+    _clear_retired(dag_id)
+    # Journaling is the LITERAL next statement after the write, and never before
+    # it: an entry with no file on disk would poll Airflow for the whole budget,
+    # while the residue of this sub-millisecond window is a file with no entry —
+    # which `find_orphans()` already reports as `superseded`.
+    lifecycle_out = {
+        "deploy_id": correlation_id,
+        "reconciled": False,
+        "run_id": deploy_run_id(correlation_id),
+    }
+    if lifecycle is not None:
+        from . import reconciler
+
+        if reconciler.is_enabled():
+            try:
+                _journal_deploy(
+                    correlation_id, dag_id, filename, ir, lifecycle, requested_by, target
+                )
+                lifecycle_out["reconciled"] = True
+                rec = reconciler.get_reconciler()
+                if rec is not None:
+                    rec.wake()
+            except Exception as err:  # noqa: BLE001 - OSError, ValueError, anything
+                # Never a deploy failure: the file is already on disk. The client
+                # is told durability is off for this deploy and performs instead.
+                warnings.append(
+                    "This deploy could not be journaled, so it will not be "
+                    f"completed automatically if you close this tab ({err}). "
+                    "The editor will drive the remaining steps instead."
+                )
 
     return {
         "deployed": True,
@@ -1074,6 +1372,7 @@ def deploy_dag(ir: Dict[str, Any], target: Optional[DeployTarget] = None) -> Dic
         "filename": filename,
         "dag_id": dag_id,
         "correlation_id": correlation_id,
+        "lifecycle": lifecycle_out,
         "backed_up": backed_up,
         "variables": synced,
         "connections": synced_connections,
@@ -1187,8 +1486,67 @@ def rename_preflight(dag_id: str, target: Optional[DeployTarget] = None) -> Dict
     }
 
 
+def _retire_ownership_block(
+    dag_id: str, target: DeployTarget, expect_afdag_id: str
+) -> Optional[str]:
+    """Why a retire of ``dag_id`` must NOT proceed, or ``None`` when it may.
+
+    The hazard a background retire introduces is not double-execution (retiring
+    twice is harmless) — it is retiring the **wrong** DAG. Flow A is renamed
+    ``old → new`` and a retire of ``old`` is queued; before it runs, someone
+    deploys a *different* `.afdag` that takes the now-free ``old``. Without this
+    check the queued retire deletes a stranger's freshly deployed file. The pause
+    is refused along with the delete: pausing a stranger's live DAG is as bad.
+
+    An unreadable target is ambiguity, and ambiguity fails closed — a skipped
+    retire is recoverable from the manager, a wrong one is not.
+
+    "Unattributable" is not the same as "someone else's", and conflating the two
+    breaks in both directions:
+
+    * The old file's header may predate ``afdag_id`` (added in the rename-migration
+      change) or may have been written from a pre-provenance `.afdag`. Refusing
+      there strands every such rename with a message that falsely blames another
+      flow. ``find_orphans`` / ``_collision_errors`` already treat a missing
+      ``afdag_id`` as *unattributable* rather than *foreign*; so does this.
+    * Symmetrically, ``expect_afdag_id`` may itself be empty. That is a reason to
+      be **stricter**, not to wave the check through: if the deployed file names
+      a real owner, that owner is demonstrably not this flow.
+
+    Only a *matched* pair of identities, or a pair where neither side has one,
+    licenses the retire. The ``MANAGED_PREFIX`` still has to be there either way:
+    a file Studio did not write is never deleted.
+    """
+    filename = f"{dag_id}.py"
+    try:
+        if not target.exists(filename):
+            # No file to protect. The DAG may still be registered, so the pause
+            # is still the right action for the id we are retiring.
+            return None
+        header = _parse_header(target.read(filename))
+    except (DeployError, OSError) as err:
+        return f"could not verify who owns {filename} ({err})"
+    if header is None:
+        return f"{filename} is not managed by Studio"
+    owner = str(header.get("afdag_id") or "").strip()
+    expect = str(expect_afdag_id or "").strip()
+    if owner and expect and owner != expect:
+        return "file now owned by another flow"
+    if owner and not expect:
+        return (
+            "this flow has no ownership provenance and the file now names a "
+            "different owner"
+        )
+    return None
+
+
 def retire_old_dag(
-    dag_id: str, *, purge: bool, target: Optional[DeployTarget] = None
+    dag_id: str,
+    *,
+    purge: bool,
+    target: Optional[DeployTarget] = None,
+    expect_afdag_id: Optional[str] = None,
+    verify_ownership: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Reconcile the OLD DAG after a `dag_id` rename migration (PRD §6.1.8(B)).
 
@@ -1198,15 +1556,38 @@ def retire_old_dag(
       the now-fileless/stale DAG, **keeping** its run history.
 
     Tolerant of a missing file / a DAG Airflow never recorded (404).
+
+    ``verify_ownership`` turns on the guard that makes a *delayed* retire safe:
+    the deployed file must still belong to ``expect_afdag_id``, or nothing is
+    touched and ``skipped_reason`` says why (see :func:`_retire_ownership_block`).
+    It is a **tri-state on purpose** — "no check requested" (the editor's own
+    immediate retire, which the user is watching) must not be expressible by the
+    same value as "check requested but this flow has no identity", or the guard
+    silently disables itself for exactly the flows it protects least well. It
+    defaults to ``expect_afdag_id is not None`` so existing callers keep their
+    behaviour.
     """
+    target = target or get_deploy_target()
+    if verify_ownership is None:
+        verify_ownership = expect_afdag_id is not None
+    if verify_ownership:
+        blocked = _retire_ownership_block(dag_id, target, str(expect_afdag_id or ""))
+        if blocked:
+            return {
+                "dag_id": dag_id,
+                "removed_file": False,
+                "paused": False,
+                "purged_history": False,
+                "removed_variables": [],
+                "skipped_reason": blocked,
+            }
     if purge:
         return purge_dag(dag_id, target)
 
-    from . import connections as connections_mod
+    from . import connections as connections_mod  # noqa: F401
     from . import variables as variables_mod
     from .client import AirflowError, get_client
 
-    target = target or get_deploy_target()
     filename = f"{dag_id}.py"
     removed_file = False
     try:
@@ -1232,6 +1613,13 @@ def retire_old_dag(
     # make that deploy fail the "key already exists, owned by another flow" gate.
     # The old `.py` is gone, so the retired DAG can no longer read them anyway.
     removed_variables = variables_mod.purge(dag_id)
+
+    # Keeping the history means keeping the DagModel row, and Airflow goes on
+    # listing that row until its dag-processor next scans the folder and marks the
+    # now-fileless DAG stale (~300 s, and never at all when the deploy target is
+    # not what that processor scans). Record the retire so the manager list can
+    # drop the id straight away instead — see `drop_retired`.
+    _mark_retired(dag_id)
 
     return {
         "dag_id": dag_id,

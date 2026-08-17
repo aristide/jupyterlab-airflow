@@ -4,7 +4,13 @@ Records **who did what to which DAG** — even before full per-user identity lan
 (§9). Every mutating server action (deploy / trigger / pause / stop-run / clear /
 delete / rollback / retire) emits one structured record::
 
-    {ts, user, action, dag_id, correlation_id, outcome, detail?}
+    {ts, user, action, dag_id, correlation_id, outcome, via, detail?}
+
+``via`` is ``"request"`` (a human clicked something) or ``"reconciler"`` (the
+server finished a deploy's lifecycle in the background — PRD §6.5.4). It is
+additive: its absence in an older log line means the request path. ``user`` is
+the human who initiated the work in **both** cases — the reconciler is a
+mechanism, not a principal, and "the server did it" is not an answer to *who*.
 
 to a dedicated ``jupyterlab_airflow.audit`` logger as a single JSON line, so the
 action is attributable and a failed import can be traced back to a Studio session
@@ -59,6 +65,7 @@ def audit_event(
     dag_id: Optional[str] = None,
     outcome: str = "ok",
     detail: Optional[str] = None,
+    via: str = "request",
 ) -> Dict[str, Any]:
     """Emit one audit record for a mutating action and return it.
 
@@ -68,6 +75,12 @@ def audit_event(
     a view-only role attempting a privileged action, PRD §9), or ``"error"``
     (it raised); ``detail`` carries a short error/reason message for
     rejected/denied/error (never the request body).
+
+    ``via`` names the *actor path* — ``"request"`` or ``"reconciler"``. It is a
+    structured field rather than a ``detail`` prefix on purpose: a SIEM can then
+    filter/alert on background-completed actions with a query instead of
+    string-matching a message, and ``detail`` keeps meaning only "why".
+
     The record is logged as a single JSON line at ``INFO`` on the
     ``jupyterlab_airflow.audit`` logger.
     """
@@ -78,6 +91,7 @@ def audit_event(
         "dag_id": dag_id,
         "correlation_id": correlation_id,
         "outcome": outcome,
+        "via": via,
     }
     if detail is not None:
         # Trim so a long traceback/message can't bloat the line.

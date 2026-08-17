@@ -11,6 +11,7 @@ from jupyterlab_airflow.deploy import (
     DeployError,
     SharedVolumeTarget,
     deploy_dag,
+    drop_retired,
     find_orphans,
     find_source_path,
     is_drifted,
@@ -196,6 +197,20 @@ class _FakeClient:
             raise AirflowError("not found", status=404)
         return {"dag_id": dag_id}
 
+    # The provider-availability gate runs on every deploy; answering it here
+    # keeps a test that deploys through this fake independent of whether some
+    # earlier test happened to populate the process-wide provider cache.
+    def list_providers(self, limit=1000):
+        return {
+            "providers": [
+                {"package_name": "apache-airflow-providers-standard", "version": "1.0"}
+            ],
+            "total_entries": 1,
+        }
+
+    def version(self):
+        return {"version": "3.0.2", "git_version": "abc"}
+
     def list_dag_runs(self, dag_id, limit=10):
         return {"dag_runs": self._runs}
 
@@ -330,6 +345,107 @@ def test_retire_old_dag_purge(monkeypatch, tmp_path):
     assert out["purged_history"] is True
     assert fake.deleted == ["gone_dag"]
     assert not (tmp_path / "gone_dag.py").exists()
+
+
+# -- a retired dag_id leaves the manager list at once (PRD §6.1.8(B)) --------
+
+
+def _retired_listing():
+    return {"dags": [{"dag_id": "hello"}, {"dag_id": "helloo"}], "total_entries": 2}
+
+
+def test_a_keep_history_retire_hides_the_old_dag_id_from_the_list(
+    tmp_path, journaling, monkeypatch
+):
+    """Rename `hello` → `helloo` and keep the history: only `helloo` may be listed.
+
+    A keep-history retire deletes the `.py` and pauses the DAG, but it must NOT
+    delete the DagModel row — that row *is* the history the user chose to keep.
+    So Airflow goes on returning BOTH ids from `GET /dags` until its dag-processor
+    next scans the folder and marks the now-fileless DAG stale: a full
+    `dag_dir_list_interval` (~300 s in the shipped compose), and **never** when
+    the deploy target is not the folder that processor scans. The state was
+    invisible to every safety net too — `find_orphans` joins on the deployed file,
+    which is exactly what the retire just removed — leaving Delete (which purges
+    the history) as the only remedy in the UI.
+    """
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    target.write("hello.py", f"{MANAGED_PREFIX}  dag_id=hello\nx = 1\n")
+    assert drop_retired(_retired_listing(), target) == _retired_listing()
+
+    retire_old_dag("hello", purge=False, target=target)
+
+    filtered = drop_retired(_retired_listing(), target)
+    assert [dag["dag_id"] for dag in filtered["dags"]] == ["helloo"]
+    assert filtered["total_entries"] == 1
+    # …and the history really is kept: the row was never deleted, only paused.
+    assert fake.deleted == []
+    assert fake.paused == [("hello", True)]
+
+
+def test_a_redeployed_dag_id_is_listed_again(tmp_path, journaling, monkeypatch):
+    """The suppression can never outlive its cause: deploying that id again — a
+    rename back to it, or a new flow claiming the freed name — releases it."""
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    target.write("hello.py", f"{MANAGED_PREFIX}  dag_id=hello\nx = 1\n")
+    retire_old_dag("hello", purge=False, target=target)
+    assert journaling.retired_ids() == {"hello"}
+
+    assert deploy_dag(_ir("hello"), target=target)["deployed"] is True
+
+    assert journaling.retired_ids() == set()
+    assert len(drop_retired(_retired_listing(), target)["dags"]) == 2
+
+
+def test_a_marker_is_released_when_a_file_takes_the_id_again(
+    tmp_path, journaling, monkeypatch
+):
+    """Second, independent release: a `{dag_id}.py` exists again (restored from a
+    backup, pushed by git, hand-written). The id is live, so it is shown — and the
+    stale marker is dropped rather than re-tested on every poll."""
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    target.write("hello.py", f"{MANAGED_PREFIX}  dag_id=hello\nx = 1\n")
+    retire_old_dag("hello", purge=False, target=target)
+    target.write("hello.py", f"{MANAGED_PREFIX}  dag_id=hello\nx = 2\n")
+
+    assert len(drop_retired(_retired_listing(), target)["dags"]) == 2
+    assert journaling.retired_ids() == set()
+
+
+def test_an_expired_marker_stops_hiding_the_dag_id(tmp_path, journaling, monkeypatch):
+    """The TTL backstop: even if every release path failed, a marker cannot hide
+    a dag_id forever."""
+    from datetime import timedelta
+
+    from jupyterlab_airflow.journal import utcnow
+
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    journaling.mark_retired("hello", now=utcnow() - timedelta(days=2))
+
+    assert len(drop_retired(_retired_listing(), target)["dags"]) == 2
+    assert journaling.retired_ids() == set()  # and the marker is gone
+
+
+def test_a_purge_does_not_need_a_marker(tmp_path, journaling, monkeypatch):
+    """`purge=True` deletes the DagModel row itself, so Airflow stops listing the
+    id immediately — no suppression needed, and none is recorded."""
+    fake = _FakeClient()
+    monkeypatch.setattr("jupyterlab_airflow.client.get_client", lambda: fake)
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    target.write("hello.py", f"{MANAGED_PREFIX}  dag_id=hello\nx = 1\n")
+
+    retire_old_dag("hello", purge=True, target=target)
+
+    assert fake.deleted == ["hello"]
+    assert journaling.retired_ids() == set()
 
 
 # -- out-of-band drift detection (PRD §6.5.3) -------------------------------
@@ -1128,3 +1244,202 @@ def test_rejected_deploy_returns_correlation_id_without_writing(tmp_path):
     assert res["deployed"] is False
     assert _re.fullmatch(r"[0-9a-f]{32}", res["correlation_id"])
     assert not list(tmp_path.glob("*.py"))
+
+
+# --------------------------------------------------------------------------- #
+# The durable deploy lifecycle (PRD §6.5.4): a deploy journals the work the
+# editor used to perform, so the server can finish it after the tab closes.
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def journaling(monkeypatch, tmp_path):
+    """Turn journaling on for one test, into its own directory."""
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_RECONCILER", "on")
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_JOURNAL_DIR", str(tmp_path / "journal"))
+    from jupyterlab_airflow.journal import get_journal
+
+    return get_journal()
+
+
+_LIFECYCLE = {"retire": None, "run_on_deploy": True}
+
+
+def test_a_deploy_journals_its_remaining_lifecycle(tmp_path, journaling):
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    res = deploy_dag(_ir("jrn_dag"), target=target, requested_by="aristide",
+                     lifecycle={"retire": {"dag_id": "jrn_old", "purge": False},
+                                "run_on_deploy": True})
+    assert res["deployed"] is True
+    assert res["lifecycle"]["reconciled"] is True
+    entry = journaling.get(res["correlation_id"])
+    # One id ties the entry, the response, the audit record and the `.py` header.
+    assert entry["deploy_id"] == res["correlation_id"] == res["lifecycle"]["deploy_id"]
+    assert entry["run_id"] == f"studio__{res['correlation_id']}" == res["lifecycle"]["run_id"]
+    assert entry["retire"] == {"dag_id": "jrn_old", "purge": False}
+    assert entry["user"] == "aristide" and entry["role_at_deploy"] == "editor"
+    assert entry["phase"] == "awaiting_registration"
+
+
+def test_a_failed_write_leaves_no_journal_entry(tmp_path, journaling, monkeypatch):
+    # Write-then-journal: the entry can never describe a file that isn't there.
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+
+    def _boom(filename, content):
+        raise DeployError("disk on fire")
+
+    monkeypatch.setattr(target, "write", _boom)
+    with pytest.raises(DeployError):
+        deploy_dag(_ir("jrn_fail"), target=target, lifecycle=_LIFECYCLE)
+    assert journaling.list_pending() == []
+
+
+def test_a_bare_ir_client_is_never_journaled(tmp_path, journaling):
+    # A browser tab from before the server upgrade still performs the steps
+    # itself; journaling would give one deploy two performers.
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    res = deploy_dag(_ir("jrn_legacy"), target=target)  # lifecycle=None
+    assert res["deployed"] is True
+    assert res["lifecycle"]["reconciled"] is False
+    assert journaling.list_pending() == []
+
+
+def test_the_kill_switch_disables_journaling(tmp_path, journaling, monkeypatch):
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_RECONCILER", "off")
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    res = deploy_dag(_ir("jrn_off"), target=target, lifecycle=_LIFECYCLE)
+    assert res["deployed"] is True
+    assert res["lifecycle"]["reconciled"] is False
+    assert journaling.list_pending() == []
+
+
+def test_an_unwritable_journal_warns_but_never_fails_the_deploy(tmp_path, monkeypatch):
+    # Degradation is always to yesterday's behaviour, never to a lost deploy.
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_RECONCILER", "on")
+    monkeypatch.setenv("JUPYTERLAB_AIRFLOW_JOURNAL_DIR", str(tmp_path / "journal"))
+    from jupyterlab_airflow import journal as journal_mod
+
+    def _boom(entry):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(journal_mod.Journal, "put", _boom)
+    target = SharedVolumeTarget(str(tmp_path / "dags"))
+    res = deploy_dag(_ir("jrn_ro"), target=target, lifecycle=_LIFECYCLE)
+    assert res["deployed"] is True
+    assert res["lifecycle"]["reconciled"] is False
+    assert any("could not be journaled" in w for w in res["warnings"])
+
+
+def test_retire_with_expect_afdag_id_skips_a_stranger(tmp_path, monkeypatch):
+    # The guard that makes a DELAYED retire safe: the dag_id was freed by a
+    # rename and taken by another flow before the retire ran.
+    from jupyterlab_airflow import client as client_module
+
+    calls = []
+
+    class _Client:
+        def set_paused(self, dag_id, is_paused):
+            calls.append((dag_id, is_paused))
+            return {}
+
+    monkeypatch.setattr(client_module, "get_client", lambda: _Client())
+    target = SharedVolumeTarget(str(tmp_path))
+    stranger = f"{MANAGED_PREFIX}  dag_id=old_dag  afdag_id=afd_them\nx = 1\n"
+    target.write("old_dag.py", stranger)
+
+    res = retire_old_dag("old_dag", purge=False, target=target, expect_afdag_id="afd_us")
+
+    assert res["skipped_reason"] == "file now owned by another flow"
+    assert (tmp_path / "old_dag.py").read_text() == stranger  # not deleted
+    assert calls == []  # and not paused either
+
+
+def _retire_client(monkeypatch, calls):
+    from jupyterlab_airflow import client as client_module
+
+    class _Client:
+        def set_paused(self, dag_id, is_paused):
+            calls.append(("set_paused", dag_id, is_paused))
+            return {}
+
+        def delete_dag(self, dag_id):
+            calls.append(("delete_dag", dag_id))
+            return {}
+
+        def list_variables(self, limit=1000, offset=0, key_pattern=None):
+            return {"variables": [], "total_entries": 0}
+
+        def list_connections(self, limit=1000, offset=0):
+            return {"connections": [], "total_entries": 0}
+
+    monkeypatch.setattr(client_module, "get_client", lambda: _Client())
+    return calls
+
+
+def test_retire_allows_a_file_whose_header_predates_afdag_id(tmp_path, monkeypatch):
+    """`afdag_id=` was only added to the generated header by the rename-migration
+    change. A DAG deployed before that has a header without the token, and the
+    ownership guard used to read that as "another flow owns it" — refusing the
+    retire (delete AND pause) and telling the user a file that was theirs all
+    along belonged to someone else. Unattributable is not foreign.
+    """
+    calls = _retire_client(monkeypatch, [])
+    target = SharedVolumeTarget(str(tmp_path))
+    legacy = f"{MANAGED_PREFIX}  studio=0.1.0  dag_id=old_dag  syntax=taskflow\nx = 1\n"
+    target.write("old_dag.py", legacy)
+
+    res = retire_old_dag(
+        "old_dag", purge=False, target=target, expect_afdag_id="afd_us",
+        verify_ownership=True,
+    )
+
+    assert res.get("skipped_reason") is None
+    assert res["removed_file"] is True and res["paused"] is True
+    assert not (tmp_path / "old_dag.py").exists()
+
+
+def test_retire_refuses_an_unknown_owner_when_this_flow_has_no_identity(tmp_path, monkeypatch):
+    """The symmetric case: `expect_afdag_id` is empty (a pre-provenance `.afdag`).
+    Passing `None` there used to disable the guard entirely, so a delayed retire
+    could delete and purge a DIFFERENT flow's freshly deployed DAG. An unknown
+    identity is a reason to check harder, not to stop checking.
+    """
+    calls = _retire_client(monkeypatch, [])
+    target = SharedVolumeTarget(str(tmp_path))
+    stranger = f"{MANAGED_PREFIX}  dag_id=old_dag  afdag_id=afd_them\nx = 1\n"
+    target.write("old_dag.py", stranger)
+
+    res = retire_old_dag(
+        "old_dag", purge=True, target=target, expect_afdag_id="", verify_ownership=True
+    )
+
+    assert res["skipped_reason"]
+    assert (tmp_path / "old_dag.py").read_text() == stranger
+    assert calls == []  # not deleted from Airflow, not paused
+
+
+def test_retire_refuses_a_file_studio_did_not_write(tmp_path, monkeypatch):
+    calls = _retire_client(monkeypatch, [])
+    target = SharedVolumeTarget(str(tmp_path))
+    (tmp_path / "old_dag.py").write_text("# hand written\nx = 1\n", encoding="utf-8")
+
+    res = retire_old_dag(
+        "old_dag", purge=False, target=target, expect_afdag_id="afd_us",
+        verify_ownership=True,
+    )
+
+    assert "not managed by Studio" in res["skipped_reason"]
+    assert (tmp_path / "old_dag.py").exists()
+    assert calls == []
+
+
+def test_retire_without_a_verification_request_keeps_its_old_behaviour(tmp_path, monkeypatch):
+    # The editor's own immediate retire (the user is watching it) asks for no
+    # ownership check — the tri-state keeps that distinct from "check requested,
+    # identity unknown".
+    calls = _retire_client(monkeypatch, [])
+    target = SharedVolumeTarget(str(tmp_path))
+    target.write("old_dag.py", f"{MANAGED_PREFIX}  dag_id=old_dag  afdag_id=afd_them\nx = 1\n")
+
+    res = retire_old_dag("old_dag", purge=False, target=target)
+
+    assert res.get("skipped_reason") is None
+    assert res["removed_file"] is True
