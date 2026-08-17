@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -36,6 +38,119 @@ from typing import Any, Dict, Optional
 AUDIT_LOGGER_NAME = "jupyterlab_airflow.audit"
 
 _logger = logging.getLogger(AUDIT_LOGGER_NAME)
+
+#: Where the trail is written. A path, or ``off`` to write no file (for a
+#: deployment that routes the logger itself).
+ENV_AUDIT_LOG = "JUPYTERLAB_AIRFLOW_AUDIT_LOG"
+#: Rotation. An audit file that grows without bound is its own incident.
+ENV_AUDIT_MAX_BYTES = "JUPYTERLAB_AIRFLOW_AUDIT_MAX_BYTES"
+ENV_AUDIT_BACKUPS = "JUPYTERLAB_AIRFLOW_AUDIT_BACKUPS"
+DEFAULT_MAX_BYTES = 5 * 1024 * 1024
+DEFAULT_BACKUPS = 5
+
+#: Marks the handler as ours, so a re-load is idempotent and an operator's own
+#: handlers are recognisably not ours.
+_OWNED = "_jupyterlab_airflow_audit"
+
+
+def audit_path(data_dir: Optional[str] = None) -> Optional[str]:
+    """The audit file's path, or ``None`` when file output is switched off."""
+    raw = os.environ.get(ENV_AUDIT_LOG, "").strip()
+    if raw.lower() in ("off", "0", "false", "none"):
+        return None
+    if raw:
+        return os.path.abspath(raw)
+    base = data_dir
+    if not base:
+        from jupyter_core.paths import jupyter_data_dir
+
+        base = jupyter_data_dir()
+    return os.path.join(base, "airflow-studio", "audit.log")
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, "").strip())
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def configure(server_app: Any = None) -> Optional[str]:
+    """Give the audit trail somewhere to actually land. Returns the path, if any.
+
+    This exists because the trail was previously **inert by default**. The
+    records were emitted correctly, but ``jupyterlab_airflow.audit`` sits at
+    ``NOTSET`` under a root logger that Jupyter leaves at ``WARNING`` with no
+    handlers, so every ``INFO`` record was discarded. Nothing warned about it:
+    the feature looked present, the tests passed (their fixture attaches its own
+    handler), and an operator would only discover the gap when they went looking
+    for a record that was never written — which is the worst possible moment.
+
+    Two rules keep this from fighting a deployment that *has* configured the
+    logger:
+
+    * If handlers are already attached, we add none of our own. That is an
+      operator routing the trail to their SIEM, and duplicating it into a file
+      they did not ask for is not our call.
+    * The level is only raised when it is ``NOTSET``. An explicit level is a
+      decision; ``NOTSET`` is just the default that made handlers useless.
+    """
+    log = getattr(server_app, "log", None) or logging.getLogger(__name__)
+
+    # `NOTSET` here means "nobody chose", and inheriting WARNING from root is
+    # what silently dropped every record. An explicit choice is left alone.
+    if _logger.level == logging.NOTSET:
+        _logger.setLevel(logging.INFO)
+
+    existing = list(_logger.handlers)
+    if any(getattr(h, _OWNED, False) for h in existing):
+        return getattr(next(h for h in existing if getattr(h, _OWNED, False)),
+                       "baseFilename", None)
+    if existing:
+        log.info(
+            "audit: %s already has handlers — leaving routing to them",
+            AUDIT_LOGGER_NAME,
+        )
+        return None
+
+    path = audit_path(getattr(server_app, "data_dir", None))
+    if path is None:
+        log.info("audit: file output disabled (%s)", ENV_AUDIT_LOG)
+        return None
+
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        # Create it ourselves, at 0600, BEFORE the handler opens it. Letting the
+        # handler create it would apply the process umask — typically 0644 — and
+        # a chmod afterwards still leaves a window where a file naming users and
+        # their actions is world-readable. `delay` is therefore off: the file
+        # must exist by the time we return, and an empty audit.log is a useful
+        # signal in its own right that the trail is armed.
+        os.close(os.open(path, os.O_CREAT | os.O_APPEND, 0o600))
+        handler = logging.handlers.RotatingFileHandler(
+            path,
+            maxBytes=_env_int(ENV_AUDIT_MAX_BYTES, DEFAULT_MAX_BYTES),
+            backupCount=_env_int(ENV_AUDIT_BACKUPS, DEFAULT_BACKUPS),
+            encoding="utf-8",
+        )
+        # The record is already a complete JSON object; a prefix would make the
+        # file no longer parseable line-by-line, which is the one property a
+        # downstream consumer needs.
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.setLevel(logging.INFO)
+        setattr(handler, _OWNED, True)
+        _logger.addHandler(handler)
+    except OSError as err:
+        # An unwritable audit path must not stop the server from starting; it
+        # must, however, be loud, because "no records" now means "not recorded"
+        # rather than "nothing happened".
+        log.warning("audit: could not open %s (%s) — the trail is NOT being "
+                    "written; set %s to a writable path", path, err, ENV_AUDIT_LOG)
+        return None
+
+    log.info("audit trail → %s", path)
+    return path
 
 # The mutating actions we audit (a closed vocabulary so the trail is consistent).
 ACTIONS = frozenset(

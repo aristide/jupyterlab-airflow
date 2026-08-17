@@ -129,6 +129,26 @@ To point the extension at a **remote** Airflow instead, disable the `airflow`
 profile and override these variables (e.g. set `AIRFLOW_API_TOKEN` to a
 pre-minted JWT).
 
+## Audit trail
+
+Every mutating action — deploy, trigger, pause, stop-run, clear, delete, rollback, retire, and Variable/Connection writes — is written as one JSON object per line to:
+
+```
+<jupyter data dir>/airflow-studio/audit.log      # in this container: /root/.local/share/jupyter/...
+```
+
+The server prints the resolved path at startup (`audit trail → …`). Tail it with:
+
+```bash
+docker compose exec jupyter tail -f /root/.local/share/jupyter/airflow-studio/audit.log
+```
+
+Each record carries `{ts, user, action, dag_id, correlation_id, outcome, via}`. `via` is `request` (a human clicked something) or `reconciler` (the server finished a deploy's lifecycle in the background) — the `user` is the human either way. `outcome` is `ok`, `rejected`, `denied` (a viewer was refused), `error`, or `needs_repair`. The `correlation_id` is also stamped into the deployed `.py` header, so one grep ties a file on disk back to the deploy, retire, unpause and trigger that produced it.
+
+The file is created `0600` (it names users and what they did) and rotates at 5 MB × 5. `JUPYTERLAB_AIRFLOW_AUDIT_LOG` overrides the path, or set it to `off` if you route the `jupyterlab_airflow.audit` logger yourself — if that logger already has handlers, the extension attaches none of its own.
+
+> This was previously **inert**: the records were emitted but the logger sat under a handler-less root at `WARNING`, so they were silently discarded. If you are upgrading and wondered why the trail was empty, that is why.
+
 ## Read-only (viewer) mode
 
 `JUPYTERLAB_AIRFLOW_ROLE` controls whether this server may change Airflow:

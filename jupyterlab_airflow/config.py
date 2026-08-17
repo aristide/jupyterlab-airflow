@@ -57,6 +57,14 @@ these are provided by the repo-root ``docker-compose.yml``.
                           you were away"), 300..604800. Default 86400.
     Out-of-range/unparseable values are clamped/defaulted with a warning.
 
+    Audit trail (PRD §9), read by ``audit.py``:
+    JUPYTERLAB_AIRFLOW_AUDIT_LOG  Where the trail is written. Default
+                          <data_dir>/airflow-studio/audit.log, created 0600 and
+                          rotated. "off" writes no file (for a deployment that
+                          routes the ``jupyterlab_airflow.audit`` logger itself —
+                          if handlers are already attached we add none).
+    JUPYTERLAB_AIRFLOW_AUDIT_MAX_BYTES / _AUDIT_BACKUPS  Rotation. Default 5MB x 5.
+
     Authorization (PRD §9):
     JUPYTERLAB_AIRFLOW_ROLE  "editor" (default) or "viewer". A viewer may read
                           everything but cannot run any privileged action —

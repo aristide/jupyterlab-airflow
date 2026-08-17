@@ -24,6 +24,13 @@ def _load_jupyter_server_extension(server_app):
         JupyterLab application instance
     """
     setup_handlers(server_app.web_app)
+    # Give the audit trail (PRD §9) a destination before anything can be
+    # audited. Without this the logger sits at NOTSET under a handler-less root
+    # and every record is silently discarded — the trail looked present and
+    # wrote nothing.
+    from . import audit
+
+    audit.configure(server_app)
     # The deploy reconciler (PRD §6.5.4): the server finishes a deploy's
     # lifecycle — wait for registration, retire the renamed-away dag_id, unpause,
     # trigger — even if the browser tab closes. It is lazily scheduled, so a
