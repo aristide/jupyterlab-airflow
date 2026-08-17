@@ -118,3 +118,8 @@ docker/airflow-dags/*
 !docker/airflow-dags/.keep
 # Session scratch space — temp scripts, probe output, throwaway repros.
 scratchpad/
+
+# Local-only agent tooling guidance. Kept on disk for the developer's own
+# workflow, deliberately not committed — it was removed from history on
+# 2026-08-17 and must not come back via an absent-minded `git add -A`.
+AGENTS.md
