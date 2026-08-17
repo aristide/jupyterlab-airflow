@@ -61,6 +61,15 @@ interface IConfirm {
 
 const runKey = (dagId: string, runId: string): string => `${dagId}::${runId}`;
 
+/** How often the panel re-reads Airflow on its own. Matched to the design's
+ *  footer copy; short enough that a triggered run visibly changes state, long
+ *  enough that an idle panel is not a load source. */
+const AUTO_REFRESH_MS = 15_000;
+
+/** Ticks between orphan sweeps. The sweep walks the entire Contents tree, so it
+ *  cannot ride the same cadence as a plain list read. */
+const ORPHAN_SWEEP_EVERY = 4;
+
 export function ManagerApp(props: IManagerAppProps): JSX.Element {
   const { trans, openPath } = props;
   // Advisory (PRD §9) — the server enforces it on every mutating endpoint.
@@ -97,10 +106,31 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
   const queryRef = React.useRef(query);
   queryRef.current = query;
 
+  // Which DAGs are expanded, read by a background refresh so it can re-read
+  // them without taking `runs` as a dependency (which would rebuild `refresh`
+  // on every drill-down and restart the poll timer with it).
+  const runsRef = React.useRef<RunMap>(runs);
+  runsRef.current = runs;
+
+  // Auto-refresh stands down while anything modal is up. A list re-ordering
+  // underneath a confirm dialog is how someone confirms the wrong DAG, and a
+  // log view jumping mid-read is just hostile.
+  const suspendPollRef = React.useRef(false);
+  suspendPollRef.current = Boolean(confirm || triggerTarget || logs);
+
   const refresh = React.useCallback(
-    async (pattern: string = queryRef.current, sweep = true): Promise<void> => {
-      setLoading(true);
-      setError(null);
+    async (
+      pattern: string = queryRef.current,
+      sweep = true,
+      background = false
+    ): Promise<void> => {
+      // A background tick is deliberately quiet: no spinner, because flashing
+      // "Loading…" over a stable list every 15 seconds reads as instability
+      // rather than freshness.
+      if (!background) {
+        setLoading(true);
+        setError(null);
+      }
       const [dagRes, errRes, orphanRes] = await Promise.all([
         listDags(100, pattern),
         listImportErrors(),
@@ -108,9 +138,17 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
         // the per-keystroke search refresh — only run it on real refreshes.
         sweep ? findOrphans() : Promise.resolve(null)
       ]);
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
       if (dagRes.status === 'ERR') {
-        setError(dagRes.error ?? 'Unknown error');
+        // A failed background poll leaves the last good list on screen. One
+        // transient blip should not replace a working view with an error
+        // banner, and the next tick will either recover or the user will
+        // refresh by hand and see the real message.
+        if (!background) {
+          setError(dagRes.error ?? 'Unknown error');
+        }
         return;
       }
       setDags(dagRes.data?.dags ?? []);
@@ -131,8 +169,39 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
           )
         );
       }
-      setRuns({});
-      setTasks({});
+      if (!background) {
+        setRuns({});
+        setTasks({});
+        return;
+      }
+      // Background: keep every open drill-down open and re-read it in place.
+      // Collapsing them on a timer would make the one thing auto-refresh is
+      // FOR — watching a run progress — the one thing you cannot do.
+      const open = Object.keys(runsRef.current);
+      if (!open.length) {
+        return;
+      }
+      const fetched = await Promise.all(
+        open.map(async dagId => {
+          const res = await listDagRuns(dagId);
+          return [
+            dagId,
+            res.status === 'OK' ? (res.data?.dag_runs ?? []) : []
+          ] as const;
+        })
+      );
+      setRuns(current => {
+        const next = { ...current };
+        for (const [dagId, dagRuns] of fetched) {
+          // Only refresh rows the user still has open: they may have collapsed
+          // one while the request was in flight, and re-adding it would fight
+          // them.
+          if (dagId in current) {
+            next[dagId] = dagRuns;
+          }
+        }
+        return next;
+      });
     },
     []
   );
@@ -152,6 +221,40 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
     const id = window.setTimeout(() => void refresh(query, false), 300);
     return () => window.clearTimeout(id);
   }, [query, refresh]);
+
+  // Auto-refresh. Airflow state changes without us — a scheduled run starts, a
+  // task fails, the reconciler finishes a deploy — and until now the panel only
+  // learned about any of it when the user pressed refresh.
+  React.useEffect(() => {
+    let ticks = 0;
+    const id = window.setInterval(() => {
+      // A hidden tab polls nothing: on JupyterHub this is one server process
+      // per user, and a forgotten tab in a background window has no business
+      // holding a 15-second heartbeat against Airflow indefinitely.
+      if (document.hidden || suspendPollRef.current) {
+        return;
+      }
+      ticks += 1;
+      // The orphan sweep walks the whole Contents tree, so it rides a slower
+      // cadence than the list itself — once a minute, not four times.
+      void refresh(queryRef.current, ticks % ORPHAN_SWEEP_EVERY === 0, true);
+    }, AUTO_REFRESH_MS);
+
+    // Coming back to the tab reads immediately rather than waiting out the rest
+    // of an interval. Skipping ticks while hidden is what makes that necessary:
+    // without this, the first thing you see after switching back is data as old
+    // as however long you were away.
+    const onVisible = (): void => {
+      if (!document.hidden && !suspendPollRef.current) {
+        void refresh(queryRef.current, true, true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh]);
 
   const togglePause = async (dag: IDag): Promise<void> => {
     const res = await setDagPaused(dag.dag_id, !dag.is_paused);
@@ -701,13 +804,15 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
           </Overlay>
         )}
 
-        {/* The mockup shows an "Auto-refresh 15s" note here, but nothing in this
-          panel polls — refreshing is the toolbar button and the `refresh`
-          command. Saying otherwise would be a false claim about when the list
-          was last read, so the footer states how it actually works. */}
-        {/* Refresh sits here rather than in the header: it is the action that
-          the adjacent "Refreshes on demand" label is about, so the control and
-          the statement it acts on read as one thing. */}
+        {/* The footer states how the panel actually behaves, and now it does
+          poll, so it can finally say so. The claim is kept honest: the interval
+          is read from the same constant that drives the timer, and the timer
+          stands down for a hidden tab or an open dialog — so "Auto-refresh 15s"
+          is an upper bound on staleness while you are looking at it, which is
+          the only time it matters.
+          Refresh sits beside that label rather than in the header: it is the
+          manual version of the sentence next to it, so the control and the
+          statement read as one thing. */}
         <div className="jp-airflow-footer">
           <button
             className="jp-airflow-iconbtn jp-airflow-footer-refresh"
@@ -717,7 +822,9 @@ export function ManagerApp(props: IManagerAppProps): JSX.Element {
           >
             <refreshIcon.react tag="span" width="14px" height="14px" />
           </button>
-          <span>{trans.__('Refreshes on demand')}</span>
+          <span>
+            {trans.__('Auto-refresh %1s', String(AUTO_REFRESH_MS / 1000))}
+          </span>
           <span className="jp-airflow-footer-api">/api/v2</span>
         </div>
       </div>

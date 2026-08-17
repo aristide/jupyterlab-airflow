@@ -116,3 +116,5 @@ docker/airflow-pip-cache/*
 # code), keep the folder tracked.
 docker/airflow-dags/*
 !docker/airflow-dags/.keep
+# Session scratch space — temp scripts, probe output, throwaway repros.
+scratchpad/
